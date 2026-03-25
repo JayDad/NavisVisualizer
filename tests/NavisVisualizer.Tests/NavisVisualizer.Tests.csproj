@@ -14,4 +14,10 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\NavisVisualizer\NavisVisualizer.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <None Update="TestData\*.xlsx">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
 </Project>
