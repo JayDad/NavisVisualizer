@@ -1,0 +1,18 @@
+# Build outputs
+bin/
+obj/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userprefs
+
+# NuGet
+*.nupkg
+packages/
+*.lock.json
+
+# OS
+.DS_Store
+Thumbs.db
