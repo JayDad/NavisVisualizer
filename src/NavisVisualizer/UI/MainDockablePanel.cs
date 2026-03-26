@@ -15,6 +15,7 @@ namespace NavisVisualizer.UI
         private TabControl _tabControl;
         private HydrotestTab _hydrotestTab;
         private SpoolTab _spoolTab;
+        private ToolsTab _toolsTab;
 
         public MainDockablePanel()
         {
@@ -36,8 +37,14 @@ namespace NavisVisualizer.UI
             _spoolTab.Dock = DockStyle.Fill;
             spPage.Controls.Add(_spoolTab);
 
+            var toolPage = new TabPage("Tools");
+            _toolsTab = new ToolsTab(this);
+            _toolsTab.Dock = DockStyle.Fill;
+            toolPage.Controls.Add(_toolsTab);
+
             _tabControl.TabPages.Add(htPage);
             _tabControl.TabPages.Add(spPage);
+            _tabControl.TabPages.Add(toolPage);
 
             Controls.Add(_tabControl);
         }
