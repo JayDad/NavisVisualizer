@@ -27,8 +27,11 @@ namespace NavisVisualizer
     [AddInPlugin(AddInLocation.AddIn)]
     public class VisualizerEntryPlugin : AddInPlugin
     {
+        private static Form _activeForm;
+
         public override int Execute(params string[] parameters)
         {
+            // DockPane attempt
             try
             {
                 var pluginRecord = Autodesk.Navisworks.Api.Application.Plugins
@@ -48,6 +51,26 @@ namespace NavisVisualizer
                 }
             }
             catch { }
+
+            // Fallback: Form
+            if (_activeForm != null && !_activeForm.IsDisposed)
+            {
+                _activeForm.BringToFront();
+                return 0;
+            }
+
+            var panel = new MainDockablePanel();
+            _activeForm = new Form
+            {
+                Text = "Navis Visualizer",
+                Width = 380,
+                Height = 750,
+                FormBorderStyle = FormBorderStyle.SizableToolWindow,
+                StartPosition = FormStartPosition.CenterScreen
+            };
+            panel.Dock = DockStyle.Fill;
+            _activeForm.Controls.Add(panel);
+            _activeForm.Show();
 
             return 0;
         }
