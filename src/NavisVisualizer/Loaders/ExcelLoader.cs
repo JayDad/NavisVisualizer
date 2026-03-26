@@ -96,10 +96,10 @@ namespace NavisVisualizer.Loaders
             return map;
         }
 
-        private static string GetCell(IXLRow row, Dictionary<string, int> cols, string header)
+        private static string GetCell(IXLRangeRow row, Dictionary<string, int> cols, string header)
         {
             if (!cols.TryGetValue(header, out int col)) return string.Empty;
-            return row.Cell(col).GetString() ?? string.Empty;
+            return row.WorksheetRow().Cell(col).GetString() ?? string.Empty;
         }
 
         private static DateTime? ParseDate(string value)
