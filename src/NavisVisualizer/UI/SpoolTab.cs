@@ -53,7 +53,7 @@ namespace NavisVisualizer.UI
 
             var colorPanel = BuildColorPanel();
 
-            _txtSearch = new TextBox { Dock = DockStyle.Fill, PlaceholderText = "🔍 Spool ID 검색..." };
+            _txtSearch = new TextBox { Dock = DockStyle.Fill, Text = "" };
             _txtSearch.TextChanged += (s, e) => FilterList();
 
             _listView = new ListView
@@ -253,9 +253,9 @@ namespace NavisVisualizer.UI
             var items = found.Values.SelectMany(v => v).ToList();
             if (items.Count == 0) return;
 
-            var collection = new Autodesk.Navisworks.Api.ModelItemCollection(items);
+            var collection = new Autodesk.Navisworks.Api.ModelItemCollection();
+            collection.AddRange(items);
             doc.CurrentSelection.CopyFrom(collection);
-            Autodesk.Navisworks.Api.Application.ActiveDocument.SendCommand("View.FitToSelection");
         }
 
         private void FilterList()
@@ -290,13 +290,18 @@ namespace NavisVisualizer.UI
         private void UpdateStats(int matched = 0, int unmatched = 0)
         {
             var counts = _spools.GroupBy(s => s.Stage).ToDictionary(g => g.Key, g => g.Count());
-            _lblStats.Text = $"설치완 {counts.GetValueOrDefault(SpoolStage.Installed)}  " +
-                             $"Loaded {counts.GetValueOrDefault(SpoolStage.Loaded)}  " +
-                             $"HO {counts.GetValueOrDefault(SpoolStage.HandOver)}  " +
-                             $"제작완 {counts.GetValueOrDefault(SpoolStage.FabCompleted)}  " +
-                             $"제작중 {counts.GetValueOrDefault(SpoolStage.Fabricating)}  " +
-                             $"미착수 {counts.GetValueOrDefault(SpoolStage.NotStarted)}"
+            _lblStats.Text = $"설치완 {GetCount(counts, SpoolStage.Installed)}  " +
+                             $"Loaded {GetCount(counts, SpoolStage.Loaded)}  " +
+                             $"HO {GetCount(counts, SpoolStage.HandOver)}  " +
+                             $"제작완 {GetCount(counts, SpoolStage.FabCompleted)}  " +
+                             $"제작중 {GetCount(counts, SpoolStage.Fabricating)}  " +
+                             $"미착수 {GetCount(counts, SpoolStage.NotStarted)}"
                            + (matched > 0 ? $"  | 매칭 {matched} / 미매칭 {unmatched}" : "");
+        }
+
+        private static int GetCount(Dictionary<SpoolStage, int> dict, SpoolStage key)
+        {
+            return dict.ContainsKey(key) ? dict[key] : 0;
         }
 
         private Dictionary<SpoolStage, ColorSetting> CloneDefaults(Dictionary<SpoolStage, ColorSetting> defaults)

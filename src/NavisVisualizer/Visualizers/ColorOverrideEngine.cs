@@ -103,7 +103,8 @@ namespace NavisVisualizer.Visualizers
         private void ApplyOverride(Document doc, List<ModelItem> items, ColorSetting setting)
         {
             if (items.Count == 0) return;
-            var collection = new ModelItemCollection(items);
+            var collection = new ModelItemCollection();
+            collection.AddRange(items);
             var nwColor = ToNwColor(setting.DisplayColor);
             doc.Models.OverridePermanentColor(collection, nwColor);
             doc.Models.OverridePermanentTransparency(collection, setting.Transparency);
@@ -120,7 +121,7 @@ namespace NavisVisualizer.Visualizers
         }
 
         private NwColor ToNwColor(System.Drawing.Color c) =>
-            NwColor.FromByteColor(c.R, c.G, c.B, c.A);
+            new NwColor(c.R / 255.0, c.G / 255.0, c.B / 255.0);
     }
 
     public class OverrideResult

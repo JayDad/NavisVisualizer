@@ -248,9 +248,9 @@ namespace NavisVisualizer.UI
             var items = found.Values.SelectMany(v => v).ToList();
             if (items.Count == 0) return;
 
-            var collection = new Autodesk.Navisworks.Api.ModelItemCollection(items);
+            var collection = new Autodesk.Navisworks.Api.ModelItemCollection();
+            collection.AddRange(items);
             doc.CurrentSelection.CopyFrom(collection);
-            Autodesk.Navisworks.Api.Application.ActiveDocument.SendCommand("View.FitToSelection");
         }
 
         private void RefreshList()
