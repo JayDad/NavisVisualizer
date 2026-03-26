@@ -11,10 +11,15 @@ namespace NavisVisualizer
     {
         private MainDockablePanel _panel;
 
-        public override Control CreateControlFromGuid(string guid)
+        public override Control CreateControlPane()
         {
             _panel = new MainDockablePanel();
             return _panel;
+        }
+
+        public override void DestroyControlPane(Control pane)
+        {
+            pane.Dispose();
         }
     }
 
