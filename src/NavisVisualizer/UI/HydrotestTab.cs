@@ -251,6 +251,7 @@ namespace NavisVisualizer.UI
             var collection = new Autodesk.Navisworks.Api.ModelItemCollection();
             collection.AddRange(items);
             doc.CurrentSelection.CopyFrom(collection);
+            doc.ActiveView.FocusOnCurrentSelection();
         }
 
         private void RefreshList()
