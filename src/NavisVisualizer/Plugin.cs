@@ -66,7 +66,8 @@ namespace NavisVisualizer
                 Width = 380,
                 Height = 750,
                 FormBorderStyle = FormBorderStyle.SizableToolWindow,
-                StartPosition = FormStartPosition.CenterScreen
+                StartPosition = FormStartPosition.CenterScreen,
+                TopMost = true
             };
             panel.Dock = DockStyle.Fill;
             _activeForm.Controls.Add(panel);
