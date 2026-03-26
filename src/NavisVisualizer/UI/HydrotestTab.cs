@@ -4,7 +4,6 @@ using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Windows.Forms;
-using Autodesk.Navisworks.Api;
 using NavisVisualizer.Loaders;
 using NavisVisualizer.Models;
 
@@ -249,7 +248,7 @@ namespace NavisVisualizer.UI
             var items = found.Values.SelectMany(v => v).ToList();
             if (items.Count == 0) return;
 
-            var collection = new ModelItemCollection(items);
+            var collection = new Autodesk.Navisworks.Api.ModelItemCollection(items);
             doc.CurrentSelection.CopyFrom(collection);
             Autodesk.Navisworks.Api.Application.ActiveDocument.SendCommand("View.FitToSelection");
         }
