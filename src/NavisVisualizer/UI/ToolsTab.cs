@@ -181,19 +181,26 @@ namespace NavisVisualizer.UI
                 }
 
                 int maxDepth = (int)_nudDepth.Value;
-                var lines = new List<string>();
-                lines.Add("Depth,Path,DisplayName,Type,ClassName,HasGeometry,ChildCount,CategoryNames");
+                string outPath = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
+                    $"ModelTree_{DateTime.Now:yyyyMMdd_HHmmss}.csv");
 
                 _lblStatus.Text = "Exporting tree...";
+                _btnTree.Enabled = false;
                 Application.DoEvents();
 
                 int totalCount = 0;
-                foreach (Autodesk.Navisworks.Api.Model model in doc.Models)
+                using (var writer = new StreamWriter(outPath, false, System.Text.Encoding.UTF8))
                 {
-                    WalkTree(model.RootItem, 0, maxDepth, "", lines, ref totalCount);
+                    writer.WriteLine("Depth,Path,DisplayName,Type,ClassName,HasGeometry,ChildCount,CategoryNames");
+
+                    foreach (Autodesk.Navisworks.Api.Model model in doc.Models)
+                    {
+                        WalkTree(model.RootItem, 0, maxDepth, "", writer, ref totalCount);
+                    }
                 }
 
-                string outPath = SaveToDesktop("ModelTree", lines);
+                _btnTree.Enabled = true;
                 _lblStatus.Text = $"Tree: {totalCount} nodes exported";
                 MessageBox.Show(
                     $"Model tree exported!\n\n"
@@ -205,6 +212,7 @@ namespace NavisVisualizer.UI
             }
             catch (Exception ex)
             {
+                _btnTree.Enabled = true;
                 MessageBox.Show($"Error: {ex.Message}", "Model Tree Dumper",
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
@@ -215,7 +223,7 @@ namespace NavisVisualizer.UI
             int depth,
             int maxDepth,
             string parentPath,
-            List<string> lines,
+            StreamWriter writer,
             ref int count)
         {
             string name = item.DisplayName ?? "(unnamed)";
@@ -225,7 +233,7 @@ namespace NavisVisualizer.UI
             bool hasGeo = item.HasGeometry;
             int childCount = item.Children.Count();
 
-            // Collect category names (not material)
+            // Collect category names (skip material)
             var catNames = new List<string>();
             foreach (Autodesk.Navisworks.Api.PropertyCategory cat in item.PropertyCategories)
             {
@@ -235,13 +243,13 @@ namespace NavisVisualizer.UI
             }
             string cats = string.Join("; ", catNames);
 
-            lines.Add($"{depth},\"{Esc(path)}\",\"{Esc(name)}\",\"{Esc(type)}\",\"{Esc(className)}\",{hasGeo},{childCount},\"{Esc(cats)}\"");
+            writer.WriteLine($"{depth},\"{Esc(path)}\",\"{Esc(name)}\",\"{Esc(type)}\",\"{Esc(className)}\",{hasGeo},{childCount},\"{Esc(cats)}\"");
             count++;
 
-            // Progress update every 1000 items
-            if (count % 1000 == 0)
+            if (count % 5000 == 0)
             {
                 _lblStatus.Text = $"Exporting... {count} nodes";
+                writer.Flush();
                 Application.DoEvents();
             }
 
@@ -249,13 +257,12 @@ namespace NavisVisualizer.UI
             {
                 foreach (Autodesk.Navisworks.Api.ModelItem child in item.Children)
                 {
-                    WalkTree(child, depth + 1, maxDepth, path, lines, ref count);
+                    WalkTree(child, depth + 1, maxDepth, path, writer, ref count);
                 }
             }
             else if (childCount > 0)
             {
-                // Mark that there are more children below max depth
-                lines.Add($"{depth + 1},\"{Esc(path)}/...\",\"... ({childCount} children)\",\"\",\"\",false,0,\"\"");
+                writer.WriteLine($"{depth + 1},\"{Esc(path)}/...\",\"... ({childCount} children)\",\"\",\"\",false,0,\"\"");
             }
         }
 
