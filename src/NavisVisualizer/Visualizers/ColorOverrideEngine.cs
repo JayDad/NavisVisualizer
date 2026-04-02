@@ -48,8 +48,9 @@ namespace NavisVisualizer.Visualizers
 
                 if (pkgItems.Count > 0 && colorSettings.TryGetValue(pkg.Status, out var setting))
                 {
-                    ApplyOverride(doc, pkgItems, setting);
-                    foreach (var item in pkgItems)
+                    var withDescendants = ExpandWithDescendants(pkgItems);
+                    ApplyOverride(doc, withDescendants, setting);
+                    foreach (var item in withDescendants)
                         allMatchedItems.Add(item);
                 }
             }
@@ -86,8 +87,9 @@ namespace NavisVisualizer.Visualizers
                 var stage = spool.GetStageAtDate(referenceDate);
                 if (colorSettings.TryGetValue(stage, out var setting))
                 {
-                    ApplyOverride(doc, items, setting);
-                    foreach (var item in items)
+                    var withDescendants = ExpandWithDescendants(items);
+                    ApplyOverride(doc, withDescendants, setting);
+                    foreach (var item in withDescendants)
                         allMatchedItems.Add(item);
                 }
             }
@@ -121,6 +123,21 @@ namespace NavisVisualizer.Visualizers
 
             if (unmatched.Count == 0) return;
             ApplyOverride(doc, unmatched, ColorSetting.Unmatched);
+        }
+
+        /// <summary>
+        /// Expands matched items to include all their descendants,
+        /// so child geometry items are also marked as matched.
+        /// </summary>
+        private List<ModelItem> ExpandWithDescendants(List<ModelItem> items)
+        {
+            var expanded = new List<ModelItem>();
+            foreach (var item in items)
+            {
+                expanded.Add(item);
+                expanded.AddRange(item.DescendantsAndSelf.Skip(1)); // Skip self (already added)
+            }
+            return expanded;
         }
 
         private NwColor ToNwColor(System.Drawing.Color c) =>
