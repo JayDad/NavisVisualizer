@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Navisworks.Api;
-using NavisVisualizer.Loaders;
+
 
 namespace NavisVisualizer.Searchers
 {
@@ -65,27 +65,12 @@ namespace NavisVisualizer.Searchers
 
         private string ExtractSpoolId(ModelItem item)
         {
-            var candidates = new[]
+            string displayName = item.DisplayName?.Trim();
+            if (!string.IsNullOrEmpty(displayName))
             {
-                (ExcelLoader.SpoolPropertyCategory, ExcelLoader.SpoolPropertyName),
-                ("Item", "Name"),
-                ("LcOaPipeLineNumber", "Value"),
-            };
-
-            foreach (var (category, property) in candidates)
-            {
-                try
-                {
-                    var prop = item.PropertyCategories
-                        .FindPropertyByDisplayName(category, property);
-                    if (prop != null)
-                    {
-                        string val = prop.Value?.ToDisplayString()?.Trim();
-                        if (!string.IsNullOrEmpty(val))
-                            return val.ToUpperInvariant();
-                    }
-                }
-                catch { }
+                string normalized = displayName.TrimStart('/').Trim();
+                if (!string.IsNullOrEmpty(normalized))
+                    return normalized.ToUpperInvariant();
             }
 
             return null;
