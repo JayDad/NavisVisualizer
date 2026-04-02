@@ -52,6 +52,8 @@ namespace NavisVisualizer.Visualizers
                     ApplyOverride(doc, withDescendants, setting);
                     foreach (var item in withDescendants)
                         allMatchedItems.Add(item);
+                    // Mark ancestors so they don't get unmatched treatment
+                    AddAncestors(allMatchedItems, pkgItems);
                 }
             }
 
@@ -91,6 +93,8 @@ namespace NavisVisualizer.Visualizers
                     ApplyOverride(doc, withDescendants, setting);
                     foreach (var item in withDescendants)
                         allMatchedItems.Add(item);
+                    // Mark ancestors so they don't get unmatched treatment
+                    AddAncestors(allMatchedItems, items);
                 }
             }
 
@@ -123,6 +127,24 @@ namespace NavisVisualizer.Visualizers
 
             if (unmatched.Count == 0) return;
             ApplyOverride(doc, unmatched, ColorSetting.Unmatched);
+        }
+
+        /// <summary>
+        /// Adds all ancestor items (parents up to root) to the matched set,
+        /// so parent groups don't get the unmatched transparent override.
+        /// </summary>
+        private void AddAncestors(HashSet<ModelItem> matchedItems, List<ModelItem> items)
+        {
+            foreach (var item in items)
+            {
+                var parent = item.Parent;
+                while (parent != null)
+                {
+                    if (!matchedItems.Add(parent))
+                        break; // Already in set, ancestors above also already added
+                    parent = parent.Parent;
+                }
+            }
         }
 
         /// <summary>
