@@ -1,7 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Data;
+using System.IO;
 using System.Linq;
 using ClosedXML.Excel;
+using ExcelDataReader;
 using NavisVisualizer.Models;
 
 namespace NavisVisualizer.Loaders
@@ -51,77 +54,93 @@ namespace NavisVisualizer.Loaders
             return packages.Values.ToList();
         }
 
+        /// <summary>
+        /// Loads spool data from Excel files (.xlsx, .xls, .xlsb).
+        /// Uses ExcelDataReader for broad format support.
+        /// </summary>
         public static List<SpoolData> LoadSpool(string filePath)
         {
             var spools = new List<SpoolData>();
+            var spoolHeaderNames = new[] { "Spool Number", "SpoolId", "Spool No", "SpoolNumber" };
 
-            using (var wb = new XLWorkbook(filePath))
+            using (var stream = File.Open(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            using (var reader = ExcelReaderFactory.CreateReader(stream))
             {
-                var spoolHeaderNames = new[] { "Spool Number", "SpoolId", "Spool No", "SpoolNumber" };
+                var dataSet = reader.AsDataSet();
 
-                // Find the right sheet: prefer "Spool" name, otherwise scan all sheets for the header
-                IXLWorksheet sheet = null;
-                int headerRowNum = -1;
+                // Find sheet and header row
+                System.Data.DataTable table = null;
+                int headerRowIdx = -1;
 
-                var namedSheet = wb.Worksheets.FirstOrDefault(w => w.Name.Equals("Spool", StringComparison.OrdinalIgnoreCase));
-                if (namedSheet != null)
+                // Prefer "Spool" named sheet
+                var namedTable = dataSet.Tables.Cast<System.Data.DataTable>()
+                    .FirstOrDefault(t => t.TableName.Equals("Spool", StringComparison.OrdinalIgnoreCase));
+                if (namedTable != null)
                 {
-                    headerRowNum = FindHeaderRow(namedSheet, spoolHeaderNames);
-                    if (headerRowNum >= 0) sheet = namedSheet;
+                    headerRowIdx = FindHeaderRowInTable(namedTable, spoolHeaderNames);
+                    if (headerRowIdx >= 0) table = namedTable;
                 }
 
-                if (sheet == null)
+                // Otherwise scan all sheets
+                if (table == null)
                 {
-                    foreach (var ws in wb.Worksheets)
+                    foreach (System.Data.DataTable dt in dataSet.Tables)
                     {
-                        int row = FindHeaderRow(ws, spoolHeaderNames);
+                        int row = FindHeaderRowInTable(dt, spoolHeaderNames);
                         if (row >= 0)
                         {
-                            sheet = ws;
-                            headerRowNum = row;
+                            table = dt;
+                            headerRowIdx = row;
                             break;
                         }
                     }
                 }
 
-                if (sheet == null || headerRowNum < 0)
+                if (table == null || headerRowIdx < 0)
                     throw new Exception("'Spool Number' 헤더를 포함한 시트를 찾을 수 없습니다.");
 
-                var cols = GetHeaderMapAt(sheet, headerRowNum);
+                // Build column map from header row
+                var cols = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                var headerRow = table.Rows[headerRowIdx];
+                for (int c = 0; c < table.Columns.Count; c++)
+                {
+                    string val = headerRow[c]?.ToString()?.Trim();
+                    if (!string.IsNullOrEmpty(val))
+                        cols[val] = c;
+                }
 
-                // Build mapping: column index → SpoolStage (for date columns)
+                // Stage columns
                 var stageColumns = new List<(int colIndex, SpoolStage stage)>();
                 foreach (var kv in SpoolStageInfo.ColumnMap)
                 {
-                    if (cols.TryGetValue(kv.Key, out int colIdx))
-                        stageColumns.Add((colIdx, kv.Value));
+                    if (cols.TryGetValue(kv.Key, out int idx))
+                        stageColumns.Add((idx, kv.Value));
                 }
 
-                int spoolCol = FindColumn(cols, "Spool Number", "SpoolId", "Spool No", "SpoolNumber");
+                int spoolCol = FindColumn(cols, spoolHeaderNames);
                 int isoCol = FindColumn(cols, "ISO No", "IsoNo", "ISO", "ISO Number");
 
-                // Read data rows starting after the header row
-                var lastRow = sheet.LastRowUsed()?.RowNumber() ?? headerRowNum;
-                for (int r = headerRowNum + 1; r <= lastRow; r++)
+                if (spoolCol < 0)
+                    throw new Exception("'Spool Number' 컬럼을 찾을 수 없습니다.");
+
+                // Read data rows
+                for (int r = headerRowIdx + 1; r < table.Rows.Count; r++)
                 {
-                    var wsRow = sheet.Row(r);
-                    string spoolId = wsRow.Cell(spoolCol).GetString()?.Trim();
+                    var row = table.Rows[r];
+                    string spoolId = row[spoolCol]?.ToString()?.Trim();
                     if (string.IsNullOrEmpty(spoolId)) continue;
 
-                    string isoNo = isoCol > 0
-                        ? wsRow.Cell(isoCol).GetString()?.Trim()
-                        : string.Empty;
+                    string isoNo = isoCol >= 0 ? row[isoCol]?.ToString()?.Trim() : string.Empty;
 
                     var spool = new SpoolData
                     {
                         SpoolId = spoolId,
-                        IsoNo = isoNo,
+                        IsoNo = isoNo ?? string.Empty,
                     };
 
                     foreach (var (colIndex, stage) in stageColumns)
                     {
-                        var cell = wsRow.Cell(colIndex);
-                        spool.StageDates[stage] = ParseCellDate(cell);
+                        spool.StageDates[stage] = ParseCellValue(row[colIndex]);
                     }
 
                     spools.Add(spool);
@@ -141,22 +160,16 @@ namespace NavisVisualizer.Loaders
             return -1;
         }
 
-        /// <summary>
-        /// Scans rows top-down to find the row containing a header cell matching one of the candidates.
-        /// Skips merged cells and category rows (e.g. "Spool Fab").
-        /// </summary>
-        private static int FindHeaderRow(IXLWorksheet sheet, params string[] candidates)
+        private static int FindHeaderRowInTable(System.Data.DataTable table, string[] candidates)
         {
             var candidateSet = new HashSet<string>(candidates, StringComparer.OrdinalIgnoreCase);
-            int maxScanRows = Math.Min(20, sheet.LastRowUsed()?.RowNumber() ?? 1);
-            int maxCols = sheet.LastColumnUsed()?.ColumnNumber() ?? 1;
-
-            for (int r = 1; r <= maxScanRows; r++)
+            int maxRows = Math.Min(20, table.Rows.Count);
+            for (int r = 0; r < maxRows; r++)
             {
-                var row = sheet.Row(r);
-                for (int c = 1; c <= maxCols; c++)
+                var row = table.Rows[r];
+                for (int c = 0; c < table.Columns.Count; c++)
                 {
-                    string val = row.Cell(c).GetString()?.Trim();
+                    string val = row[c]?.ToString()?.Trim();
                     if (!string.IsNullOrEmpty(val) && candidateSet.Contains(val))
                         return r;
                 }
@@ -164,50 +177,34 @@ namespace NavisVisualizer.Loaders
             return -1;
         }
 
-        /// <summary>
-        /// Builds header→column map from a specific row number.
-        /// </summary>
-        private static Dictionary<string, int> GetHeaderMapAt(IXLWorksheet sheet, int rowNumber)
+        private static DateTime? ParseCellValue(object value)
+        {
+            if (value == null || value == DBNull.Value) return null;
+            if (value is DateTime dt) return dt;
+            string str = value.ToString()?.Trim();
+            if (string.IsNullOrEmpty(str)) return null;
+            return DateTime.TryParse(str, out var parsed) ? parsed : (DateTime?)null;
+        }
+
+        #region Hydrotest helpers (ClosedXML)
+
+        private static Dictionary<string, int> GetHeaderMap(IXLWorksheet sheet)
         {
             var map = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            var row = sheet.Row(rowNumber);
-            int maxCol = sheet.LastColumnUsed()?.ColumnNumber() ?? 1;
-            for (int i = 1; i <= maxCol; i++)
+            var headerRow = sheet.Row(1);
+            for (int i = 1; i <= headerRow.LastCellUsed().Address.ColumnNumber; i++)
             {
-                string header = row.Cell(i).GetString()?.Trim();
+                string header = headerRow.Cell(i).GetString().Trim();
                 if (!string.IsNullOrEmpty(header))
                     map[header] = i;
             }
             return map;
         }
 
-        private static Dictionary<string, int> GetHeaderMap(IXLWorksheet sheet)
-        {
-            return GetHeaderMapAt(sheet, 1);
-        }
-
         private static string GetCell(IXLRangeRow row, Dictionary<string, int> cols, string header)
         {
             if (!cols.TryGetValue(header, out int col)) return string.Empty;
             return row.WorksheetRow().Cell(col).GetString() ?? string.Empty;
-        }
-
-        private static DateTime? ParseCellDate(IXLCell cell)
-        {
-            if (cell.IsEmpty()) return null;
-
-            try
-            {
-                // Excel stores dates as numbers; ClosedXML can convert via GetDateTime()
-                return cell.GetDateTime();
-            }
-            catch
-            {
-                // Fallback: parse as string
-                string val = cell.GetString()?.Trim();
-                if (string.IsNullOrEmpty(val)) return null;
-                return DateTime.TryParse(val, out var dt) ? dt : (DateTime?)null;
-            }
         }
 
         private static DateTime? ParseDate(string value)
@@ -225,5 +222,7 @@ namespace NavisVisualizer.Loaders
                 default:                                  return HydrotestStatus.NotStarted;
             }
         }
+
+        #endregion
     }
 }

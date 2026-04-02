@@ -63,12 +63,16 @@ namespace NavisVisualizer.UI
             };
             _dtpReference.ValueChanged += (s, e) =>
             {
-                if (_spools.Count > 0) FilterList();
+                if (_spools.Count > 0)
+                {
+                    FilterList();
+                    UpdateStats();
+                }
             };
             datePanel.Controls.Add(dateLabel);
             datePanel.Controls.Add(_dtpReference);
 
-            var colorPanel = BuildColorPanel();
+            var colorPanels = BuildColorPanel();
 
             _txtSearch = new TextBox { Dock = DockStyle.Fill, Text = "" };
             _txtSearch.TextChanged += (s, e) => FilterList();
@@ -98,29 +102,30 @@ namespace NavisVisualizer.UI
             btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnReset, _btnViewpoint, _btnNwd });
 
             _progressBar = new ProgressBar { Dock = DockStyle.Fill, Height = 12, Visible = false };
-            _lblStats    = new Label       { Dock = DockStyle.Fill, Text = "로드된 데이터 없음", AutoSize = false, Height = 36 };
+            _lblStats    = new Label       { Dock = DockStyle.Fill, Text = "로드된 데이터 없음", AutoSize = false, Height = 40 };
 
             layout.Controls.Add(_btnLoad);
             layout.Controls.Add(_lblFile);
             layout.Controls.Add(datePanel);
             layout.Controls.Add(new Label { Text = "Fabrication", Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 18 });
-            layout.Controls.Add(colorPanel.fabPanel);
+            layout.Controls.Add(colorPanels.fabPanel);
             layout.Controls.Add(new Label { Text = "Install", Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 18 });
-            layout.Controls.Add(colorPanel.instPanel);
+            layout.Controls.Add(colorPanels.instPanel);
             layout.Controls.Add(_txtSearch);
+            // Stats above the list
+            layout.Controls.Add(_lblStats);
             layout.Controls.Add(new Label { Text = "Spool 목록", Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 18 });
             layout.Controls.Add(_listView);
             layout.Controls.Add(btnPanel);
             layout.Controls.Add(_progressBar);
-            layout.Controls.Add(_lblStats);
 
             Controls.Add(layout);
         }
 
         private (Panel fabPanel, Panel instPanel) BuildColorPanel()
         {
-            var fabPanel = BuildStageColorPanel(
-                new[] { SpoolStage.NotStarted }.Concat(SpoolStageInfo.FabricationStages).ToArray());
+            var fabStages = new[] { SpoolStage.NotStarted }.Concat(SpoolStageInfo.FabricationStages).ToArray();
+            var fabPanel = BuildStageColorPanel(fabStages);
             var instPanel = BuildStageColorPanel(SpoolStageInfo.InstallStages);
             return (fabPanel, instPanel);
         }
@@ -128,22 +133,28 @@ namespace NavisVisualizer.UI
         private Panel BuildStageColorPanel(SpoolStage[] stages)
         {
             var panel  = new Panel { Dock = DockStyle.Fill, AutoSize = true };
-            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 4, AutoSize = true };
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 90));
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 40));
+            // 2 columns: [check][color][btn][trans] | [check][color][btn][trans]
+            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 8, AutoSize = true };
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 85));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 36));
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 22));
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 70));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 62));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 85));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 36));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 22));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 62));
 
-            foreach (var stage in stages)
+            for (int i = 0; i < stages.Length; i++)
             {
+                var stage   = stages[i];
                 var setting = _colorSettings[stage];
                 string label = SpoolStageInfo.Labels[stage];
 
                 var chk             = new CheckBox { Text = label, Checked = true, AutoSize = true };
-                var colorBox        = new Panel    { Width = 36, Height = 20, BackColor = setting.DisplayColor, BorderStyle = BorderStyle.FixedSingle };
+                var colorBox        = new Panel    { Width = 32, Height = 20, BackColor = setting.DisplayColor, BorderStyle = BorderStyle.FixedSingle };
                 var colorBtn        = new Button   { Text = "▼", Width = 22, Height = 20, FlatStyle = FlatStyle.Flat };
                 colorBtn.FlatAppearance.BorderSize = 0;
-                var transparencyBox = new ComboBox { Width = 65, DropDownStyle = ComboBoxStyle.DropDownList };
+                var transparencyBox = new ComboBox { Width = 58, DropDownStyle = ComboBoxStyle.DropDownList };
                 foreach (var t in new[] { "0%", "20%", "40%", "60%", "70%", "80%", "90%", "100%" })
                     transparencyBox.Items.Add(t);
                 transparencyBox.Text = $"{(int)(setting.Transparency * 100)}%";
@@ -167,10 +178,13 @@ namespace NavisVisualizer.UI
                 };
 
                 _colorRows[stage] = (colorBox, colorBtn, transparencyBox, chk);
-                layout.Controls.Add(chk);
-                layout.Controls.Add(colorBox);
-                layout.Controls.Add(colorBtn);
-                layout.Controls.Add(transparencyBox);
+
+                int row = i / 2;
+                int colOffset = (i % 2) * 4;
+                layout.Controls.Add(chk, colOffset + 0, row);
+                layout.Controls.Add(colorBox, colOffset + 1, row);
+                layout.Controls.Add(colorBtn, colOffset + 2, row);
+                layout.Controls.Add(transparencyBox, colOffset + 3, row);
             }
 
             panel.Controls.Add(layout);
@@ -179,7 +193,11 @@ namespace NavisVisualizer.UI
 
         private void BtnLoad_Click(object sender, EventArgs e)
         {
-            using (var dlg = new OpenFileDialog { Title = "Spool Excel 로드", Filter = "Excel (*.xlsx)|*.xlsx" })
+            using (var dlg = new OpenFileDialog
+            {
+                Title = "Spool Excel 로드",
+                Filter = "Excel 파일 (*.xlsx;*.xls;*.xlsb)|*.xlsx;*.xls;*.xlsb|모든 파일|*.*"
+            })
             {
                 if (dlg.ShowDialog() != DialogResult.OK) return;
                 try
@@ -320,7 +338,6 @@ namespace NavisVisualizer.UI
                 .ToDictionary(g => g.Key, g => g.Count());
 
             var parts = new List<string>();
-            // Show counts in reverse order (most progressed first)
             var allStages = new[] { SpoolStage.NotStarted }.Concat(SpoolStageInfo.OrderedStages).Reverse();
             foreach (var stage in allStages)
             {
