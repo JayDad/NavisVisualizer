@@ -57,9 +57,37 @@ namespace NavisVisualizer.Loaders
 
             using (var wb = new XLWorkbook(filePath))
             {
-                var sheet = wb.Worksheets.FirstOrDefault(w => w.Name.Equals("Spool", StringComparison.OrdinalIgnoreCase))
-                    ?? wb.Worksheets.First();
-                var cols = GetHeaderMap(sheet);
+                var spoolHeaderNames = new[] { "Spool Number", "SpoolId", "Spool No", "SpoolNumber" };
+
+                // Find the right sheet: prefer "Spool" name, otherwise scan all sheets for the header
+                IXLWorksheet sheet = null;
+                int headerRowNum = -1;
+
+                var namedSheet = wb.Worksheets.FirstOrDefault(w => w.Name.Equals("Spool", StringComparison.OrdinalIgnoreCase));
+                if (namedSheet != null)
+                {
+                    headerRowNum = FindHeaderRow(namedSheet, spoolHeaderNames);
+                    if (headerRowNum >= 0) sheet = namedSheet;
+                }
+
+                if (sheet == null)
+                {
+                    foreach (var ws in wb.Worksheets)
+                    {
+                        int row = FindHeaderRow(ws, spoolHeaderNames);
+                        if (row >= 0)
+                        {
+                            sheet = ws;
+                            headerRowNum = row;
+                            break;
+                        }
+                    }
+                }
+
+                if (sheet == null || headerRowNum < 0)
+                    throw new Exception("'Spool Number' 헤더를 포함한 시트를 찾을 수 없습니다.");
+
+                var cols = GetHeaderMapAt(sheet, headerRowNum);
 
                 // Build mapping: column index → SpoolStage (for date columns)
                 var stageColumns = new List<(int colIndex, SpoolStage stage)>();
@@ -69,20 +97,19 @@ namespace NavisVisualizer.Loaders
                         stageColumns.Add((colIdx, kv.Value));
                 }
 
-                // Find Spool Number and ISO No columns (try multiple header names)
                 int spoolCol = FindColumn(cols, "Spool Number", "SpoolId", "Spool No", "SpoolNumber");
                 int isoCol = FindColumn(cols, "ISO No", "IsoNo", "ISO", "ISO Number");
 
-                if (spoolCol < 0)
-                    throw new Exception("'Spool Number' 컬럼을 찾을 수 없습니다.");
-
-                foreach (var row in sheet.RangeUsed().RowsUsed().Skip(1))
+                // Read data rows starting after the header row
+                var lastRow = sheet.LastRowUsed()?.RowNumber() ?? headerRowNum;
+                for (int r = headerRowNum + 1; r <= lastRow; r++)
                 {
-                    string spoolId = row.WorksheetRow().Cell(spoolCol).GetString()?.Trim();
+                    var wsRow = sheet.Row(r);
+                    string spoolId = wsRow.Cell(spoolCol).GetString()?.Trim();
                     if (string.IsNullOrEmpty(spoolId)) continue;
 
                     string isoNo = isoCol > 0
-                        ? row.WorksheetRow().Cell(isoCol).GetString()?.Trim()
+                        ? wsRow.Cell(isoCol).GetString()?.Trim()
                         : string.Empty;
 
                     var spool = new SpoolData
@@ -93,7 +120,7 @@ namespace NavisVisualizer.Loaders
 
                     foreach (var (colIndex, stage) in stageColumns)
                     {
-                        var cell = row.WorksheetRow().Cell(colIndex);
+                        var cell = wsRow.Cell(colIndex);
                         spool.StageDates[stage] = ParseCellDate(cell);
                     }
 
@@ -114,17 +141,49 @@ namespace NavisVisualizer.Loaders
             return -1;
         }
 
-        private static Dictionary<string, int> GetHeaderMap(IXLWorksheet sheet)
+        /// <summary>
+        /// Scans rows top-down to find the row containing a header cell matching one of the candidates.
+        /// Skips merged cells and category rows (e.g. "Spool Fab").
+        /// </summary>
+        private static int FindHeaderRow(IXLWorksheet sheet, params string[] candidates)
+        {
+            var candidateSet = new HashSet<string>(candidates, StringComparer.OrdinalIgnoreCase);
+            int maxScanRows = Math.Min(20, sheet.LastRowUsed()?.RowNumber() ?? 1);
+            int maxCols = sheet.LastColumnUsed()?.ColumnNumber() ?? 1;
+
+            for (int r = 1; r <= maxScanRows; r++)
+            {
+                var row = sheet.Row(r);
+                for (int c = 1; c <= maxCols; c++)
+                {
+                    string val = row.Cell(c).GetString()?.Trim();
+                    if (!string.IsNullOrEmpty(val) && candidateSet.Contains(val))
+                        return r;
+                }
+            }
+            return -1;
+        }
+
+        /// <summary>
+        /// Builds header→column map from a specific row number.
+        /// </summary>
+        private static Dictionary<string, int> GetHeaderMapAt(IXLWorksheet sheet, int rowNumber)
         {
             var map = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            var headerRow = sheet.Row(1);
-            for (int i = 1; i <= headerRow.LastCellUsed().Address.ColumnNumber; i++)
+            var row = sheet.Row(rowNumber);
+            int maxCol = sheet.LastColumnUsed()?.ColumnNumber() ?? 1;
+            for (int i = 1; i <= maxCol; i++)
             {
-                string header = headerRow.Cell(i).GetString().Trim();
+                string header = row.Cell(i).GetString()?.Trim();
                 if (!string.IsNullOrEmpty(header))
                     map[header] = i;
             }
             return map;
+        }
+
+        private static Dictionary<string, int> GetHeaderMap(IXLWorksheet sheet)
+        {
+            return GetHeaderMapAt(sheet, 1);
         }
 
         private static string GetCell(IXLRangeRow row, Dictionary<string, int> cols, string header)
