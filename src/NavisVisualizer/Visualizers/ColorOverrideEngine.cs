@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Navisworks.Api;
@@ -63,6 +64,7 @@ namespace NavisVisualizer.Visualizers
             Document doc,
             List<SpoolData> spools,
             Dictionary<SpoolStage, ColorSetting> colorSettings,
+            DateTime referenceDate,
             bool hideUnmatched = true)
         {
             var result = new OverrideResult();
@@ -81,7 +83,8 @@ namespace NavisVisualizer.Visualizers
 
                 result.MatchedCount++;
 
-                if (colorSettings.TryGetValue(spool.Stage, out var setting))
+                var stage = spool.GetStageAtDate(referenceDate);
+                if (colorSettings.TryGetValue(stage, out var setting))
                 {
                     ApplyOverride(doc, items, setting);
                     foreach (var item in items)
