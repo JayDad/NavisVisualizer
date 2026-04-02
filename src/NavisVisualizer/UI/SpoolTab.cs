@@ -18,6 +18,7 @@ namespace NavisVisualizer.UI
 
         private Button   _btnLoad;
         private Label    _lblFile;
+        private DateTimePicker _dtpReference;
         private TextBox  _txtSearch;
         private ListView _listView;
         private Button   _btnApply;
@@ -47,9 +48,25 @@ namespace NavisVisualizer.UI
                 Padding = new Padding(4)
             };
 
-            _btnLoad = new Button { Text = "📂 Spool Excel 로드", Dock = DockStyle.Fill, Height = 30 };
+            _btnLoad = new Button { Text = "Spool Excel", Dock = DockStyle.Fill, Height = 30 };
             _btnLoad.Click += BtnLoad_Click;
             _lblFile  = new Label { Text = "(파일 없음)", Dock = DockStyle.Fill, ForeColor = Color.Gray, AutoSize = false, Height = 18 };
+
+            // Reference date picker
+            var datePanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 28, AutoSize = false };
+            var dateLabel = new Label { Text = "기준일:", AutoSize = true, Padding = new Padding(0, 4, 0, 0) };
+            _dtpReference = new DateTimePicker
+            {
+                Format = DateTimePickerFormat.Short,
+                Value = DateTime.Today,
+                Width = 110,
+            };
+            _dtpReference.ValueChanged += (s, e) =>
+            {
+                if (_spools.Count > 0) FilterList();
+            };
+            datePanel.Controls.Add(dateLabel);
+            datePanel.Controls.Add(_dtpReference);
 
             var colorPanel = BuildColorPanel();
 
@@ -64,15 +81,16 @@ namespace NavisVisualizer.UI
                 GridLines = true,
                 View = View.Details,
             };
-            _listView.Columns.Add("Spool ID", 110);
-            _listView.Columns.Add("단계",     90);
+            _listView.Columns.Add("Spool ID", 140);
+            _listView.Columns.Add("ISO No", 120);
+            _listView.Columns.Add("단계", 80);
             _listView.SelectedIndexChanged += ListView_SelectedIndexChanged;
 
             var btnPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 65, AutoSize = true };
             _btnApply     = new Button { Text = "적용",              Width = 80  };
             _btnReset     = new Button { Text = "전체 초기화",       Width = 90  };
-            _btnViewpoint = new Button { Text = "📷 Viewpoint 저장", Width = 120 };
-            _btnNwd       = new Button { Text = "💾 NWD Export",     Width = 110 };
+            _btnViewpoint = new Button { Text = "Viewpoint 저장",    Width = 120 };
+            _btnNwd       = new Button { Text = "NWD Export",        Width = 110 };
             _btnApply.Click     += BtnApply_Click;
             _btnReset.Click     += BtnReset_Click;
             _btnViewpoint.Click += BtnViewpoint_Click;
@@ -80,12 +98,15 @@ namespace NavisVisualizer.UI
             btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnReset, _btnViewpoint, _btnNwd });
 
             _progressBar = new ProgressBar { Dock = DockStyle.Fill, Height = 12, Visible = false };
-            _lblStats    = new Label       { Dock = DockStyle.Fill, Text = "로드된 데이터 없음", AutoSize = false, Height = 18 };
+            _lblStats    = new Label       { Dock = DockStyle.Fill, Text = "로드된 데이터 없음", AutoSize = false, Height = 36 };
 
             layout.Controls.Add(_btnLoad);
             layout.Controls.Add(_lblFile);
-            layout.Controls.Add(new Label { Text = "단계 & 색상", Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 18 });
-            layout.Controls.Add(colorPanel);
+            layout.Controls.Add(datePanel);
+            layout.Controls.Add(new Label { Text = "Fabrication", Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 18 });
+            layout.Controls.Add(colorPanel.fabPanel);
+            layout.Controls.Add(new Label { Text = "Install", Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 18 });
+            layout.Controls.Add(colorPanel.instPanel);
             layout.Controls.Add(_txtSearch);
             layout.Controls.Add(new Label { Text = "Spool 목록", Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 18 });
             layout.Controls.Add(_listView);
@@ -96,25 +117,29 @@ namespace NavisVisualizer.UI
             Controls.Add(layout);
         }
 
-        private Panel BuildColorPanel()
+        private (Panel fabPanel, Panel instPanel) BuildColorPanel()
+        {
+            var fabPanel = BuildStageColorPanel(
+                new[] { SpoolStage.NotStarted }.Concat(SpoolStageInfo.FabricationStages).ToArray());
+            var instPanel = BuildStageColorPanel(SpoolStageInfo.InstallStages);
+            return (fabPanel, instPanel);
+        }
+
+        private Panel BuildStageColorPanel(SpoolStage[] stages)
         {
             var panel  = new Panel { Dock = DockStyle.Fill, AutoSize = true };
             var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 4, AutoSize = true };
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 80));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 90));
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 40));
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 22));
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 70));
 
-            var stages = new[] { SpoolStage.Installed, SpoolStage.Loaded, SpoolStage.HandOver,
-                                  SpoolStage.FabCompleted, SpoolStage.Fabricating, SpoolStage.NotStarted };
-            var labels = new[] { "설치완", "Loaded", "Hand-over", "제작완료", "제작중", "미착수" };
-
-            for (int i = 0; i < stages.Length; i++)
+            foreach (var stage in stages)
             {
-                var stage   = stages[i];
                 var setting = _colorSettings[stage];
+                string label = SpoolStageInfo.Labels[stage];
 
-                var chk             = new CheckBox { Text = labels[i], Checked = true, AutoSize = true };
+                var chk             = new CheckBox { Text = label, Checked = true, AutoSize = true };
                 var colorBox        = new Panel    { Width = 36, Height = 20, BackColor = setting.DisplayColor, BorderStyle = BorderStyle.FixedSingle };
                 var colorBtn        = new Button   { Text = "▼", Width = 22, Height = 20, FlatStyle = FlatStyle.Flat };
                 colorBtn.FlatAppearance.BorderSize = 0;
@@ -205,7 +230,8 @@ namespace NavisVisualizer.UI
                 if (kv.Value.check.Checked)
                     activeSettings[kv.Key] = _colorSettings[kv.Key];
 
-            var result = _main.OverrideEngine.ApplySpool(doc, _spools, activeSettings);
+            var referenceDate = _dtpReference.Value;
+            var result = _main.OverrideEngine.ApplySpool(doc, _spools, activeSettings, referenceDate);
             UpdateStats(result.MatchedCount, result.UnmatchedCount);
         }
 
@@ -262,27 +288,25 @@ namespace NavisVisualizer.UI
         private void FilterList()
         {
             string keyword = _txtSearch?.Text?.Trim().ToUpperInvariant() ?? "";
+            var referenceDate = _dtpReference.Value;
+
             var filtered = string.IsNullOrEmpty(keyword)
                 ? _spools
-                : _spools.Where(s => s.SpoolId.ToUpperInvariant().Contains(keyword)).ToList();
+                : _spools.Where(s => s.SpoolId.ToUpperInvariant().Contains(keyword)
+                    || (s.IsoNo ?? "").ToUpperInvariant().Contains(keyword)).ToList();
 
             _listView.Items.Clear();
-            var stageLabels = new Dictionary<SpoolStage, string>
-            {
-                [SpoolStage.NotStarted]   = "미착수",
-                [SpoolStage.Fabricating]  = "제작중",
-                [SpoolStage.FabCompleted] = "제작완료",
-                [SpoolStage.HandOver]     = "Hand-over",
-                [SpoolStage.Loaded]       = "Loaded",
-                [SpoolStage.Installed]    = "설치완",
-            };
 
             foreach (var spool in filtered)
             {
+                var stage = spool.GetStageAtDate(referenceDate);
+                string stageLabel = SpoolStageInfo.Labels.TryGetValue(stage, out var lbl) ? lbl : stage.ToString();
+
                 var item = new ListViewItem(spool.SpoolId);
-                item.SubItems.Add(stageLabels.TryGetValue(spool.Stage, out var lbl) ? lbl : spool.Stage.ToString());
+                item.SubItems.Add(spool.IsoNo ?? "");
+                item.SubItems.Add(stageLabel);
                 item.Tag = spool;
-                if (_colorSettings.TryGetValue(spool.Stage, out var setting))
+                if (_colorSettings.TryGetValue(stage, out var setting))
                     item.ForeColor = setting.DisplayColor;
                 _listView.Items.Add(item);
             }
@@ -290,19 +314,22 @@ namespace NavisVisualizer.UI
 
         private void UpdateStats(int matched = 0, int unmatched = 0)
         {
-            var counts = _spools.GroupBy(s => s.Stage).ToDictionary(g => g.Key, g => g.Count());
-            _lblStats.Text = $"설치완 {GetCount(counts, SpoolStage.Installed)}  " +
-                             $"Loaded {GetCount(counts, SpoolStage.Loaded)}  " +
-                             $"HO {GetCount(counts, SpoolStage.HandOver)}  " +
-                             $"제작완 {GetCount(counts, SpoolStage.FabCompleted)}  " +
-                             $"제작중 {GetCount(counts, SpoolStage.Fabricating)}  " +
-                             $"미착수 {GetCount(counts, SpoolStage.NotStarted)}"
-                           + (matched > 0 ? $"  | 매칭 {matched} / 미매칭 {unmatched}" : "");
-        }
+            var referenceDate = _dtpReference.Value;
+            var counts = _spools
+                .GroupBy(s => s.GetStageAtDate(referenceDate))
+                .ToDictionary(g => g.Key, g => g.Count());
 
-        private static int GetCount(Dictionary<SpoolStage, int> dict, SpoolStage key)
-        {
-            return dict.ContainsKey(key) ? dict[key] : 0;
+            var parts = new List<string>();
+            // Show counts in reverse order (most progressed first)
+            var allStages = new[] { SpoolStage.NotStarted }.Concat(SpoolStageInfo.OrderedStages).Reverse();
+            foreach (var stage in allStages)
+            {
+                if (counts.TryGetValue(stage, out int cnt) && cnt > 0)
+                    parts.Add($"{SpoolStageInfo.Labels[stage]} {cnt}");
+            }
+
+            _lblStats.Text = string.Join("  ", parts)
+                           + (matched > 0 ? $"\n매칭 {matched} / 미매칭 {unmatched}" : "");
         }
 
         private Dictionary<SpoolStage, ColorSetting> CloneDefaults(Dictionary<SpoolStage, ColorSetting> defaults)

@@ -8,9 +8,6 @@ namespace NavisVisualizer.Loaders
 {
     public static class ExcelLoader
     {
-        public const string SpoolPropertyCategory = "Element";
-        public const string SpoolPropertyName = "Id";
-
         public static List<TestPackageData> LoadHydrotest(string filePath)
         {
             var packages = new Dictionary<string, TestPackageData>(StringComparer.OrdinalIgnoreCase);
@@ -60,27 +57,61 @@ namespace NavisVisualizer.Loaders
 
             using (var wb = new XLWorkbook(filePath))
             {
-                var sheet = wb.Worksheet("Spool")
-                    ?? throw new Exception("'Spool' 시트를 찾을 수 없습니다.");
+                var sheet = wb.Worksheets.FirstOrDefault(w => w.Name.Equals("Spool", StringComparison.OrdinalIgnoreCase))
+                    ?? wb.Worksheets.First();
                 var cols = GetHeaderMap(sheet);
+
+                // Build mapping: column index → SpoolStage (for date columns)
+                var stageColumns = new List<(int colIndex, SpoolStage stage)>();
+                foreach (var kv in SpoolStageInfo.ColumnMap)
+                {
+                    if (cols.TryGetValue(kv.Key, out int colIdx))
+                        stageColumns.Add((colIdx, kv.Value));
+                }
+
+                // Find Spool Number and ISO No columns (try multiple header names)
+                int spoolCol = FindColumn(cols, "Spool Number", "SpoolId", "Spool No", "SpoolNumber");
+                int isoCol = FindColumn(cols, "ISO No", "IsoNo", "ISO", "ISO Number");
+
+                if (spoolCol < 0)
+                    throw new Exception("'Spool Number' 컬럼을 찾을 수 없습니다.");
 
                 foreach (var row in sheet.RangeUsed().RowsUsed().Skip(1))
                 {
-                    string spoolId = GetCell(row, cols, "SpoolId").Trim();
+                    string spoolId = row.WorksheetRow().Cell(spoolCol).GetString()?.Trim();
                     if (string.IsNullOrEmpty(spoolId)) continue;
 
-                    spools.Add(new SpoolData
+                    string isoNo = isoCol > 0
+                        ? row.WorksheetRow().Cell(isoCol).GetString()?.Trim()
+                        : string.Empty;
+
+                    var spool = new SpoolData
                     {
                         SpoolId = spoolId,
-                        Stage = ParseSpoolStage(GetCell(row, cols, "Stage")),
-                        PlannedDate = ParseDate(GetCell(row, cols, "PlannedDate")),
-                        ActualDate = ParseDate(GetCell(row, cols, "ActualDate")),
-                        Remarks = GetCell(row, cols, "Remarks"),
-                    });
+                        IsoNo = isoNo,
+                    };
+
+                    foreach (var (colIndex, stage) in stageColumns)
+                    {
+                        var cell = row.WorksheetRow().Cell(colIndex);
+                        spool.StageDates[stage] = ParseCellDate(cell);
+                    }
+
+                    spools.Add(spool);
                 }
             }
 
             return spools;
+        }
+
+        private static int FindColumn(Dictionary<string, int> cols, params string[] candidates)
+        {
+            foreach (var name in candidates)
+            {
+                if (cols.TryGetValue(name, out int col))
+                    return col;
+            }
+            return -1;
         }
 
         private static Dictionary<string, int> GetHeaderMap(IXLWorksheet sheet)
@@ -102,6 +133,20 @@ namespace NavisVisualizer.Loaders
             return row.WorksheetRow().Cell(col).GetString() ?? string.Empty;
         }
 
+        private static DateTime? ParseCellDate(IXLCell cell)
+        {
+            if (cell.IsEmpty()) return null;
+
+            // Try reading as DateTime directly (Excel stores dates as numbers)
+            if (cell.DataType == XLDataType.DateTime)
+                return cell.GetDateTime();
+
+            // Try parsing string value
+            string val = cell.GetString()?.Trim();
+            if (string.IsNullOrEmpty(val)) return null;
+            return DateTime.TryParse(val, out var dt) ? dt : (DateTime?)null;
+        }
+
         private static DateTime? ParseDate(string value)
         {
             if (string.IsNullOrWhiteSpace(value)) return null;
@@ -115,19 +160,6 @@ namespace NavisVisualizer.Loaders
                 case "C": case "완료": case "COMPLETED": return HydrotestStatus.Completed;
                 case "R": case "복구": case "RECOVERY":  return HydrotestStatus.Recovery;
                 default:                                  return HydrotestStatus.NotStarted;
-            }
-        }
-
-        private static SpoolStage ParseSpoolStage(string value)
-        {
-            switch (value?.Trim().ToUpperInvariant())
-            {
-                case "FAB":  case "제작중":    return SpoolStage.Fabricating;
-                case "FABC": case "제작완료":  return SpoolStage.FabCompleted;
-                case "HO":   case "HAND-OVER": case "HANDOVER": return SpoolStage.HandOver;
-                case "LD":   case "LOADED":    return SpoolStage.Loaded;
-                case "INST": case "설치완":    return SpoolStage.Installed;
-                default:                       return SpoolStage.NotStarted;
             }
         }
     }
