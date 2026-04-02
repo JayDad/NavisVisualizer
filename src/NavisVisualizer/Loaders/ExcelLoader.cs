@@ -196,14 +196,18 @@ namespace NavisVisualizer.Loaders
         {
             if (cell.IsEmpty()) return null;
 
-            // Try reading as DateTime directly (Excel stores dates as numbers)
-            if (cell.DataType == XLDataType.DateTime)
+            try
+            {
+                // Excel stores dates as numbers; ClosedXML can convert via GetDateTime()
                 return cell.GetDateTime();
-
-            // Try parsing string value
-            string val = cell.GetString()?.Trim();
-            if (string.IsNullOrEmpty(val)) return null;
-            return DateTime.TryParse(val, out var dt) ? dt : (DateTime?)null;
+            }
+            catch
+            {
+                // Fallback: parse as string
+                string val = cell.GetString()?.Trim();
+                if (string.IsNullOrEmpty(val)) return null;
+                return DateTime.TryParse(val, out var dt) ? dt : (DateTime?)null;
+            }
         }
 
         private static DateTime? ParseDate(string value)
