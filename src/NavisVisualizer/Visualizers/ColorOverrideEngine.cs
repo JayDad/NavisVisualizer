@@ -55,25 +55,23 @@ namespace NavisVisualizer.Visualizers
             }
 
             result.TimingMatch = sw.ElapsedMilliseconds;
-
             _cachedStageCollections.Clear();
 
-            // Hydrotest: apply to package nodes directly without expanding descendants.
-            // Navisworks propagates parent color overrides to children visually.
-            // If not, we fall back to shallow expansion (direct children only).
+            // Hydrotest: Package → Children(Spool) → Spool's descendants
+            // Skips Package-level DescendantsAndSelf (which is slow for deep trees)
+            // Instead iterates Children and expands each child
             long expandMs = 0;
             foreach (var kv in stageItems)
             {
                 var swExpand = Stopwatch.StartNew();
                 string key = kv.Key.ToString();
-                var collection = ShallowExpandToCollection(kv.Value);
+                var collection = ChildDeepExpandToCollection(kv.Value);
                 _cachedStageCollections[key] = collection;
                 result.TotalItemsColored += collection.Count;
                 expandMs += swExpand.ElapsedMilliseconds;
             }
             result.TimingExpand = expandMs;
 
-            // Apply colors
             var swApply = Stopwatch.StartNew();
             foreach (var kv in stageItems)
             {
@@ -122,7 +120,6 @@ namespace NavisVisualizer.Visualizers
             }
 
             result.TimingMatch = sw.ElapsedMilliseconds;
-
             _cachedStageCollections.Clear();
 
             long expandMs = 0;
@@ -168,24 +165,27 @@ namespace NavisVisualizer.Visualizers
         }
 
         /// <summary>
-        /// Shallow expansion: adds the item itself and its direct Children only (1 level deep).
-        /// Used for Hydrotest packages where deep expansion is too slow.
+        /// For Hydrotest: adds Package node, then for each direct Child (Spool),
+        /// deep-expands the Spool's descendants. Avoids calling DescendantsAndSelf
+        /// on the Package node itself (which traverses all intermediate levels).
         /// </summary>
-        private ModelItemCollection ShallowExpandToCollection(List<ModelItem> items)
+        private ModelItemCollection ChildDeepExpandToCollection(List<ModelItem> items)
         {
             var collection = new ModelItemCollection();
-            foreach (var item in items)
+            foreach (var pkg in items)
             {
-                collection.Add(item);
-                foreach (var child in item.Children)
-                    collection.Add(child);
+                collection.Add(pkg);
+                foreach (var child in pkg.Children)
+                {
+                    foreach (var desc in child.DescendantsAndSelf)
+                        collection.Add(desc);
+                }
             }
             return collection;
         }
 
         /// <summary>
-        /// Deep expansion: adds the item and ALL descendants recursively.
-        /// Used for Spool items where subtrees are small.
+        /// Deep expansion for Spool: adds the item and ALL descendants.
         /// </summary>
         private ModelItemCollection ExpandToCollection(List<ModelItem> items)
         {
@@ -202,7 +202,9 @@ namespace NavisVisualizer.Visualizers
         {
             if (collection.Count == 0) return;
             doc.Models.OverridePermanentColor(collection, ToNwColor(setting.DisplayColor));
-            doc.Models.OverridePermanentTransparency(collection, setting.Transparency);
+            // Skip transparency call if fully opaque (0.0) — saves one API call per stage
+            if (setting.Transparency > 0.001)
+                doc.Models.OverridePermanentTransparency(collection, setting.Transparency);
         }
 
         private NwColor ToNwColor(System.Drawing.Color c) =>
@@ -216,7 +218,6 @@ namespace NavisVisualizer.Visualizers
         public int UnmatchedCount => UnmatchedIds.Count;
         public int TotalItemsColored { get; set; }
 
-        // Timing (ms)
         public long TimingMatch { get; set; }
         public long TimingExpand { get; set; }
         public long TimingApply { get; set; }
