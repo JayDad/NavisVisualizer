@@ -12,6 +12,10 @@ namespace NavisVisualizer.Visualizers
     {
         private readonly ModelItemSearcher _searcher;
 
+        // Cached expanded items per stage key (string) for incremental updates
+        private Dictionary<string, ModelItemCollection> _cachedStageCollections
+            = new Dictionary<string, ModelItemCollection>();
+
         public ColorOverrideEngine(ModelItemSearcher searcher)
         {
             _searcher = searcher;
@@ -36,7 +40,6 @@ namespace NavisVisualizer.Visualizers
                     result.UnmatchedIds.Add(pkg.TestPkgId);
                     continue;
                 }
-
                 result.MatchedCount++;
 
                 var stage = pkg.GetStageAtDate(referenceDate);
@@ -50,13 +53,18 @@ namespace NavisVisualizer.Visualizers
                 list.AddRange(items);
             }
 
-            // Reset previous overrides, then apply only matched
+            // Reset + apply all stages
             doc.Models.ResetAllPermanentMaterials();
+            _cachedStageCollections.Clear();
 
             foreach (var kv in stageItems)
             {
+                string key = kv.Key.ToString();
+                var collection = ExpandToCollection(kv.Value);
+                _cachedStageCollections[key] = collection;
+
                 if (colorSettings.TryGetValue(kv.Key, out var setting))
-                    ApplyOverrideWithDescendants(doc, kv.Value, setting);
+                    ApplyOverride(doc, collection, setting);
             }
 
             return result;
@@ -81,7 +89,6 @@ namespace NavisVisualizer.Visualizers
                     result.UnmatchedIds.Add(spool.SpoolId);
                     continue;
                 }
-
                 result.MatchedCount++;
 
                 var stage = spool.GetStageAtDate(referenceDate);
@@ -95,34 +102,60 @@ namespace NavisVisualizer.Visualizers
                 list.AddRange(items);
             }
 
-            // Reset previous overrides, then apply only matched
             doc.Models.ResetAllPermanentMaterials();
+            _cachedStageCollections.Clear();
 
             foreach (var kv in stageItems)
             {
+                string key = kv.Key.ToString();
+                var collection = ExpandToCollection(kv.Value);
+                _cachedStageCollections[key] = collection;
+
                 if (colorSettings.TryGetValue(kv.Key, out var setting))
-                    ApplyOverrideWithDescendants(doc, kv.Value, setting);
+                    ApplyOverride(doc, collection, setting);
             }
 
             return result;
         }
 
+        /// <summary>
+        /// Update color/transparency for a single stage using cached items.
+        /// No Reset — only recolors the specified stage's items.
+        /// </summary>
+        public bool UpdateStageColor(Document doc, string stageKey, ColorSetting setting)
+        {
+            if (!_cachedStageCollections.TryGetValue(stageKey, out var collection))
+                return false;
+            ApplyOverride(doc, collection, setting);
+            return true;
+        }
+
+        /// <summary>
+        /// Check if cached stage data exists (i.e., Apply was called before).
+        /// </summary>
+        public bool HasCachedData => _cachedStageCollections.Count > 0;
+
         public void Reset(Document doc)
         {
             doc.Models.ResetAllPermanentMaterials();
+            _cachedStageCollections.Clear();
         }
 
-        private void ApplyOverrideWithDescendants(Document doc, List<ModelItem> items, ColorSetting setting)
+        private ModelItemCollection ExpandToCollection(List<ModelItem> items)
         {
-            if (items.Count == 0) return;
             var collection = new ModelItemCollection();
             foreach (var item in items)
             {
                 foreach (var desc in item.DescendantsAndSelf)
                     collection.Add(desc);
             }
-            var nwColor = ToNwColor(setting.DisplayColor);
-            doc.Models.OverridePermanentColor(collection, nwColor);
+            return collection;
+        }
+
+        private void ApplyOverride(Document doc, ModelItemCollection collection, ColorSetting setting)
+        {
+            if (collection.Count == 0) return;
+            doc.Models.OverridePermanentColor(collection, ToNwColor(setting.DisplayColor));
             doc.Models.OverridePermanentTransparency(collection, setting.Transparency);
         }
 
