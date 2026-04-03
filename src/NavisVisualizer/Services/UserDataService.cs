@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Text;
 using Autodesk.Navisworks.Api;
 using Autodesk.Navisworks.Api.ComApi;
 using NavisVisualizer.Models;
@@ -14,6 +15,87 @@ namespace NavisVisualizer.Services
 
         private static object _enumPropVec;
         private static object _enumProp;
+
+        /// <summary>
+        /// Test writing a single property and verify it can be read back.
+        /// Returns diagnostic message.
+        /// </summary>
+        public string TestWriteOneProperty(ModelItem item)
+        {
+            var diag = new StringBuilder();
+            try
+            {
+                dynamic comState = ComApiBridge.State;
+                ResolveEnums();
+                diag.AppendLine($"Enum resolved: PropVec={_enumPropVec}, Prop={_enumProp}");
+
+                dynamic comPath = ComApiBridge.ToInwOaPath(item);
+                diag.AppendLine($"Path type: {((object)comPath).GetType().Name}");
+
+                dynamic propNode = comState.GetGUIPropertyNode(comPath, true);
+                diag.AppendLine($"PropNode type: {((object)propNode).GetType().Name}");
+
+                // Read existing user-defined count
+                dynamic userDefBefore = propNode.UserDefined();
+                int countBefore = userDefBefore.Count;
+                diag.AppendLine($"UserDefined count before: {countBefore}");
+
+                // Create property vector with one test property
+                dynamic propVec = comState.ObjectFactory(_enumPropVec);
+                diag.AppendLine($"PropVec type: {((object)propVec).GetType().Name}");
+
+                dynamic prop = comState.ObjectFactory(_enumProp);
+                diag.AppendLine($"Prop type: {((object)prop).GetType().Name}");
+
+                prop.name = "test_name";
+                prop.UserName = "Test Property";
+                prop.value = "Hello from NavisVisualizer";
+                propVec.Properties().Add(prop);
+
+                int propCount = propVec.Properties().Count;
+                diag.AppendLine($"PropVec.Properties().Count after Add: {propCount}");
+
+                // Write
+                propNode.SetUserDefined(0, CategoryInternalName, CategoryDisplayName, propVec);
+                diag.AppendLine("SetUserDefined called (no exception)");
+
+                // Verify: read back immediately
+                dynamic userDefAfter = propNode.UserDefined();
+                int countAfter = userDefAfter.Count;
+                diag.AppendLine($"UserDefined count after: {countAfter}");
+
+                if (countAfter > countBefore)
+                {
+                    // Read the last tab
+                    dynamic lastTab = userDefAfter[countAfter];
+                    diag.AppendLine($"Last tab Name: {lastTab.Name}");
+                    diag.AppendLine($"Last tab UserName: {lastTab.UserName}");
+                    dynamic tabProps = lastTab.Properties();
+                    diag.AppendLine($"Tab properties count: {tabProps.Count}");
+                    diag.AppendLine("SUCCESS: Property was written and verified!");
+                }
+                else
+                {
+                    diag.AppendLine("FAIL: UserDefined count did not increase.");
+                    // List all existing tabs for debugging
+                    for (int i = 1; i <= countAfter; i++)
+                    {
+                        try
+                        {
+                            dynamic tab = userDefAfter[i];
+                            diag.AppendLine($"  Tab[{i}]: Name={tab.Name}, UserName={tab.UserName}");
+                        }
+                        catch { }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                diag.AppendLine($"EXCEPTION: {ex.GetType().Name}: {ex.Message}");
+            }
+
+            return diag.ToString();
+        }
 
         public int WriteSpoolProperties(
             List<SpoolData> spools,
@@ -41,29 +123,14 @@ namespace NavisVisualizer.Services
                     {
                         dynamic comPath = ComApiBridge.ToInwOaPath(item);
                         dynamic propNode = comState.GetGUIPropertyNode(comPath, true);
-
-                        // Build property vector
                         dynamic propVec = comState.ObjectFactory(_enumPropVec);
 
-                        // Add simple test property first
-                        AddProp(comState, propVec, "LcOaSpoolId", "Spool Number", spool.SpoolId);
-
-                        if (!string.IsNullOrEmpty(spool.IsoNo))
-                            AddProp(comState, propVec, "LcOaIsoNo", "ISO No", spool.IsoNo);
+                        AddProp(comState, propVec, "test_id", "Spool Number", spool.SpoolId);
 
                         string stageLabel = SpoolStageInfo.Labels.TryGetValue(stage, out var lbl)
                             ? lbl : stage.ToString();
-                        AddProp(comState, propVec, "LcOaStage", "현재 단계", stageLabel);
+                        AddProp(comState, propVec, "test_stage", "현재 단계", stageLabel);
 
-                        foreach (var s in SpoolStageInfo.OrderedStages)
-                        {
-                            string label = SpoolStageInfo.Labels[s];
-                            string dateStr = spool.StageDates.TryGetValue(s, out var date) && date.HasValue
-                                ? date.Value.ToString("yyyy-MM-dd") : "";
-                            AddProp(comState, propVec, "LcOa" + s.ToString(), label, dateStr);
-                        }
-
-                        // Write to the item
                         propNode.SetUserDefined(0, CategoryInternalName, CategoryDisplayName, propVec);
                         written++;
                     }
@@ -97,7 +164,6 @@ namespace NavisVisualizer.Services
 
             Type enumType = null;
 
-            // Search loaded assemblies
             foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
             {
                 if (!asm.GetName().Name.Contains("Interop")) continue;
@@ -113,7 +179,6 @@ namespace NavisVisualizer.Services
                 if (enumType != null) break;
             }
 
-            // Fallback: load from Navisworks directory
             if (enumType == null)
             {
                 try
