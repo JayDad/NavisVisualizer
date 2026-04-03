@@ -6,6 +6,7 @@ using System.Linq;
 using System.Windows.Forms;
 using NavisVisualizer.Loaders;
 using NavisVisualizer.Models;
+using NavisVisualizer.Visualizers;
 
 namespace NavisVisualizer.UI
 {
@@ -88,7 +89,7 @@ namespace NavisVisualizer.UI
             _txtSearch.TextChanged += (s, e) => FilterList();
 
             // Stats label
-            _lblStats = new Label { Dock = DockStyle.Fill, Text = "로드된 데이터 없음", AutoSize = false, Height = 40 };
+            _lblStats = new Label { Dock = DockStyle.Fill, Text = "로드된 데이터 없음", AutoSize = false, Height = 55 };
 
             // Filter tabs: 전체 / 매칭 / 미매칭
             _tabFilter = new TabControl { Dock = DockStyle.Fill, Height = 230 };
@@ -310,25 +311,21 @@ namespace NavisVisualizer.UI
             _tabFilter.TabPages[2].Text = $"미매칭 ({_unmatchedSpoolIds.Count})";
 
             // Write user-defined properties if checked
+            int propsWritten = 0;
             if (_chkWriteProps.Checked)
             {
                 try
                 {
                     var allSpoolIds = _spools.Select(s => s.SpoolId).Distinct();
                     var searchResult = _main.Searcher.FindBySpoolIds(allSpoolIds);
-                    int propsWritten = _main.UserDataSvc.WriteSpoolProperties(_spools, searchResult, referenceDate);
-                    UpdateStats(result.MatchedCount, result.UnmatchedCount, propsWritten);
+                    propsWritten = _main.UserDataSvc.WriteSpoolProperties(_spools, searchResult, referenceDate);
                 }
                 catch (Exception ex)
                 {
-                    UpdateStats(result.MatchedCount, result.UnmatchedCount);
                     MessageBox.Show($"속성 삽입 실패:\n{ex.Message}", "오류", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
             }
-            else
-            {
-                UpdateStats(result.MatchedCount, result.UnmatchedCount);
-            }
+            UpdateStats(result, propsWritten);
 
             FilterList();
         }
@@ -449,7 +446,7 @@ namespace NavisVisualizer.UI
             }
         }
 
-        private void UpdateStats(int matched = 0, int unmatched = 0, int propsWritten = 0)
+        private void UpdateStats(OverrideResult result = null, int propsWritten = 0)
         {
             var referenceDate = _dtpReference.Value;
             var counts = _spools
@@ -465,8 +462,13 @@ namespace NavisVisualizer.UI
             }
 
             string line2 = "";
-            if (matched > 0) line2 += $"매칭 {matched} / 미매칭 {unmatched}";
-            if (propsWritten > 0) line2 += $"  속성 {propsWritten}건 삽입";
+            if (result != null && result.MatchedCount > 0)
+            {
+                line2 = $"매칭 {result.MatchedCount} / 미매칭 {result.UnmatchedCount}  " +
+                         $"요소 {result.TotalItemsColored:#,0}개";
+                if (propsWritten > 0) line2 += $"  속성 {propsWritten}건";
+                line2 += $"\n매칭 {result.TimingMatch}ms  확장 {result.TimingExpand}ms  적용 {result.TimingApply}ms  총 {result.TimingTotal}ms";
+            }
             _lblStats.Text = string.Join("  ", parts)
                            + (!string.IsNullOrEmpty(line2) ? $"\n{line2}" : "");
         }
