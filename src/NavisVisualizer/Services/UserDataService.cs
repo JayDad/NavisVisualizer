@@ -25,6 +25,14 @@ namespace NavisVisualizer.Services
             var diag = new StringBuilder();
             try
             {
+                string displayName = item.DisplayName ?? "(no name)";
+                diag.AppendLine($"=== 대상 아이템 ===");
+                diag.AppendLine($"DisplayName: {displayName}");
+                diag.AppendLine($"ClassName: {item.ClassName}");
+                diag.AppendLine($"HasChildren: {item.Children.Any()}");
+                diag.AppendLine($"입력 시도: 카테고리=\"{CategoryDisplayName}\", 속성=\"Test Property\", 값=\"Hello\"");
+                diag.AppendLine();
+
                 dynamic comState = ComApiBridge.State;
                 ResolveEnums();
                 diag.AppendLine($"Enum: PropVec={_enumPropVec}, Prop={_enumProp}");
