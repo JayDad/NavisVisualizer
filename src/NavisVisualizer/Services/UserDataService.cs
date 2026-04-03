@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using Autodesk.Navisworks.Api;
 using Autodesk.Navisworks.Api.ComApi;
 using NavisVisualizer.Models;
@@ -20,7 +21,7 @@ namespace NavisVisualizer.Services
             DateTime referenceDate)
         {
             dynamic comState = ComApiBridge.State;
-            ResolveEnums(comState);
+            ResolveEnums();
 
             int written = 0;
             int attempted = 0;
@@ -58,16 +59,47 @@ namespace NavisVisualizer.Services
             return written;
         }
 
-        private static void ResolveEnums(dynamic comState)
+        private static void ResolveEnums()
         {
             if (_enumPropVec != null) return;
 
-            // Get the enum type from the same assembly as the COM state object
-            Type stateType = ((object)comState).GetType();
-            Type enumType = stateType.Assembly.GetType("Autodesk.Navisworks.Interop.ComApi.nwEObjectType");
+            Type enumType = null;
+
+            // Strategy 1: Search all loaded assemblies
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                enumType = asm.GetType("Autodesk.Navisworks.Interop.ComApi.nwEObjectType");
+                if (enumType != null) break;
+            }
+
+            // Strategy 2: Force-load the Interop assembly by name
+            if (enumType == null)
+            {
+                try
+                {
+                    var asm = Assembly.Load("Autodesk.Navisworks.Interop.ComApi");
+                    enumType = asm.GetType("Autodesk.Navisworks.Interop.ComApi.nwEObjectType");
+                }
+                catch { }
+            }
+
+            // Strategy 3: Load from Navisworks install directory
+            if (enumType == null)
+            {
+                try
+                {
+                    string navisDir = System.IO.Path.GetDirectoryName(typeof(Autodesk.Navisworks.Api.Application).Assembly.Location);
+                    string dllPath = System.IO.Path.Combine(navisDir, "Autodesk.Navisworks.Interop.ComApi.dll");
+                    var asm = Assembly.LoadFrom(dllPath);
+                    enumType = asm.GetType("Autodesk.Navisworks.Interop.ComApi.nwEObjectType");
+                }
+                catch { }
+            }
 
             if (enumType == null)
-                throw new Exception("nwEObjectType enum을 찾을 수 없습니다.");
+                throw new Exception(
+                    "nwEObjectType enum을 찾을 수 없습니다.\n" +
+                    "Autodesk.Navisworks.Interop.ComApi.dll이 설치되어 있는지 확인하세요.");
 
             _enumPropVec = Enum.Parse(enumType, "eObjectType_nwOaPropertyVec");
             _enumProp = Enum.Parse(enumType, "eObjectType_nwOaProperty");
