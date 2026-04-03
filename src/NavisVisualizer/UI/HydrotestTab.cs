@@ -259,7 +259,7 @@ namespace NavisVisualizer.UI
                 MessageBox.Show("Excel을 먼저 로드하고 모델을 열어주세요.");
                 return;
             }
-            if (!_main.Searcher.IsIndexBuilt)
+            if (_main.Searcher.NeedsRebuild(doc))
                 BuildIndex();
 
             var activeSettings = new Dictionary<HydrotestStage, ColorSetting>();
@@ -322,7 +322,7 @@ namespace NavisVisualizer.UI
             if (tag == null) return;
 
             var doc = _main.GetDocument();
-            if (doc == null || !_main.Searcher.IsIndexBuilt) return;
+            if (doc == null || !_main.Searcher.IsIndexBuilt || _main.Searcher.NeedsRebuild(doc)) return;
 
             var found = _main.Searcher.FindBySpoolIds(new[] { tag.TestPkgId });
             var items = found.Values.SelectMany(v => v).ToList();
