@@ -203,13 +203,17 @@ namespace NavisVisualizer.UI
                         {
                             _colorSettings[capturedStage].DisplayColor = dlg.Color;
                             colorBox.BackColor = dlg.Color;
+                            IncrementalUpdate(capturedStage.ToString());
                         }
                     }
                 };
                 transparencyBox.SelectedIndexChanged += (s, e) =>
                 {
                     if (double.TryParse(transparencyBox.Text.Replace("%", ""), out double pct))
+                    {
                         _colorSettings[capturedStage].Transparency = pct / 100.0;
+                        IncrementalUpdate(capturedStage.ToString());
+                    }
                 };
 
                 _colorRows[stage] = (colorBox, colorBtn, transparencyBox, chk);
@@ -251,6 +255,16 @@ namespace NavisVisualizer.UI
                     MessageBox.Show($"Excel 로드 실패:\n{ex.Message}", "오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
+        }
+
+        private void IncrementalUpdate(string stageKey)
+        {
+            var doc = _main.GetDocument();
+            if (doc == null || !_main.OverrideEngine.HasCachedData) return;
+
+            // Parse the stage key back to find the setting
+            if (Enum.TryParse<SpoolStage>(stageKey, out var stage) && _colorSettings.TryGetValue(stage, out var setting))
+                _main.OverrideEngine.UpdateStageColor(doc, stageKey, setting);
         }
 
         private void BuildIndex()

@@ -177,13 +177,17 @@ namespace NavisVisualizer.UI
                         {
                             _colorSettings[cs].DisplayColor = dlg.Color;
                             colorBox.BackColor = dlg.Color;
+                            IncrementalUpdate(cs.ToString());
                         }
                     }
                 };
                 transparencyBox.SelectedIndexChanged += (s, e) =>
                 {
                     if (double.TryParse(transparencyBox.Text.Replace("%", ""), out double pct))
+                    {
                         _colorSettings[cs].Transparency = pct / 100.0;
+                        IncrementalUpdate(cs.ToString());
+                    }
                 };
 
                 _colorRows[stage] = (colorBox, colorBtn, transparencyBox, chk);
@@ -225,6 +229,15 @@ namespace NavisVisualizer.UI
                     MessageBox.Show($"Excel 로드 실패:\n{ex.Message}", "오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
+        }
+
+        private void IncrementalUpdate(string stageKey)
+        {
+            var doc = _main.GetDocument();
+            if (doc == null || !_main.OverrideEngine.HasCachedData) return;
+
+            if (Enum.TryParse<HydrotestStage>(stageKey, out var stage) && _colorSettings.TryGetValue(stage, out var setting))
+                _main.OverrideEngine.UpdateStageColor(doc, stageKey, setting);
         }
 
         private void BuildIndex()
