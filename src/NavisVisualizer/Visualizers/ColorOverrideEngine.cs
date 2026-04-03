@@ -27,6 +27,9 @@ namespace NavisVisualizer.Visualizers
             var result = new OverrideResult();
             var allMatchedItems = new HashSet<ModelItem>();
 
+            // Group items by stage for batch API calls
+            var stageItems = new Dictionary<HydrotestStage, List<ModelItem>>();
+
             var allPkgIds = packages.Select(p => p.TestPkgId).Distinct();
             var searchResult = _searcher.FindBySpoolIds(allPkgIds);
 
@@ -41,13 +44,30 @@ namespace NavisVisualizer.Visualizers
                 result.MatchedCount++;
 
                 var stage = pkg.GetStageAtDate(referenceDate);
-                if (colorSettings.TryGetValue(stage, out var setting))
+                if (!colorSettings.ContainsKey(stage)) continue;
+
+                if (!stageItems.TryGetValue(stage, out var list))
                 {
-                    var withDescendants = ExpandWithDescendants(items);
-                    ApplyOverride(doc, withDescendants, setting);
-                    foreach (var item in withDescendants)
-                        allMatchedItems.Add(item);
-                    AddAncestors(allMatchedItems, items);
+                    list = new List<ModelItem>();
+                    stageItems[stage] = list;
+                }
+
+                foreach (var item in items)
+                {
+                    list.Add(item);
+                    foreach (var desc in item.DescendantsAndSelf)
+                        allMatchedItems.Add(desc);
+                    AddAncestors(allMatchedItems, item);
+                }
+            }
+
+            // Batch: one API call per stage
+            foreach (var kv in stageItems)
+            {
+                if (colorSettings.TryGetValue(kv.Key, out var setting))
+                {
+                    var expanded = ExpandWithDescendants(kv.Value);
+                    ApplyOverride(doc, expanded, setting);
                 }
             }
 
@@ -67,6 +87,9 @@ namespace NavisVisualizer.Visualizers
             var result = new OverrideResult();
             var allMatchedItems = new HashSet<ModelItem>();
 
+            // Group items by stage for batch API calls
+            var stageItems = new Dictionary<SpoolStage, List<ModelItem>>();
+
             var allSpoolIds = spools.Select(s => s.SpoolId).Distinct();
             var searchResult = _searcher.FindBySpoolIds(allSpoolIds);
 
@@ -81,13 +104,30 @@ namespace NavisVisualizer.Visualizers
                 result.MatchedCount++;
 
                 var stage = spool.GetStageAtDate(referenceDate);
-                if (colorSettings.TryGetValue(stage, out var setting))
+                if (!colorSettings.ContainsKey(stage)) continue;
+
+                if (!stageItems.TryGetValue(stage, out var list))
                 {
-                    var withDescendants = ExpandWithDescendants(items);
-                    ApplyOverride(doc, withDescendants, setting);
-                    foreach (var item in withDescendants)
-                        allMatchedItems.Add(item);
-                    AddAncestors(allMatchedItems, items);
+                    list = new List<ModelItem>();
+                    stageItems[stage] = list;
+                }
+
+                foreach (var item in items)
+                {
+                    list.Add(item);
+                    foreach (var desc in item.DescendantsAndSelf)
+                        allMatchedItems.Add(desc);
+                    AddAncestors(allMatchedItems, item);
+                }
+            }
+
+            // Batch: one API call per stage
+            foreach (var kv in stageItems)
+            {
+                if (colorSettings.TryGetValue(kv.Key, out var setting))
+                {
+                    var expanded = ExpandWithDescendants(kv.Value);
+                    ApplyOverride(doc, expanded, setting);
                 }
             }
 
@@ -114,24 +154,24 @@ namespace NavisVisualizer.Visualizers
 
         private void ApplyUnmatchedOverride(Document doc, HashSet<ModelItem> matchedItems)
         {
-            var unmatched = doc.Models.RootItemDescendantsAndSelf
-                .Where(item => !matchedItems.Contains(item))
-                .ToList();
+            var unmatched = new List<ModelItem>();
+            foreach (var item in doc.Models.RootItemDescendantsAndSelf)
+            {
+                if (!matchedItems.Contains(item))
+                    unmatched.Add(item);
+            }
 
             if (unmatched.Count == 0) return;
             ApplyOverride(doc, unmatched, ColorSetting.Unmatched);
         }
 
-        private void AddAncestors(HashSet<ModelItem> matchedItems, List<ModelItem> items)
+        private void AddAncestors(HashSet<ModelItem> matchedItems, ModelItem item)
         {
-            foreach (var item in items)
+            var parent = item.Parent;
+            while (parent != null)
             {
-                var parent = item.Parent;
-                while (parent != null)
-                {
-                    if (!matchedItems.Add(parent)) break;
-                    parent = parent.Parent;
-                }
+                if (!matchedItems.Add(parent)) break;
+                parent = parent.Parent;
             }
         }
 
@@ -140,8 +180,8 @@ namespace NavisVisualizer.Visualizers
             var expanded = new List<ModelItem>();
             foreach (var item in items)
             {
-                expanded.Add(item);
-                expanded.AddRange(item.DescendantsAndSelf.Skip(1));
+                foreach (var desc in item.DescendantsAndSelf)
+                    expanded.Add(desc);
             }
             return expanded;
         }

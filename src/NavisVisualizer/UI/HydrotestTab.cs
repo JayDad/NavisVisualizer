@@ -231,16 +231,12 @@ namespace NavisVisualizer.UI
         {
             var doc = _main.GetDocument();
             if (doc == null) return;
+            _progressBar.Style = ProgressBarStyle.Marquee;
             _progressBar.Visible = true;
-            _main.Searcher.BuildIndex(doc, (current, total) =>
-            {
-                if (total > 0)
-                {
-                    _progressBar.Value = Math.Min((int)((double)current / total * 100), 100);
-                    Application.DoEvents();
-                }
-            });
+            Application.DoEvents();
+            _main.Searcher.BuildIndex(doc);
             _progressBar.Visible = false;
+            _progressBar.Style = ProgressBarStyle.Blocks;
         }
 
         private void BtnApply_Click(object sender, EventArgs e)

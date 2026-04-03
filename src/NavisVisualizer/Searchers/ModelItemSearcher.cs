@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Navisworks.Api;
 
-
 namespace NavisVisualizer.Searchers
 {
     public class ModelItemSearcher
@@ -12,32 +11,47 @@ namespace NavisVisualizer.Searchers
         private bool _isBuilt = false;
 
         public bool IsIndexBuilt => _isBuilt;
+        public int IndexedCount => _index?.Count ?? 0;
 
         public void BuildIndex(Document doc, Action<int, int> onProgress = null)
         {
             _index = new Dictionary<string, List<ModelItem>>(StringComparer.OrdinalIgnoreCase);
             _isBuilt = false;
 
-            var allItems = doc.Models.RootItemDescendantsAndSelf.ToList();
-            int total = allItems.Count;
+            // Only index group/container nodes (items with children).
+            // Leaf geometry items (Pipe, Elbow, etc.) are not matching targets
+            // and will be reached via ExpandWithDescendants.
             int current = 0;
+            int progressInterval = 0;
 
-            foreach (var item in allItems)
+            foreach (var item in doc.Models.RootItemDescendantsAndSelf)
             {
                 current++;
-                onProgress?.Invoke(current, total);
+                if (onProgress != null && ++progressInterval >= 500)
+                {
+                    progressInterval = 0;
+                    onProgress.Invoke(current, 0); // total unknown, report current count
+                }
 
-                string spoolId = ExtractSpoolId(item);
-                if (string.IsNullOrEmpty(spoolId)) continue;
+                // Skip leaf geometry — only index containers
+                if (!item.Children.Any()) continue;
 
-                if (!_index.TryGetValue(spoolId, out var list))
+                string displayName = item.DisplayName?.Trim();
+                if (string.IsNullOrEmpty(displayName)) continue;
+
+                string key = displayName.TrimStart('/').Trim();
+                if (string.IsNullOrEmpty(key)) continue;
+                key = key.ToUpperInvariant();
+
+                if (!_index.TryGetValue(key, out var list))
                 {
                     list = new List<ModelItem>();
-                    _index[spoolId] = list;
+                    _index[key] = list;
                 }
                 list.Add(item);
             }
 
+            onProgress?.Invoke(current, current);
             _isBuilt = true;
         }
 
@@ -54,26 +68,6 @@ namespace NavisVisualizer.Searchers
                     : new List<ModelItem>();
             }
             return result;
-        }
-
-        public List<ModelItem> GetUnmatchedItems(Document doc, HashSet<ModelItem> matchedItems)
-        {
-            return doc.Models.RootItemDescendantsAndSelf
-                .Where(item => !matchedItems.Contains(item))
-                .ToList();
-        }
-
-        private string ExtractSpoolId(ModelItem item)
-        {
-            string displayName = item.DisplayName?.Trim();
-            if (!string.IsNullOrEmpty(displayName))
-            {
-                string normalized = displayName.TrimStart('/').Trim();
-                if (!string.IsNullOrEmpty(normalized))
-                    return normalized.ToUpperInvariant();
-            }
-
-            return null;
         }
 
         public void Reset() => _isBuilt = false;
