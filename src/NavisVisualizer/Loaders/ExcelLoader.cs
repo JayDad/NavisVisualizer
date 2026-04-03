@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Data;
 using System.IO;
 using System.Linq;
-using ClosedXML.Excel;
 using ExcelDataReader;
 using NavisVisualizer.Models;
 
@@ -13,51 +12,72 @@ namespace NavisVisualizer.Loaders
     {
         public static List<TestPackageData> LoadHydrotest(string filePath)
         {
-            var packages = new Dictionary<string, TestPackageData>(StringComparer.OrdinalIgnoreCase);
+            var packages = new List<TestPackageData>();
+            var pkgHeaderNames = new[] { "Test Package No.", "Test Package No", "TestPkgId", "Test Pkg No" };
 
-            using (var wb = new XLWorkbook(filePath))
+            using (var stream = File.Open(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            using (var reader = ExcelReaderFactory.CreateReader(stream))
             {
-                var statusSheet = wb.Worksheet("Status")
-                    ?? throw new Exception("'Status' 시트를 찾을 수 없습니다.");
-                var statusCols = GetHeaderMap(statusSheet);
+                var dataSet = reader.AsDataSet();
 
-                foreach (var row in statusSheet.RangeUsed().RowsUsed().Skip(1))
+                System.Data.DataTable table = null;
+                int headerRowIdx = -1;
+
+                foreach (System.Data.DataTable dt in dataSet.Tables)
                 {
-                    string pkgId = GetCell(row, statusCols, "TestPkgId").Trim();
-                    if (string.IsNullOrEmpty(pkgId)) continue;
-
-                    packages[pkgId] = new TestPackageData
+                    int row = FindHeaderRowInTable(dt, pkgHeaderNames);
+                    if (row >= 0)
                     {
-                        TestPkgId = pkgId,
-                        Status = ParseHydrotestStatus(GetCell(row, statusCols, "Status")),
-                        PlannedDate = ParseDate(GetCell(row, statusCols, "PlannedDate")),
-                        ActualDate = ParseDate(GetCell(row, statusCols, "ActualDate")),
-                        System = GetCell(row, statusCols, "System"),
-                        Remarks = GetCell(row, statusCols, "Remarks"),
-                    };
+                        table = dt;
+                        headerRowIdx = row;
+                        break;
+                    }
                 }
 
-                var mappingSheet = wb.Worksheet("Mapping")
-                    ?? throw new Exception("'Mapping' 시트를 찾을 수 없습니다.");
-                var mappingCols = GetHeaderMap(mappingSheet);
+                if (table == null || headerRowIdx < 0)
+                    throw new Exception("'Test Package No.' 헤더를 포함한 시트를 찾을 수 없습니다.");
 
-                foreach (var row in mappingSheet.RangeUsed().RowsUsed().Skip(1))
+                var cols = BuildColumnMap(table, headerRowIdx);
+
+                var stageColumns = new List<(int colIndex, HydrotestStage stage)>();
+                foreach (var kv in HydrotestStageInfo.ColumnMap)
                 {
-                    string pkgId = GetCell(row, mappingCols, "TestPkgId").Trim();
-                    string spoolId = GetCell(row, mappingCols, "SpoolId").Trim();
+                    if (cols.TryGetValue(kv.Key, out int idx))
+                        stageColumns.Add((idx, kv.Value));
+                }
 
-                    if (packages.TryGetValue(pkgId, out var pkg) && !string.IsNullOrEmpty(spoolId))
-                        pkg.SpoolIds.Add(spoolId);
+                int pkgCol = FindColumn(cols, pkgHeaderNames);
+                int sysCol = FindColumn(cols, "System No.", "System No", "SystemNo", "System");
+                int lineCol = FindColumn(cols, "Line Service", "LineService", "Service");
+
+                if (pkgCol < 0)
+                    throw new Exception("'Test Package No.' 컬럼을 찾을 수 없습니다.");
+
+                for (int r = headerRowIdx + 1; r < table.Rows.Count; r++)
+                {
+                    var row = table.Rows[r];
+                    string pkgId = row[pkgCol]?.ToString()?.Trim();
+                    if (string.IsNullOrEmpty(pkgId)) continue;
+
+                    var pkg = new TestPackageData
+                    {
+                        TestPkgId = pkgId,
+                        SystemNo = sysCol >= 0 ? row[sysCol]?.ToString()?.Trim() ?? "" : "",
+                        LineService = lineCol >= 0 ? row[lineCol]?.ToString()?.Trim() ?? "" : "",
+                    };
+
+                    foreach (var (colIndex, stage) in stageColumns)
+                    {
+                        pkg.StageDates[stage] = ParseCellValue(row[colIndex]);
+                    }
+
+                    packages.Add(pkg);
                 }
             }
 
-            return packages.Values.ToList();
+            return packages;
         }
 
-        /// <summary>
-        /// Loads spool data from Excel files (.xlsx, .xls, .xlsb).
-        /// Uses ExcelDataReader for broad format support.
-        /// </summary>
         public static List<SpoolData> LoadSpool(string filePath)
         {
             var spools = new List<SpoolData>();
@@ -68,11 +88,9 @@ namespace NavisVisualizer.Loaders
             {
                 var dataSet = reader.AsDataSet();
 
-                // Find sheet and header row
                 System.Data.DataTable table = null;
                 int headerRowIdx = -1;
 
-                // Prefer "Spool" named sheet
                 var namedTable = dataSet.Tables.Cast<System.Data.DataTable>()
                     .FirstOrDefault(t => t.TableName.Equals("Spool", StringComparison.OrdinalIgnoreCase));
                 if (namedTable != null)
@@ -81,35 +99,20 @@ namespace NavisVisualizer.Loaders
                     if (headerRowIdx >= 0) table = namedTable;
                 }
 
-                // Otherwise scan all sheets
                 if (table == null)
                 {
                     foreach (System.Data.DataTable dt in dataSet.Tables)
                     {
                         int row = FindHeaderRowInTable(dt, spoolHeaderNames);
-                        if (row >= 0)
-                        {
-                            table = dt;
-                            headerRowIdx = row;
-                            break;
-                        }
+                        if (row >= 0) { table = dt; headerRowIdx = row; break; }
                     }
                 }
 
                 if (table == null || headerRowIdx < 0)
                     throw new Exception("'Spool Number' 헤더를 포함한 시트를 찾을 수 없습니다.");
 
-                // Build column map from header row
-                var cols = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-                var headerRow = table.Rows[headerRowIdx];
-                for (int c = 0; c < table.Columns.Count; c++)
-                {
-                    string val = headerRow[c]?.ToString()?.Trim();
-                    if (!string.IsNullOrEmpty(val))
-                        cols[val] = c;
-                }
+                var cols = BuildColumnMap(table, headerRowIdx);
 
-                // Stage columns
                 var stageColumns = new List<(int colIndex, SpoolStage stage)>();
                 foreach (var kv in SpoolStageInfo.ColumnMap)
                 {
@@ -123,19 +126,16 @@ namespace NavisVisualizer.Loaders
                 if (spoolCol < 0)
                     throw new Exception("'Spool Number' 컬럼을 찾을 수 없습니다.");
 
-                // Read data rows
                 for (int r = headerRowIdx + 1; r < table.Rows.Count; r++)
                 {
                     var row = table.Rows[r];
                     string spoolId = row[spoolCol]?.ToString()?.Trim();
                     if (string.IsNullOrEmpty(spoolId)) continue;
 
-                    string isoNo = isoCol >= 0 ? row[isoCol]?.ToString()?.Trim() : string.Empty;
-
                     var spool = new SpoolData
                     {
                         SpoolId = spoolId,
-                        IsoNo = isoNo ?? string.Empty,
+                        IsoNo = isoCol >= 0 ? row[isoCol]?.ToString()?.Trim() ?? "" : "",
                     };
 
                     foreach (var (colIndex, stage) in stageColumns)
@@ -148,6 +148,21 @@ namespace NavisVisualizer.Loaders
             }
 
             return spools;
+        }
+
+        #region Shared helpers
+
+        private static Dictionary<string, int> BuildColumnMap(System.Data.DataTable table, int headerRowIdx)
+        {
+            var cols = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            var headerRow = table.Rows[headerRowIdx];
+            for (int c = 0; c < table.Columns.Count; c++)
+            {
+                string val = headerRow[c]?.ToString()?.Trim();
+                if (!string.IsNullOrEmpty(val))
+                    cols[val] = c;
+            }
+            return cols;
         }
 
         private static int FindColumn(Dictionary<string, int> cols, params string[] candidates)
@@ -184,43 +199,6 @@ namespace NavisVisualizer.Loaders
             string str = value.ToString()?.Trim();
             if (string.IsNullOrEmpty(str)) return null;
             return DateTime.TryParse(str, out var parsed) ? parsed : (DateTime?)null;
-        }
-
-        #region Hydrotest helpers (ClosedXML)
-
-        private static Dictionary<string, int> GetHeaderMap(IXLWorksheet sheet)
-        {
-            var map = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            var headerRow = sheet.Row(1);
-            for (int i = 1; i <= headerRow.LastCellUsed().Address.ColumnNumber; i++)
-            {
-                string header = headerRow.Cell(i).GetString().Trim();
-                if (!string.IsNullOrEmpty(header))
-                    map[header] = i;
-            }
-            return map;
-        }
-
-        private static string GetCell(IXLRangeRow row, Dictionary<string, int> cols, string header)
-        {
-            if (!cols.TryGetValue(header, out int col)) return string.Empty;
-            return row.WorksheetRow().Cell(col).GetString() ?? string.Empty;
-        }
-
-        private static DateTime? ParseDate(string value)
-        {
-            if (string.IsNullOrWhiteSpace(value)) return null;
-            return DateTime.TryParse(value, out var dt) ? dt : (DateTime?)null;
-        }
-
-        private static HydrotestStatus ParseHydrotestStatus(string value)
-        {
-            switch (value?.Trim().ToUpperInvariant())
-            {
-                case "C": case "완료": case "COMPLETED": return HydrotestStatus.Completed;
-                case "R": case "복구": case "RECOVERY":  return HydrotestStatus.Recovery;
-                default:                                  return HydrotestStatus.NotStarted;
-            }
         }
 
         #endregion
