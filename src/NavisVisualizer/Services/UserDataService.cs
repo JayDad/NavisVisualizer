@@ -11,9 +11,6 @@ namespace NavisVisualizer.Services
         private const string CategoryDisplayName = "Spool 실적";
         private const string CategoryInternalName = "NavisVisualizer_SpoolData";
 
-        /// <summary>
-        /// Writes spool performance data as user-defined properties on matched model items.
-        /// </summary>
         public int WriteSpoolProperties(
             List<SpoolData> spools,
             Dictionary<string, List<ModelItem>> searchResult,
@@ -21,6 +18,7 @@ namespace NavisVisualizer.Services
         {
             dynamic comState = ComApiBridge.State;
             int written = 0;
+            int attempted = 0;
             string lastError = null;
 
             foreach (var spool in spools)
@@ -32,39 +30,34 @@ namespace NavisVisualizer.Services
 
                 foreach (var item in items)
                 {
+                    attempted++;
                     try
                     {
                         dynamic comPath = ComApiBridge.ToInwOaPath(item);
                         dynamic properties = BuildProperties(comState, spool, stage);
-
-                        // SetUserDefined is a method on State, not on Path
-                        comState.SetUserDefined(
-                            comPath,
-                            0,
-                            CategoryInternalName,
-                            CategoryDisplayName,
-                            properties);
+                        comState.SetUserDefined(comPath, 0, CategoryInternalName, CategoryDisplayName, properties);
                         written++;
                     }
                     catch (Exception ex)
                     {
-                        lastError = ex.Message;
+                        lastError = ex.GetType().Name + ": " + ex.Message;
                     }
                 }
             }
 
+            // Always report what happened
+            if (attempted == 0)
+                throw new Exception("속성 삽입 대상이 없습니다. (searchResult 매칭 0건)");
             if (written == 0 && lastError != null)
-                throw new Exception($"속성 삽입 실패: {lastError}");
+                throw new Exception($"0/{attempted}건 실패: {lastError}");
 
             return written;
         }
 
         private dynamic BuildProperties(dynamic comState, SpoolData spool, SpoolStage currentStage)
         {
-            // nwEObjectType.eObjectType_nwOaPropertyVec
             dynamic properties = comState.ObjectFactory(
-                (dynamic)Enum.Parse(GetEnumType(comState), "eObjectType_nwOaPropertyVec"),
-                null, null);
+                ResolveEnum("eObjectType_nwOaPropertyVec"), null, null);
 
             AddProperty(comState, properties, "Spool Number", spool.SpoolId);
 
@@ -88,35 +81,54 @@ namespace NavisVisualizer.Services
 
         private void AddProperty(dynamic comState, dynamic properties, string name, string value)
         {
-            // nwEObjectType.eObjectType_nwOaProperty
             dynamic prop = comState.ObjectFactory(
-                (dynamic)Enum.Parse(GetEnumType(comState), "eObjectType_nwOaProperty"),
-                null, null);
+                ResolveEnum("eObjectType_nwOaProperty"), null, null);
             prop.name = name;
             prop.UserName = name;
             prop.value = value;
             properties.Properties().Add(prop);
         }
 
-        private Type _enumType;
-        private Type GetEnumType(dynamic comState)
+        private static object _enumPropertyVec;
+        private static object _enumProperty;
+
+        private static object ResolveEnum(string valueName)
         {
-            if (_enumType == null)
+            if (valueName == "eObjectType_nwOaPropertyVec" && _enumPropertyVec != null)
+                return _enumPropertyVec;
+            if (valueName == "eObjectType_nwOaProperty" && _enumProperty != null)
+                return _enumProperty;
+
+            // Try to find the enum type from loaded assemblies
+            Type enumType = null;
+            string[] possibleNames = new[]
             {
-                // Find nwEObjectType enum from the same assembly as the COM state
-                Type stateType = ((object)comState).GetType();
-                _enumType = stateType.Assembly.GetType("Autodesk.Navisworks.Interop.ComApi.nwEObjectType");
-                if (_enumType == null)
+                "Autodesk.Navisworks.Interop.ComApi.nwEObjectType",
+                "Autodesk.Navisworks.Api.Interop.ComApi.nwEObjectType",
+            };
+
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                foreach (var typeName in possibleNames)
                 {
-                    // Fallback: search all loaded assemblies
-                    foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
-                    {
-                        _enumType = asm.GetType("Autodesk.Navisworks.Interop.ComApi.nwEObjectType");
-                        if (_enumType != null) break;
-                    }
+                    enumType = asm.GetType(typeName);
+                    if (enumType != null) break;
                 }
+                if (enumType != null) break;
             }
-            return _enumType;
+
+            if (enumType != null)
+            {
+                var result = Enum.Parse(enumType, valueName);
+                if (valueName.Contains("Vec")) _enumPropertyVec = result;
+                else _enumProperty = result;
+                return result;
+            }
+
+            // Fallback: hardcoded values for Navisworks 2022
+            throw new Exception(
+                $"nwEObjectType enum을 찾을 수 없습니다. " +
+                $"Interop.ComApi DLL이 로드되었는지 확인하세요.");
         }
     }
 }
