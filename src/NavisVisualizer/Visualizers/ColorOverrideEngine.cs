@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using Autodesk.Navisworks.Api;
 using NavisVisualizer.Models;
@@ -12,7 +13,6 @@ namespace NavisVisualizer.Visualizers
     {
         private readonly ModelItemSearcher _searcher;
 
-        // Cached expanded items per stage key (string) for incremental updates
         private Dictionary<string, ModelItemCollection> _cachedStageCollections
             = new Dictionary<string, ModelItemCollection>();
 
@@ -27,6 +27,7 @@ namespace NavisVisualizer.Visualizers
             Dictionary<HydrotestStage, ColorSetting> colorSettings,
             DateTime referenceDate)
         {
+            var sw = Stopwatch.StartNew();
             var result = new OverrideResult();
             var stageItems = new Dictionary<HydrotestStage, List<ModelItem>>();
 
@@ -53,19 +54,35 @@ namespace NavisVisualizer.Visualizers
                 list.AddRange(items);
             }
 
-            // Reset + apply all stages
-            doc.Models.ResetAllPermanentMaterials();
+            result.TimingMatch = sw.ElapsedMilliseconds;
+
+            // No auto-Reset — user can manually reset via "전체 초기화"
             _cachedStageCollections.Clear();
 
+            // Expand + cache
+            long expandMs = 0;
             foreach (var kv in stageItems)
             {
+                var swExpand = Stopwatch.StartNew();
                 string key = kv.Key.ToString();
                 var collection = ExpandToCollection(kv.Value);
                 _cachedStageCollections[key] = collection;
+                result.TotalItemsColored += collection.Count;
+                expandMs += swExpand.ElapsedMilliseconds;
+            }
+            result.TimingExpand = expandMs;
 
-                if (colorSettings.TryGetValue(kv.Key, out var setting))
+            // Apply colors
+            var swApply = Stopwatch.StartNew();
+            foreach (var kv in stageItems)
+            {
+                string key = kv.Key.ToString();
+                if (_cachedStageCollections.TryGetValue(key, out var collection)
+                    && colorSettings.TryGetValue(kv.Key, out var setting))
                     ApplyOverride(doc, collection, setting);
             }
+            result.TimingApply = swApply.ElapsedMilliseconds;
+            result.TimingTotal = sw.ElapsedMilliseconds;
 
             return result;
         }
@@ -76,6 +93,7 @@ namespace NavisVisualizer.Visualizers
             Dictionary<SpoolStage, ColorSetting> colorSettings,
             DateTime referenceDate)
         {
+            var sw = Stopwatch.StartNew();
             var result = new OverrideResult();
             var stageItems = new Dictionary<SpoolStage, List<ModelItem>>();
 
@@ -102,26 +120,36 @@ namespace NavisVisualizer.Visualizers
                 list.AddRange(items);
             }
 
-            doc.Models.ResetAllPermanentMaterials();
+            result.TimingMatch = sw.ElapsedMilliseconds;
+
             _cachedStageCollections.Clear();
 
+            long expandMs = 0;
             foreach (var kv in stageItems)
             {
+                var swExpand = Stopwatch.StartNew();
                 string key = kv.Key.ToString();
                 var collection = ExpandToCollection(kv.Value);
                 _cachedStageCollections[key] = collection;
+                result.TotalItemsColored += collection.Count;
+                expandMs += swExpand.ElapsedMilliseconds;
+            }
+            result.TimingExpand = expandMs;
 
-                if (colorSettings.TryGetValue(kv.Key, out var setting))
+            var swApply = Stopwatch.StartNew();
+            foreach (var kv in stageItems)
+            {
+                string key = kv.Key.ToString();
+                if (_cachedStageCollections.TryGetValue(key, out var collection)
+                    && colorSettings.TryGetValue(kv.Key, out var setting))
                     ApplyOverride(doc, collection, setting);
             }
+            result.TimingApply = swApply.ElapsedMilliseconds;
+            result.TimingTotal = sw.ElapsedMilliseconds;
 
             return result;
         }
 
-        /// <summary>
-        /// Update color/transparency for a single stage using cached items.
-        /// No Reset — only recolors the specified stage's items.
-        /// </summary>
         public bool UpdateStageColor(Document doc, string stageKey, ColorSetting setting)
         {
             if (!_cachedStageCollections.TryGetValue(stageKey, out var collection))
@@ -130,9 +158,6 @@ namespace NavisVisualizer.Visualizers
             return true;
         }
 
-        /// <summary>
-        /// Check if cached stage data exists (i.e., Apply was called before).
-        /// </summary>
         public bool HasCachedData => _cachedStageCollections.Count > 0;
 
         public void Reset(Document doc)
@@ -168,5 +193,12 @@ namespace NavisVisualizer.Visualizers
         public int MatchedCount { get; set; }
         public List<string> UnmatchedIds { get; set; } = new List<string>();
         public int UnmatchedCount => UnmatchedIds.Count;
+        public int TotalItemsColored { get; set; }
+
+        // Timing (ms)
+        public long TimingMatch { get; set; }
+        public long TimingExpand { get; set; }
+        public long TimingApply { get; set; }
+        public long TimingTotal { get; set; }
     }
 }
