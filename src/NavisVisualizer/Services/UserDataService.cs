@@ -11,9 +11,8 @@ namespace NavisVisualizer.Services
         private const string CategoryDisplayName = "Spool 실적";
         private const string CategoryInternalName = "NavisVisualizer_SpoolData";
 
-        // nwEObjectType enum values (fixed across Navisworks versions)
-        private const int eObjectType_nwOaPropertyVec = 1;
-        private const int eObjectType_nwOaProperty = 2;
+        private static object _enumPropVec;
+        private static object _enumProp;
 
         public int WriteSpoolProperties(
             List<SpoolData> spools,
@@ -21,6 +20,8 @@ namespace NavisVisualizer.Services
             DateTime referenceDate)
         {
             dynamic comState = ComApiBridge.State;
+            ResolveEnums(comState);
+
             int written = 0;
             int attempted = 0;
             string lastError = null;
@@ -50,16 +51,31 @@ namespace NavisVisualizer.Services
             }
 
             if (attempted == 0)
-                throw new Exception("속성 삽입 대상이 없습니다. (searchResult 매칭 0건)");
+                throw new Exception("속성 삽입 대상이 없습니다.");
             if (written == 0 && lastError != null)
                 throw new Exception($"0/{attempted}건 실패: {lastError}");
 
             return written;
         }
 
+        private static void ResolveEnums(dynamic comState)
+        {
+            if (_enumPropVec != null) return;
+
+            // Get the enum type from the same assembly as the COM state object
+            Type stateType = ((object)comState).GetType();
+            Type enumType = stateType.Assembly.GetType("Autodesk.Navisworks.Interop.ComApi.nwEObjectType");
+
+            if (enumType == null)
+                throw new Exception("nwEObjectType enum을 찾을 수 없습니다.");
+
+            _enumPropVec = Enum.Parse(enumType, "eObjectType_nwOaPropertyVec");
+            _enumProp = Enum.Parse(enumType, "eObjectType_nwOaProperty");
+        }
+
         private dynamic BuildProperties(dynamic comState, SpoolData spool, SpoolStage currentStage)
         {
-            dynamic properties = comState.ObjectFactory(eObjectType_nwOaPropertyVec, null, null);
+            dynamic properties = comState.ObjectFactory(_enumPropVec, null, null);
 
             AddProperty(comState, properties, "Spool Number", spool.SpoolId);
 
@@ -83,7 +99,7 @@ namespace NavisVisualizer.Services
 
         private void AddProperty(dynamic comState, dynamic properties, string name, string value)
         {
-            dynamic prop = comState.ObjectFactory(eObjectType_nwOaProperty, null, null);
+            dynamic prop = comState.ObjectFactory(_enumProp, null, null);
             prop.name = name;
             prop.UserName = name;
             prop.value = value;
