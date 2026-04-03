@@ -25,6 +25,7 @@ namespace NavisVisualizer.UI
         private Button   _btnReset;
         private Button   _btnViewpoint;
         private Button   _btnNwd;
+        private CheckBox _chkWriteProps;
         private Label    _lblStats;
         private ProgressBar _progressBar;
 
@@ -90,6 +91,8 @@ namespace NavisVisualizer.UI
             _listView.Columns.Add("단계", 80);
             _listView.SelectedIndexChanged += ListView_SelectedIndexChanged;
 
+            _chkWriteProps = new CheckBox { Text = "실적 속성 삽입", Checked = false, AutoSize = true };
+
             var btnPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 65, AutoSize = true };
             _btnApply     = new Button { Text = "적용",              Width = 80  };
             _btnReset     = new Button { Text = "전체 초기화",       Width = 90  };
@@ -99,7 +102,7 @@ namespace NavisVisualizer.UI
             _btnReset.Click     += BtnReset_Click;
             _btnViewpoint.Click += BtnViewpoint_Click;
             _btnNwd.Click       += BtnNwd_Click;
-            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnReset, _btnViewpoint, _btnNwd });
+            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnReset, _chkWriteProps, _btnViewpoint, _btnNwd });
 
             _progressBar = new ProgressBar { Dock = DockStyle.Fill, Height = 12, Visible = false };
             _lblStats    = new Label       { Dock = DockStyle.Fill, Text = "로드된 데이터 없음", AutoSize = false, Height = 40 };
@@ -250,7 +253,27 @@ namespace NavisVisualizer.UI
 
             var referenceDate = _dtpReference.Value;
             var result = _main.OverrideEngine.ApplySpool(doc, _spools, activeSettings, referenceDate);
-            UpdateStats(result.MatchedCount, result.UnmatchedCount);
+
+            // Write user-defined properties if checked
+            if (_chkWriteProps.Checked)
+            {
+                try
+                {
+                    var allSpoolIds = _spools.Select(s => s.SpoolId).Distinct();
+                    var searchResult = _main.Searcher.FindBySpoolIds(allSpoolIds);
+                    int propsWritten = _main.UserDataSvc.WriteSpoolProperties(_spools, searchResult, referenceDate);
+                    UpdateStats(result.MatchedCount, result.UnmatchedCount, propsWritten);
+                }
+                catch (Exception ex)
+                {
+                    UpdateStats(result.MatchedCount, result.UnmatchedCount);
+                    MessageBox.Show($"속성 삽입 실패:\n{ex.Message}", "오류", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+            }
+            else
+            {
+                UpdateStats(result.MatchedCount, result.UnmatchedCount);
+            }
         }
 
         private void BtnReset_Click(object sender, EventArgs e)
@@ -330,7 +353,7 @@ namespace NavisVisualizer.UI
             }
         }
 
-        private void UpdateStats(int matched = 0, int unmatched = 0)
+        private void UpdateStats(int matched = 0, int unmatched = 0, int propsWritten = 0)
         {
             var referenceDate = _dtpReference.Value;
             var counts = _spools
@@ -345,8 +368,11 @@ namespace NavisVisualizer.UI
                     parts.Add($"{SpoolStageInfo.Labels[stage]} {cnt}");
             }
 
+            string line2 = "";
+            if (matched > 0) line2 += $"매칭 {matched} / 미매칭 {unmatched}";
+            if (propsWritten > 0) line2 += $"  속성 {propsWritten}건 삽입";
             _lblStats.Text = string.Join("  ", parts)
-                           + (matched > 0 ? $"\n매칭 {matched} / 미매칭 {unmatched}" : "");
+                           + (!string.IsNullOrEmpty(line2) ? $"\n{line2}" : "");
         }
 
         private Dictionary<SpoolStage, ColorSetting> CloneDefaults(Dictionary<SpoolStage, ColorSetting> defaults)

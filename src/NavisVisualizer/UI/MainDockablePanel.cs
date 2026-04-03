@@ -11,6 +11,7 @@ namespace NavisVisualizer.UI
         public ModelItemSearcher Searcher { get; } = new ModelItemSearcher();
         public ColorOverrideEngine OverrideEngine { get; }
         public ExportService ExportSvc { get; } = new ExportService();
+        public UserDataService UserDataSvc { get; } = new UserDataService();
 
         private TabControl _tabControl;
         private HydrotestTab _hydrotestTab;
