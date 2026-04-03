@@ -29,9 +29,9 @@ namespace NavisVisualizer.UI
         private ListView _listView;
         private Button   _btnApply;
         private Button   _btnReset;
+        private Button   _btnWriteProps;
         private Button   _btnViewpoint;
         private Button   _btnNwd;
-        private CheckBox _chkWriteProps;
         private Label    _lblStats;
         private ProgressBar _progressBar;
 
@@ -127,18 +127,18 @@ namespace NavisVisualizer.UI
                 }
             };
 
-            _chkWriteProps = new CheckBox { Text = "실적 속성 삽입", Checked = false, AutoSize = true };
-
             var btnPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 65, AutoSize = true };
-            _btnApply     = new Button { Text = "적용",              Width = 80  };
-            _btnReset     = new Button { Text = "전체 초기화",       Width = 90  };
-            _btnViewpoint = new Button { Text = "Viewpoint 저장",    Width = 120 };
-            _btnNwd       = new Button { Text = "NWD Export",        Width = 110 };
-            _btnApply.Click     += BtnApply_Click;
-            _btnReset.Click     += BtnReset_Click;
-            _btnViewpoint.Click += BtnViewpoint_Click;
-            _btnNwd.Click       += BtnNwd_Click;
-            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnReset, _chkWriteProps, _btnViewpoint, _btnNwd });
+            _btnApply      = new Button { Text = "적용",              Width = 80  };
+            _btnReset      = new Button { Text = "전체 초기화",       Width = 90  };
+            _btnWriteProps = new Button { Text = "속성 쓰기",         Width = 80  };
+            _btnViewpoint  = new Button { Text = "Viewpoint 저장",    Width = 120 };
+            _btnNwd        = new Button { Text = "NWD Export",        Width = 110 };
+            _btnApply.Click      += BtnApply_Click;
+            _btnReset.Click      += BtnReset_Click;
+            _btnWriteProps.Click += BtnWriteProps_Click;
+            _btnViewpoint.Click  += BtnViewpoint_Click;
+            _btnNwd.Click        += BtnNwd_Click;
+            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnReset, _btnWriteProps, _btnViewpoint, _btnNwd });
 
             _progressBar = new ProgressBar { Dock = DockStyle.Fill, Height = 12, Visible = false };
 
@@ -308,24 +308,47 @@ namespace NavisVisualizer.UI
             _tabFilter.TabPages[1].Text = $"매칭 ({_matchedSpoolIds.Count})";
             _tabFilter.TabPages[2].Text = $"미매칭 ({_unmatchedSpoolIds.Count})";
 
-            // Write user-defined properties if checked
-            int propsWritten = 0;
-            if (_chkWriteProps.Checked)
-            {
-                try
-                {
-                    var allSpoolIds = _spools.Select(s => s.SpoolId).Distinct();
-                    var searchResult = _main.Searcher.FindBySpoolIds(allSpoolIds);
-                    propsWritten = _main.UserDataSvc.WriteSpoolProperties(_spools, searchResult, referenceDate);
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show($"속성 삽입 실패:\n{ex.Message}", "오류", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                }
-            }
-            UpdateStats(result, propsWritten);
-
+            UpdateStats(result);
             FilterList();
+        }
+
+        private void BtnWriteProps_Click(object sender, EventArgs e)
+        {
+            var doc = _main.GetDocument();
+            if (doc == null || _spools.Count == 0)
+            {
+                MessageBox.Show("Excel을 먼저 로드하고 모델을 열어주세요.");
+                return;
+            }
+            if (_main.Searcher.NeedsRebuild(doc))
+                BuildIndex();
+
+            var referenceDate = _dtpReference.Value;
+
+            try
+            {
+                // Clear selection to reduce properties panel flashing
+                doc.CurrentSelection.Clear();
+
+                _btnWriteProps.Enabled = false;
+                _btnWriteProps.Text = "쓰는 중...";
+                Application.DoEvents();
+
+                var allSpoolIds = _spools.Select(s => s.SpoolId).Distinct();
+                var searchResult = _main.Searcher.FindBySpoolIds(allSpoolIds);
+                int written = _main.UserDataSvc.WriteSpoolProperties(_spools, searchResult, referenceDate);
+
+                _lblStats.Text += $"\n속성 {written}건 삽입 완료";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"속성 삽입 실패:\n{ex.Message}", "오류", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            finally
+            {
+                _btnWriteProps.Enabled = true;
+                _btnWriteProps.Text = "속성 쓰기";
+            }
         }
 
         private void BtnReset_Click(object sender, EventArgs e)
@@ -444,7 +467,7 @@ namespace NavisVisualizer.UI
             }
         }
 
-        private void UpdateStats(OverrideResult result = null, int propsWritten = 0)
+        private void UpdateStats(OverrideResult result = null)
         {
             var referenceDate = _dtpReference.Value;
             var counts = _spools
@@ -461,10 +484,7 @@ namespace NavisVisualizer.UI
 
             string line2 = "";
             if (result != null && result.MatchedCount > 0)
-            {
                 line2 = $"매칭 {result.MatchedCount} / 미매칭 {result.UnmatchedCount}";
-                if (propsWritten > 0) line2 += $"  속성 {propsWritten}건";
-            }
             _lblStats.Text = string.Join("  ", parts)
                            + (!string.IsNullOrEmpty(line2) ? $"\n{line2}" : "");
         }
