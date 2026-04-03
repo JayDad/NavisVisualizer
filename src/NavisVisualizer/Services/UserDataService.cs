@@ -10,7 +10,7 @@ namespace NavisVisualizer.Services
     public class UserDataService
     {
         private const string CategoryDisplayName = "Spool 실적";
-        private const string CategoryInternalName = "NavisVisualizer_SpoolData";
+        private const string CategoryInternalName = "LcOaNvSpool";
 
         private static object _enumPropVec;
         private static object _enumProp;
@@ -40,9 +40,31 @@ namespace NavisVisualizer.Services
                     try
                     {
                         dynamic comPath = ComApiBridge.ToInwOaPath(item);
-                        dynamic properties = BuildProperties(comState, spool, stage);
                         dynamic propNode = comState.GetGUIPropertyNode(comPath, true);
-                        propNode.SetUserDefined(0, CategoryInternalName, CategoryDisplayName, properties);
+
+                        // Build property vector
+                        dynamic propVec = comState.ObjectFactory(_enumPropVec);
+
+                        // Add simple test property first
+                        AddProp(comState, propVec, "LcOaSpoolId", "Spool Number", spool.SpoolId);
+
+                        if (!string.IsNullOrEmpty(spool.IsoNo))
+                            AddProp(comState, propVec, "LcOaIsoNo", "ISO No", spool.IsoNo);
+
+                        string stageLabel = SpoolStageInfo.Labels.TryGetValue(stage, out var lbl)
+                            ? lbl : stage.ToString();
+                        AddProp(comState, propVec, "LcOaStage", "현재 단계", stageLabel);
+
+                        foreach (var s in SpoolStageInfo.OrderedStages)
+                        {
+                            string label = SpoolStageInfo.Labels[s];
+                            string dateStr = spool.StageDates.TryGetValue(s, out var date) && date.HasValue
+                                ? date.Value.ToString("yyyy-MM-dd") : "";
+                            AddProp(comState, propVec, "LcOa" + s.ToString(), label, dateStr);
+                        }
+
+                        // Write to the item
+                        propNode.SetUserDefined(0, CategoryInternalName, CategoryDisplayName, propVec);
                         written++;
                     }
                     catch (Exception ex)
@@ -60,112 +82,63 @@ namespace NavisVisualizer.Services
             return written;
         }
 
+        private void AddProp(dynamic comState, dynamic propVec, string internalName, string displayName, string value)
+        {
+            dynamic prop = comState.ObjectFactory(_enumProp);
+            prop.name = internalName;
+            prop.UserName = displayName;
+            prop.value = value;
+            propVec.Properties().Add(prop);
+        }
+
         private static void ResolveEnums()
         {
             if (_enumPropVec != null) return;
 
             Type enumType = null;
-            var diagInfo = new List<string>();
 
-            // Strategy 1: Search all loaded assemblies for any type named nwEObjectType
+            // Search loaded assemblies
             foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
             {
-                string asmName = asm.GetName().Name;
-                if (asmName.Contains("Navisworks") && asmName.Contains("Interop"))
+                if (!asm.GetName().Name.Contains("Interop")) continue;
+                try
                 {
-                    diagInfo.Add($"Found assembly: {asmName}");
-                    // Search all types for the enum
-                    try
+                    foreach (var t in asm.GetExportedTypes())
                     {
-                        foreach (var t in asm.GetExportedTypes())
-                        {
-                            if (t.IsEnum && t.Name == "nwEObjectType")
-                            {
-                                enumType = t;
-                                diagInfo.Add($"Found enum: {t.FullName}");
-                                break;
-                            }
-                        }
+                        if (t.IsEnum && t.Name == "nwEObjectType")
+                        { enumType = t; break; }
                     }
-                    catch (Exception ex) { diagInfo.Add($"GetExportedTypes failed: {ex.Message}"); }
                 }
+                catch { }
                 if (enumType != null) break;
             }
 
-            // Strategy 2: Force-load and search
+            // Fallback: load from Navisworks directory
             if (enumType == null)
             {
                 try
                 {
-                    string navisDir = System.IO.Path.GetDirectoryName(
+                    string dir = System.IO.Path.GetDirectoryName(
                         typeof(Autodesk.Navisworks.Api.Application).Assembly.Location);
-                    diagInfo.Add($"Navisworks dir: {navisDir}");
-
-                    string dllPath = System.IO.Path.Combine(navisDir, "Autodesk.Navisworks.Interop.ComApi.dll");
-                    bool exists = System.IO.File.Exists(dllPath);
-                    diagInfo.Add($"DLL exists: {exists}");
-
-                    if (exists)
+                    string dll = System.IO.Path.Combine(dir, "Autodesk.Navisworks.Interop.ComApi.dll");
+                    if (System.IO.File.Exists(dll))
                     {
-                        var asm = Assembly.LoadFrom(dllPath);
-                        diagInfo.Add($"Loaded: {asm.FullName}");
+                        var asm = Assembly.LoadFrom(dll);
                         foreach (var t in asm.GetExportedTypes())
                         {
-                            if (t.IsEnum && t.Name.Contains("ObjectType"))
-                            {
-                                diagInfo.Add($"Enum found: {t.FullName}");
-                                if (t.Name == "nwEObjectType")
-                                {
-                                    enumType = t;
-                                    break;
-                                }
-                            }
+                            if (t.IsEnum && t.Name == "nwEObjectType")
+                            { enumType = t; break; }
                         }
                     }
                 }
-                catch (Exception ex) { diagInfo.Add($"Strategy 2 failed: {ex.Message}"); }
+                catch { }
             }
 
             if (enumType == null)
-                throw new Exception(
-                    "nwEObjectType enum을 찾을 수 없습니다.\n" +
-                    string.Join("\n", diagInfo));
+                throw new Exception("nwEObjectType enum을 찾을 수 없습니다.");
 
             _enumPropVec = Enum.Parse(enumType, "eObjectType_nwOaPropertyVec");
             _enumProp = Enum.Parse(enumType, "eObjectType_nwOaProperty");
-        }
-
-        private dynamic BuildProperties(dynamic comState, SpoolData spool, SpoolStage currentStage)
-        {
-            dynamic properties = comState.ObjectFactory(_enumPropVec, null, null);
-
-            AddProperty(comState, properties, "Spool Number", spool.SpoolId);
-
-            if (!string.IsNullOrEmpty(spool.IsoNo))
-                AddProperty(comState, properties, "ISO No", spool.IsoNo);
-
-            string stageLabel = SpoolStageInfo.Labels.TryGetValue(currentStage, out var lbl) ? lbl : currentStage.ToString();
-            AddProperty(comState, properties, "현재 단계", stageLabel);
-
-            foreach (var stage in SpoolStageInfo.OrderedStages)
-            {
-                string label = SpoolStageInfo.Labels[stage];
-                if (spool.StageDates.TryGetValue(stage, out var date) && date.HasValue)
-                    AddProperty(comState, properties, label, date.Value.ToString("yyyy-MM-dd"));
-                else
-                    AddProperty(comState, properties, label, "-");
-            }
-
-            return properties;
-        }
-
-        private void AddProperty(dynamic comState, dynamic properties, string name, string value)
-        {
-            dynamic prop = comState.ObjectFactory(_enumProp, null, null);
-            prop.name = name;
-            prop.UserName = name;
-            prop.value = value;
-            properties.Properties().Add(prop);
         }
     }
 }
