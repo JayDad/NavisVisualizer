@@ -1,26 +1,27 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using Autodesk.Navisworks.Api;
 using Autodesk.Navisworks.Api.ComApi;
-using Autodesk.Navisworks.Interop.ComApi;
 using NavisVisualizer.Models;
 
 namespace NavisVisualizer.Services
 {
     public class UserDataService
     {
-        private const string CategoryName = "Spool 실적";
-        private const string InternalCategoryName = "NavisVisualizer_SpoolData";
+        private const string CategoryDisplayName = "Spool 실적";
+        private const string CategoryInternalName = "NavisVisualizer_SpoolData";
 
         /// <summary>
         /// Writes spool performance data as user-defined properties on matched model items.
+        /// Uses dynamic COM interop to avoid hard dependency on Interop.ComApi namespace.
         /// </summary>
         public int WriteSpoolProperties(
             List<SpoolData> spools,
             Dictionary<string, List<ModelItem>> searchResult,
             DateTime referenceDate)
         {
-            var comState = ComApiBridge.State;
+            dynamic comState = ComApiBridge.State;
             int written = 0;
 
             foreach (var spool in spools)
@@ -29,17 +30,17 @@ namespace NavisVisualizer.Services
                     continue;
 
                 var stage = spool.GetStageAtDate(referenceDate);
-                var properties = BuildProperties(comState, spool, stage);
 
                 foreach (var item in items)
                 {
                     try
                     {
-                        var comPath = ComApiBridge.ToInwOaPath(item);
+                        dynamic comPath = ComApiBridge.ToInwOaPath(item);
+                        dynamic properties = BuildProperties(comState, spool, stage);
                         comPath.UserDefined.SetUserDefined(
                             0,
-                            InternalCategoryName,
-                            CategoryName,
+                            CategoryInternalName,
+                            CategoryDisplayName,
                             properties);
                         written++;
                     }
@@ -59,13 +60,14 @@ namespace NavisVisualizer.Services
             {
                 try
                 {
-                    var comPath = ComApiBridge.ToInwOaPath(item);
-                    var userDefined = comPath.UserDefined;
-                    // Remove by setting empty property vector
-                    for (int i = 1; i <= userDefined.Count; i++)
+                    dynamic comPath = ComApiBridge.ToInwOaPath(item);
+                    dynamic userDefined = comPath.UserDefined;
+                    int count = userDefined.Count;
+                    for (int i = 1; i <= count; i++)
                     {
-                        var tab = userDefined[i];
-                        if (tab.UserName == CategoryName || tab.Name == InternalCategoryName)
+                        dynamic tab = userDefined[i];
+                        if ((string)tab.UserName == CategoryDisplayName ||
+                            (string)tab.Name == CategoryInternalName)
                         {
                             userDefined.RemoveUserDefined(i);
                             break;
@@ -76,26 +78,19 @@ namespace NavisVisualizer.Services
             }
         }
 
-        private InwOaPropertyVec BuildProperties(
-            InwOpState comState,
-            SpoolData spool,
-            SpoolStage currentStage)
+        private dynamic BuildProperties(dynamic comState, SpoolData spool, SpoolStage currentStage)
         {
-            var properties = (InwOaPropertyVec)comState.ObjectFactory(
-                nwEObjectType.eObjectType_nwOaPropertyVec, null, null);
+            // eObjectType_nwOaPropertyVec = 1
+            dynamic properties = comState.ObjectFactory(1, null, null);
 
-            // Spool ID
             AddProperty(comState, properties, "Spool Number", spool.SpoolId);
 
-            // ISO No
             if (!string.IsNullOrEmpty(spool.IsoNo))
                 AddProperty(comState, properties, "ISO No", spool.IsoNo);
 
-            // Current stage
             string stageLabel = SpoolStageInfo.Labels.TryGetValue(currentStage, out var lbl) ? lbl : currentStage.ToString();
             AddProperty(comState, properties, "현재 단계", stageLabel);
 
-            // All stage dates
             foreach (var stage in SpoolStageInfo.OrderedStages)
             {
                 string label = SpoolStageInfo.Labels[stage];
@@ -108,14 +103,10 @@ namespace NavisVisualizer.Services
             return properties;
         }
 
-        private void AddProperty(
-            InwOpState comState,
-            InwOaPropertyVec properties,
-            string name,
-            string value)
+        private void AddProperty(dynamic comState, dynamic properties, string name, string value)
         {
-            var prop = (InwOaProperty)comState.ObjectFactory(
-                nwEObjectType.eObjectType_nwOaProperty, null, null);
+            // eObjectType_nwOaProperty = 2
+            dynamic prop = comState.ObjectFactory(2, null, null);
             prop.name = name;
             prop.UserName = name;
             prop.value = value;
