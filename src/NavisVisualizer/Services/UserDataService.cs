@@ -10,8 +10,8 @@ namespace NavisVisualizer.Services
 {
     public class UserDataService
     {
-        private const string CategoryDisplayName = "Spool 실적";
-        private const string CategoryInternalName = "LcOaNvSpool";
+        private const string CategoryDisplayName = "User Property";
+        private const string CategoryInternalName = "User Property";
 
         private static object _enumPropVec;
         private static object _enumProp;
