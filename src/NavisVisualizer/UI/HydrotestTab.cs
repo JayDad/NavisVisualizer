@@ -222,8 +222,6 @@ namespace NavisVisualizer.UI
                     _unmatchedPkgIds.Clear();
                     FilterList();
                     UpdateStats();
-                    if (!_main.Searcher.IsIndexBuilt)
-                        BuildIndex();
                 }
                 catch (Exception ex)
                 {

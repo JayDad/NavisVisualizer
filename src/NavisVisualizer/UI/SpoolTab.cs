@@ -248,8 +248,6 @@ namespace NavisVisualizer.UI
                     _unmatchedSpoolIds.Clear();
                     FilterList();
                     UpdateStats();
-                    if (!_main.Searcher.IsIndexBuilt)
-                        BuildIndex();
                 }
                 catch (Exception ex)
                 {
