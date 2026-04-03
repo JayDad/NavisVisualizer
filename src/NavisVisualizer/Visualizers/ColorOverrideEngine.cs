@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
 using Autodesk.Navisworks.Api;
 using NavisVisualizer.Models;
@@ -27,7 +26,6 @@ namespace NavisVisualizer.Visualizers
             Dictionary<HydrotestStage, ColorSetting> colorSettings,
             DateTime referenceDate)
         {
-            var sw = Stopwatch.StartNew();
             var result = new OverrideResult();
             var stageItems = new Dictionary<HydrotestStage, List<ModelItem>>();
 
@@ -54,29 +52,17 @@ namespace NavisVisualizer.Visualizers
                 list.AddRange(items);
             }
 
-            result.TimingMatch = sw.ElapsedMilliseconds;
             _cachedStageCollections.Clear();
 
-            // No expand — color matched nodes only (no descendant traversal)
             foreach (var kv in stageItems)
             {
                 string key = kv.Key.ToString();
                 var collection = ToCollection(kv.Value);
                 _cachedStageCollections[key] = collection;
-                result.TotalItemsColored += collection.Count;
-            }
-            result.TimingExpand = 0;
 
-            var swApply = Stopwatch.StartNew();
-            foreach (var kv in stageItems)
-            {
-                string key = kv.Key.ToString();
-                if (_cachedStageCollections.TryGetValue(key, out var collection)
-                    && colorSettings.TryGetValue(kv.Key, out var setting))
+                if (colorSettings.TryGetValue(kv.Key, out var setting))
                     ApplyOverride(doc, collection, setting);
             }
-            result.TimingApply = swApply.ElapsedMilliseconds;
-            result.TimingTotal = sw.ElapsedMilliseconds;
 
             return result;
         }
@@ -87,7 +73,6 @@ namespace NavisVisualizer.Visualizers
             Dictionary<SpoolStage, ColorSetting> colorSettings,
             DateTime referenceDate)
         {
-            var sw = Stopwatch.StartNew();
             var result = new OverrideResult();
             var stageItems = new Dictionary<SpoolStage, List<ModelItem>>();
 
@@ -114,29 +99,17 @@ namespace NavisVisualizer.Visualizers
                 list.AddRange(items);
             }
 
-            result.TimingMatch = sw.ElapsedMilliseconds;
             _cachedStageCollections.Clear();
 
-            // No expand — color matched nodes only (no descendant traversal)
             foreach (var kv in stageItems)
             {
                 string key = kv.Key.ToString();
                 var collection = ToCollection(kv.Value);
                 _cachedStageCollections[key] = collection;
-                result.TotalItemsColored += collection.Count;
-            }
-            result.TimingExpand = 0;
 
-            var swApply = Stopwatch.StartNew();
-            foreach (var kv in stageItems)
-            {
-                string key = kv.Key.ToString();
-                if (_cachedStageCollections.TryGetValue(key, out var collection)
-                    && colorSettings.TryGetValue(kv.Key, out var setting))
+                if (colorSettings.TryGetValue(kv.Key, out var setting))
                     ApplyOverride(doc, collection, setting);
             }
-            result.TimingApply = swApply.ElapsedMilliseconds;
-            result.TimingTotal = sw.ElapsedMilliseconds;
 
             return result;
         }
@@ -168,7 +141,6 @@ namespace NavisVisualizer.Visualizers
         {
             if (collection.Count == 0) return;
             doc.Models.OverridePermanentColor(collection, ToNwColor(setting.DisplayColor));
-            // Skip transparency call if fully opaque (0.0) — saves one API call per stage
             if (setting.Transparency > 0.001)
                 doc.Models.OverridePermanentTransparency(collection, setting.Transparency);
         }
@@ -182,11 +154,5 @@ namespace NavisVisualizer.Visualizers
         public int MatchedCount { get; set; }
         public List<string> UnmatchedIds { get; set; } = new List<string>();
         public int UnmatchedCount => UnmatchedIds.Count;
-        public int TotalItemsColored { get; set; }
-
-        public long TimingMatch { get; set; }
-        public long TimingExpand { get; set; }
-        public long TimingApply { get; set; }
-        public long TimingTotal { get; set; }
     }
 }

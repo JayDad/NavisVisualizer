@@ -80,7 +80,7 @@ namespace NavisVisualizer.UI
             _txtSearch = new TextBox { Dock = DockStyle.Fill, Text = "" };
             _txtSearch.TextChanged += (s, e) => FilterList();
 
-            _lblStats = new Label { Dock = DockStyle.Fill, Text = "로드된 데이터 없음", AutoSize = false, Height = 55 };
+            _lblStats = new Label { Dock = DockStyle.Fill, Text = "로드된 데이터 없음", AutoSize = false, Height = 36 };
 
             _tabFilter = new TabControl { Dock = DockStyle.Fill, Height = 230 };
             var tabAll = new TabPage("전체");
@@ -416,11 +416,7 @@ namespace NavisVisualizer.UI
 
             string line2 = "";
             if (result != null && result.MatchedCount > 0)
-            {
-                line2 = $"매칭 {result.MatchedCount} / 미매칭 {result.UnmatchedCount}  " +
-                         $"요소 {result.TotalItemsColored:#,0}개\n" +
-                         $"매칭 {result.TimingMatch}ms  확장 {result.TimingExpand}ms  적용 {result.TimingApply}ms  총 {result.TimingTotal}ms";
-            }
+                line2 = $"매칭 {result.MatchedCount} / 미매칭 {result.UnmatchedCount}";
             _lblStats.Text = string.Join("  ", parts)
                            + (!string.IsNullOrEmpty(line2) ? $"\n{line2}" : "");
         }
