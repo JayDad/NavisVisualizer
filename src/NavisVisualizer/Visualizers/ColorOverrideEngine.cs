@@ -21,12 +21,9 @@ namespace NavisVisualizer.Visualizers
             Document doc,
             List<TestPackageData> packages,
             Dictionary<HydrotestStage, ColorSetting> colorSettings,
-            DateTime referenceDate,
-            bool hideUnmatched = true)
+            DateTime referenceDate)
         {
             var result = new OverrideResult();
-
-            // Group items by stage
             var stageItems = new Dictionary<HydrotestStage, List<ModelItem>>();
 
             var allPkgIds = packages.Select(p => p.TestPkgId).Distinct();
@@ -53,18 +50,13 @@ namespace NavisVisualizer.Visualizers
                 list.AddRange(items);
             }
 
-            // Step 1: Make everything transparent (one fast API call)
-            if (hideUnmatched)
-                ApplyToAll(doc, ColorSetting.Unmatched);
+            // Reset previous overrides, then apply only matched
+            doc.Models.ResetAllPermanentMaterials();
 
-            // Step 2: Override matched items by stage (one call per stage)
             foreach (var kv in stageItems)
             {
                 if (colorSettings.TryGetValue(kv.Key, out var setting))
-                {
-                    var expanded = ExpandWithDescendants(kv.Value);
-                    ApplyOverride(doc, expanded, setting);
-                }
+                    ApplyOverrideWithDescendants(doc, kv.Value, setting);
             }
 
             return result;
@@ -74,12 +66,9 @@ namespace NavisVisualizer.Visualizers
             Document doc,
             List<SpoolData> spools,
             Dictionary<SpoolStage, ColorSetting> colorSettings,
-            DateTime referenceDate,
-            bool hideUnmatched = true)
+            DateTime referenceDate)
         {
             var result = new OverrideResult();
-
-            // Group items by stage
             var stageItems = new Dictionary<SpoolStage, List<ModelItem>>();
 
             var allSpoolIds = spools.Select(s => s.SpoolId).Distinct();
@@ -106,18 +95,13 @@ namespace NavisVisualizer.Visualizers
                 list.AddRange(items);
             }
 
-            // Step 1: Make everything transparent
-            if (hideUnmatched)
-                ApplyToAll(doc, ColorSetting.Unmatched);
+            // Reset previous overrides, then apply only matched
+            doc.Models.ResetAllPermanentMaterials();
 
-            // Step 2: Override matched items by stage
             foreach (var kv in stageItems)
             {
                 if (colorSettings.TryGetValue(kv.Key, out var setting))
-                {
-                    var expanded = ExpandWithDescendants(kv.Value);
-                    ApplyOverride(doc, expanded, setting);
-                }
+                    ApplyOverrideWithDescendants(doc, kv.Value, setting);
             }
 
             return result;
@@ -128,38 +112,18 @@ namespace NavisVisualizer.Visualizers
             doc.Models.ResetAllPermanentMaterials();
         }
 
-        /// <summary>
-        /// Apply color/transparency to ALL items in one API call.
-        /// Much faster than filtering unmatched items individually.
-        /// </summary>
-        private void ApplyToAll(Document doc, ColorSetting setting)
-        {
-            var all = new ModelItemCollection();
-            all.AddRange(doc.Models.RootItemDescendantsAndSelf);
-            var nwColor = ToNwColor(setting.DisplayColor);
-            doc.Models.OverridePermanentColor(all, nwColor);
-            doc.Models.OverridePermanentTransparency(all, setting.Transparency);
-        }
-
-        private void ApplyOverride(Document doc, List<ModelItem> items, ColorSetting setting)
+        private void ApplyOverrideWithDescendants(Document doc, List<ModelItem> items, ColorSetting setting)
         {
             if (items.Count == 0) return;
             var collection = new ModelItemCollection();
-            collection.AddRange(items);
-            var nwColor = ToNwColor(setting.DisplayColor);
-            doc.Models.OverridePermanentColor(collection, nwColor);
-            doc.Models.OverridePermanentTransparency(collection, setting.Transparency);
-        }
-
-        private List<ModelItem> ExpandWithDescendants(List<ModelItem> items)
-        {
-            var expanded = new List<ModelItem>();
             foreach (var item in items)
             {
                 foreach (var desc in item.DescendantsAndSelf)
-                    expanded.Add(desc);
+                    collection.Add(desc);
             }
-            return expanded;
+            var nwColor = ToNwColor(setting.DisplayColor);
+            doc.Models.OverridePermanentColor(collection, nwColor);
+            doc.Models.OverridePermanentTransparency(collection, setting.Transparency);
         }
 
         private NwColor ToNwColor(System.Drawing.Color c) =>

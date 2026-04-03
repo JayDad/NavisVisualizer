@@ -283,7 +283,6 @@ namespace NavisVisualizer.UI
 
             var referenceDate = _dtpReference.Value;
             var result = _main.OverrideEngine.ApplySpool(doc, _spools, activeSettings, referenceDate);
-
             // Update match tracking
             _unmatchedSpoolIds = result.UnmatchedIds;
             var unmatchedSet = new HashSet<string>(result.UnmatchedIds, StringComparer.OrdinalIgnoreCase);
