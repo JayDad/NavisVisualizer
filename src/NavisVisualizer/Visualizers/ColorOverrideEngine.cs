@@ -25,9 +25,8 @@ namespace NavisVisualizer.Visualizers
             bool hideUnmatched = true)
         {
             var result = new OverrideResult();
-            var allMatchedItems = new HashSet<ModelItem>();
 
-            // Group items by stage for batch API calls
+            // Group items by stage
             var stageItems = new Dictionary<HydrotestStage, List<ModelItem>>();
 
             var allPkgIds = packages.Select(p => p.TestPkgId).Distinct();
@@ -51,17 +50,14 @@ namespace NavisVisualizer.Visualizers
                     list = new List<ModelItem>();
                     stageItems[stage] = list;
                 }
-
-                foreach (var item in items)
-                {
-                    list.Add(item);
-                    foreach (var desc in item.DescendantsAndSelf)
-                        allMatchedItems.Add(desc);
-                    AddAncestors(allMatchedItems, item);
-                }
+                list.AddRange(items);
             }
 
-            // Batch: one API call per stage
+            // Step 1: Make everything transparent (one fast API call)
+            if (hideUnmatched)
+                ApplyToAll(doc, ColorSetting.Unmatched);
+
+            // Step 2: Override matched items by stage (one call per stage)
             foreach (var kv in stageItems)
             {
                 if (colorSettings.TryGetValue(kv.Key, out var setting))
@@ -70,9 +66,6 @@ namespace NavisVisualizer.Visualizers
                     ApplyOverride(doc, expanded, setting);
                 }
             }
-
-            if (hideUnmatched)
-                ApplyUnmatchedOverride(doc, allMatchedItems);
 
             return result;
         }
@@ -85,9 +78,8 @@ namespace NavisVisualizer.Visualizers
             bool hideUnmatched = true)
         {
             var result = new OverrideResult();
-            var allMatchedItems = new HashSet<ModelItem>();
 
-            // Group items by stage for batch API calls
+            // Group items by stage
             var stageItems = new Dictionary<SpoolStage, List<ModelItem>>();
 
             var allSpoolIds = spools.Select(s => s.SpoolId).Distinct();
@@ -111,17 +103,14 @@ namespace NavisVisualizer.Visualizers
                     list = new List<ModelItem>();
                     stageItems[stage] = list;
                 }
-
-                foreach (var item in items)
-                {
-                    list.Add(item);
-                    foreach (var desc in item.DescendantsAndSelf)
-                        allMatchedItems.Add(desc);
-                    AddAncestors(allMatchedItems, item);
-                }
+                list.AddRange(items);
             }
 
-            // Batch: one API call per stage
+            // Step 1: Make everything transparent
+            if (hideUnmatched)
+                ApplyToAll(doc, ColorSetting.Unmatched);
+
+            // Step 2: Override matched items by stage
             foreach (var kv in stageItems)
             {
                 if (colorSettings.TryGetValue(kv.Key, out var setting))
@@ -131,15 +120,25 @@ namespace NavisVisualizer.Visualizers
                 }
             }
 
-            if (hideUnmatched)
-                ApplyUnmatchedOverride(doc, allMatchedItems);
-
             return result;
         }
 
         public void Reset(Document doc)
         {
             doc.Models.ResetAllPermanentMaterials();
+        }
+
+        /// <summary>
+        /// Apply color/transparency to ALL items in one API call.
+        /// Much faster than filtering unmatched items individually.
+        /// </summary>
+        private void ApplyToAll(Document doc, ColorSetting setting)
+        {
+            var all = new ModelItemCollection();
+            all.AddRange(doc.Models.RootItemDescendantsAndSelf);
+            var nwColor = ToNwColor(setting.DisplayColor);
+            doc.Models.OverridePermanentColor(all, nwColor);
+            doc.Models.OverridePermanentTransparency(all, setting.Transparency);
         }
 
         private void ApplyOverride(Document doc, List<ModelItem> items, ColorSetting setting)
@@ -150,29 +149,6 @@ namespace NavisVisualizer.Visualizers
             var nwColor = ToNwColor(setting.DisplayColor);
             doc.Models.OverridePermanentColor(collection, nwColor);
             doc.Models.OverridePermanentTransparency(collection, setting.Transparency);
-        }
-
-        private void ApplyUnmatchedOverride(Document doc, HashSet<ModelItem> matchedItems)
-        {
-            var unmatched = new List<ModelItem>();
-            foreach (var item in doc.Models.RootItemDescendantsAndSelf)
-            {
-                if (!matchedItems.Contains(item))
-                    unmatched.Add(item);
-            }
-
-            if (unmatched.Count == 0) return;
-            ApplyOverride(doc, unmatched, ColorSetting.Unmatched);
-        }
-
-        private void AddAncestors(HashSet<ModelItem> matchedItems, ModelItem item)
-        {
-            var parent = item.Parent;
-            while (parent != null)
-            {
-                if (!matchedItems.Add(parent)) break;
-                parent = parent.Parent;
-            }
         }
 
         private List<ModelItem> ExpandWithDescendants(List<ModelItem> items)
