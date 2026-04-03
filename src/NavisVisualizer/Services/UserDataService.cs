@@ -23,113 +23,102 @@ namespace NavisVisualizer.Services
         public string TestWriteOneProperty(ModelItem item)
         {
             var diag = new StringBuilder();
+            var bf = BindingFlags.InvokeMethod | BindingFlags.Public | BindingFlags.Instance;
+
             try
             {
-                string displayName = item.DisplayName ?? "(no name)";
                 diag.AppendLine($"=== 대상 아이템 ===");
-                diag.AppendLine($"DisplayName: {displayName}");
+                diag.AppendLine($"DisplayName: {item.DisplayName ?? "(none)"}");
                 diag.AppendLine($"ClassName: {item.ClassName}");
-                diag.AppendLine($"HasChildren: {item.Children.Any()}");
-                diag.AppendLine($"입력 시도: 카테고리=\"{CategoryDisplayName}\", 속성=\"Test Property\", 값=\"Hello\"");
+                diag.AppendLine($"입력: 카테고리=\"{CategoryDisplayName}\", 속성=\"Test\", 값=\"Hello\"");
                 diag.AppendLine();
 
                 dynamic comState = ComApiBridge.State;
                 ResolveEnums();
-                diag.AppendLine($"Enum: PropVec={_enumPropVec}, Prop={_enumProp}");
+                diag.AppendLine($"Enum OK");
 
-                dynamic comPath = ComApiBridge.ToInwOaPath(item);
-                Type pathType = ((object)comPath).GetType();
-                diag.AppendLine($"Path type: {pathType.Name}");
+                object comPath = (object)ComApiBridge.ToInwOaPath(item);
+                diag.AppendLine($"Path: {comPath.GetType().Name}");
 
-                // List interfaces on comPath
-                foreach (var iface in pathType.GetInterfaces())
+                // GetGUIPropertyNode via IDispatch (InvokeMember)
+                object stateObj = (object)comState;
+                object propNode = stateObj.GetType().InvokeMember(
+                    "GetGUIPropertyNode", bf, null, stateObj,
+                    new object[] { comPath, true });
+                diag.AppendLine($"PropNode: {propNode.GetType().Name}");
+
+                // Create property vector via IDispatch
+                object propVec = stateObj.GetType().InvokeMember(
+                    "ObjectFactory", bf, null, stateObj,
+                    new object[] { _enumPropVec });
+                diag.AppendLine($"PropVec: {propVec.GetType().Name}");
+
+                // Create property
+                object prop = stateObj.GetType().InvokeMember(
+                    "ObjectFactory", bf, null, stateObj,
+                    new object[] { _enumProp });
+                diag.AppendLine($"Prop: {prop.GetType().Name}");
+
+                // Set property fields via IDispatch
+                var propType = prop.GetType();
+                propType.InvokeMember("name", BindingFlags.SetProperty, null, prop, new object[] { "test_name" });
+                propType.InvokeMember("UserName", BindingFlags.SetProperty, null, prop, new object[] { "Test Property" });
+                propType.InvokeMember("value", BindingFlags.SetProperty, null, prop, new object[] { "Hello from NavisVisualizer" });
+                diag.AppendLine("Prop fields set");
+
+                // Add prop to propVec.Properties()
+                object propsCollection = propVec.GetType().InvokeMember(
+                    "Properties", bf, null, propVec, null);
+                propsCollection.GetType().InvokeMember(
+                    "Add", bf, null, propsCollection, new object[] { prop });
+                diag.AppendLine("Prop added to vec");
+
+                // Read UserDefined count before
+                object userDefBefore = null;
+                int countBefore = 0;
+                try
                 {
-                    if (iface.Name.Contains("Inw"))
-                        diag.AppendLine($"  Path iface: {iface.Name}");
+                    userDefBefore = propNode.GetType().InvokeMember(
+                        "UserDefined", bf, null, propNode, null);
+                    countBefore = (int)userDefBefore.GetType().InvokeMember(
+                        "Count", BindingFlags.GetProperty, null, userDefBefore, null);
+                    diag.AppendLine($"UserDefined count before: {countBefore}");
+                }
+                catch (Exception ex)
+                {
+                    diag.AppendLine($"UserDefined() failed: {ex.InnerException?.Message ?? ex.Message}");
+                    diag.AppendLine("Trying SetUserDefined anyway...");
                 }
 
-                dynamic propNode = comState.GetGUIPropertyNode(comPath, true);
-                Type nodeType = ((object)propNode).GetType();
-                diag.AppendLine($"PropNode type: {nodeType.Name}");
+                // Call SetUserDefined via IDispatch
+                propNode.GetType().InvokeMember(
+                    "SetUserDefined", bf, null, propNode,
+                    new object[] { 0, CategoryInternalName, CategoryDisplayName, propVec });
+                diag.AppendLine("SetUserDefined called OK!");
 
-                // List interfaces on propNode
-                foreach (var iface in nodeType.GetInterfaces())
+                // Verify
+                try
                 {
-                    if (iface.Name.Contains("Inw"))
-                        diag.AppendLine($"  Node iface: {iface.Name}");
-                }
+                    object userDefAfter = propNode.GetType().InvokeMember(
+                        "UserDefined", bf, null, propNode, null);
+                    int countAfter = (int)userDefAfter.GetType().InvokeMember(
+                        "Count", BindingFlags.GetProperty, null, userDefAfter, null);
+                    diag.AppendLine($"UserDefined count after: {countAfter}");
 
-                // Try to find SetUserDefined via interfaces
-                bool hasSetUserDefined = false;
-                bool hasUserDefined = false;
-                foreach (var iface in nodeType.GetInterfaces())
-                {
-                    foreach (var method in iface.GetMethods())
-                    {
-                        if (method.Name == "SetUserDefined") hasSetUserDefined = true;
-                        if (method.Name == "UserDefined") hasUserDefined = true;
-                    }
-                }
-                diag.AppendLine($"HasSetUserDefined: {hasSetUserDefined}");
-                diag.AppendLine($"HasUserDefined: {hasUserDefined}");
-
-                // If InwGUIPropertyNode2 interface exists, try casting
-                Type node2Type = null;
-                foreach (var iface in nodeType.GetInterfaces())
-                {
-                    if (iface.Name.Contains("PropertyNode2") || iface.Name.Contains("GUIPropertyNode2"))
-                    {
-                        node2Type = iface;
-                        diag.AppendLine($"Found v2 interface: {iface.FullName}");
-                        break;
-                    }
-                }
-
-                if (node2Type != null)
-                {
-                    // Use reflection to call SetUserDefined via the v2 interface
-                    dynamic propVec = comState.ObjectFactory(_enumPropVec);
-                    dynamic prop = comState.ObjectFactory(_enumProp);
-                    prop.name = "test_name";
-                    prop.UserName = "Test Property";
-                    prop.value = "Hello";
-                    propVec.Properties().Add(prop);
-                    diag.AppendLine($"PropVec created, count: {propVec.Properties().Count}");
-
-                    // Call via reflection
-                    var setMethod = node2Type.GetMethod("SetUserDefined");
-                    if (setMethod != null)
-                    {
-                        diag.AppendLine($"SetUserDefined params: {string.Join(", ", Array.ConvertAll(setMethod.GetParameters(), p => p.ParameterType.Name + " " + p.Name))}");
-                        setMethod.Invoke((object)propNode, new object[] { 0, CategoryInternalName, CategoryDisplayName, (object)propVec });
-                        diag.AppendLine("SetUserDefined called via reflection!");
-
-                        var getMethod = node2Type.GetMethod("UserDefined");
-                        if (getMethod != null)
-                        {
-                            dynamic userDef = getMethod.Invoke((object)propNode, null);
-                            diag.AppendLine($"UserDefined count after: {userDef.Count}");
-                        }
-                    }
+                    if (countAfter > countBefore)
+                        diag.AppendLine("SUCCESS! 속성이 추가되었습니다.");
                     else
-                    {
-                        diag.AppendLine("SetUserDefined method NOT found on v2 interface");
-                    }
+                        diag.AppendLine("FAIL: count 변화 없음");
                 }
-                else
+                catch (Exception ex)
                 {
-                    diag.AppendLine("No v2 interface found. Listing all interface methods:");
-                    foreach (var iface in nodeType.GetInterfaces())
-                    {
-                        if (!iface.Name.Contains("Inw")) continue;
-                        foreach (var m in iface.GetMethods())
-                            diag.AppendLine($"  {iface.Name}.{m.Name}");
-                    }
+                    diag.AppendLine($"Verify failed: {ex.InnerException?.Message ?? ex.Message}");
                 }
             }
             catch (Exception ex)
             {
-                diag.AppendLine($"EXCEPTION: {ex.GetType().Name}: {ex.Message}");
+                var inner = ex.InnerException;
+                diag.AppendLine($"EXCEPTION: {(inner ?? ex).GetType().Name}: {(inner ?? ex).Message}");
             }
 
             return diag.ToString();
