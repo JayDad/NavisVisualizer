@@ -31,9 +31,5 @@
       <HintPath>C:\Program Files\Autodesk\Navisworks Simulate 2022\Autodesk.Navisworks.ComApi.dll</HintPath>
       <Private>false</Private>
     </Reference>
-    <Reference Include="Autodesk.Navisworks.Interop.ComApi">
-      <HintPath>C:\Program Files\Autodesk\Navisworks Simulate 2022\Autodesk.Navisworks.Interop.ComApi.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
   </ItemGroup>
 </Project>
