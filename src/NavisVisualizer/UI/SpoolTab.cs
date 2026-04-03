@@ -16,10 +16,15 @@ namespace NavisVisualizer.UI
         private List<SpoolData> _spools = new List<SpoolData>();
         private Dictionary<SpoolStage, ColorSetting> _colorSettings;
 
+        // Match tracking
+        private HashSet<string> _matchedSpoolIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private List<string> _unmatchedSpoolIds = new List<string>();
+
         private Button   _btnLoad;
         private Label    _lblFile;
         private DateTimePicker _dtpReference;
         private TextBox  _txtSearch;
+        private TabControl _tabFilter;
         private ListView _listView;
         private Button   _btnApply;
         private Button   _btnReset;
@@ -75,13 +80,26 @@ namespace NavisVisualizer.UI
 
             var colorPanels = BuildColorPanel();
 
+            // Search box
             _txtSearch = new TextBox { Dock = DockStyle.Fill, Text = "" };
             _txtSearch.TextChanged += (s, e) => FilterList();
+
+            // Stats label
+            _lblStats = new Label { Dock = DockStyle.Fill, Text = "로드된 데이터 없음", AutoSize = false, Height = 40 };
+
+            // Filter tabs: 전체 / 매칭 / 미매칭
+            _tabFilter = new TabControl { Dock = DockStyle.Fill, Height = 230 };
+            var tabAll       = new TabPage("전체");
+            var tabMatched   = new TabPage("매칭");
+            var tabUnmatched = new TabPage("미매칭");
+            _tabFilter.TabPages.Add(tabAll);
+            _tabFilter.TabPages.Add(tabMatched);
+            _tabFilter.TabPages.Add(tabUnmatched);
+            _tabFilter.SelectedIndexChanged += (s, e) => FilterList();
 
             _listView = new ListView
             {
                 Dock = DockStyle.Fill,
-                Height = 200,
                 FullRowSelect = true,
                 GridLines = true,
                 View = View.Details,
@@ -89,7 +107,20 @@ namespace NavisVisualizer.UI
             _listView.Columns.Add("Spool ID", 140);
             _listView.Columns.Add("ISO No", 120);
             _listView.Columns.Add("단계", 80);
+            _listView.Columns.Add("매칭", 45);
             _listView.SelectedIndexChanged += ListView_SelectedIndexChanged;
+
+            // ListView goes into the first tab, but we'll manage it by moving it
+            tabAll.Controls.Add(_listView);
+            _tabFilter.SelectedIndexChanged += (s, e) =>
+            {
+                // Move ListView to the selected tab
+                var selectedTab = _tabFilter.SelectedTab;
+                if (!selectedTab.Controls.Contains(_listView))
+                {
+                    selectedTab.Controls.Add(_listView);
+                }
+            };
 
             _chkWriteProps = new CheckBox { Text = "실적 속성 삽입", Checked = false, AutoSize = true };
 
@@ -105,7 +136,6 @@ namespace NavisVisualizer.UI
             btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnReset, _chkWriteProps, _btnViewpoint, _btnNwd });
 
             _progressBar = new ProgressBar { Dock = DockStyle.Fill, Height = 12, Visible = false };
-            _lblStats    = new Label       { Dock = DockStyle.Fill, Text = "로드된 데이터 없음", AutoSize = false, Height = 40 };
 
             layout.Controls.Add(_btnLoad);
             layout.Controls.Add(_lblFile);
@@ -114,13 +144,11 @@ namespace NavisVisualizer.UI
             layout.Controls.Add(colorPanels.fabPanel);
             layout.Controls.Add(new Label { Text = "Install", Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 18 });
             layout.Controls.Add(colorPanels.instPanel);
-            layout.Controls.Add(_txtSearch);
-            // Stats above the list
-            layout.Controls.Add(_lblStats);
-            layout.Controls.Add(new Label { Text = "Spool 목록", Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 18 });
-            layout.Controls.Add(_listView);
             layout.Controls.Add(btnPanel);
             layout.Controls.Add(_progressBar);
+            layout.Controls.Add(_lblStats);
+            layout.Controls.Add(_txtSearch);
+            layout.Controls.Add(_tabFilter);
 
             Controls.Add(layout);
         }
@@ -207,6 +235,8 @@ namespace NavisVisualizer.UI
                 {
                     _spools = ExcelLoader.LoadSpool(dlg.FileName);
                     _lblFile.Text = Path.GetFileName(dlg.FileName);
+                    _matchedSpoolIds.Clear();
+                    _unmatchedSpoolIds.Clear();
                     FilterList();
                     UpdateStats();
                     if (!_main.Searcher.IsIndexBuilt)
@@ -254,6 +284,18 @@ namespace NavisVisualizer.UI
             var referenceDate = _dtpReference.Value;
             var result = _main.OverrideEngine.ApplySpool(doc, _spools, activeSettings, referenceDate);
 
+            // Update match tracking
+            _unmatchedSpoolIds = result.UnmatchedIds;
+            var unmatchedSet = new HashSet<string>(result.UnmatchedIds, StringComparer.OrdinalIgnoreCase);
+            _matchedSpoolIds = new HashSet<string>(
+                _spools.Select(s => s.SpoolId).Where(id => !unmatchedSet.Contains(id)),
+                StringComparer.OrdinalIgnoreCase);
+
+            // Update tab titles with counts
+            _tabFilter.TabPages[0].Text = $"전체 ({_spools.Count})";
+            _tabFilter.TabPages[1].Text = $"매칭 ({_matchedSpoolIds.Count})";
+            _tabFilter.TabPages[2].Text = $"미매칭 ({_unmatchedSpoolIds.Count})";
+
             // Write user-defined properties if checked
             if (_chkWriteProps.Checked)
             {
@@ -274,6 +316,8 @@ namespace NavisVisualizer.UI
             {
                 UpdateStats(result.MatchedCount, result.UnmatchedCount);
             }
+
+            FilterList();
         }
 
         private void BtnReset_Click(object sender, EventArgs e)
@@ -330,11 +374,20 @@ namespace NavisVisualizer.UI
         {
             string keyword = _txtSearch?.Text?.Trim().ToUpperInvariant() ?? "";
             var referenceDate = _dtpReference.Value;
+            int tabIndex = _tabFilter.SelectedIndex; // 0=전체, 1=매칭, 2=미매칭
 
-            var filtered = string.IsNullOrEmpty(keyword)
-                ? _spools
-                : _spools.Where(s => s.SpoolId.ToUpperInvariant().Contains(keyword)
-                    || (s.IsoNo ?? "").ToUpperInvariant().Contains(keyword)).ToList();
+            var filtered = _spools.AsEnumerable();
+
+            // Tab filter
+            if (tabIndex == 1 && _matchedSpoolIds.Count > 0)
+                filtered = filtered.Where(s => _matchedSpoolIds.Contains(s.SpoolId));
+            else if (tabIndex == 2 && _unmatchedSpoolIds.Count > 0)
+                filtered = filtered.Where(s => _unmatchedSpoolIds.Contains(s.SpoolId));
+
+            // Text search filter
+            if (!string.IsNullOrEmpty(keyword))
+                filtered = filtered.Where(s => s.SpoolId.ToUpperInvariant().Contains(keyword)
+                    || (s.IsoNo ?? "").ToUpperInvariant().Contains(keyword));
 
             _listView.Items.Clear();
 
@@ -342,13 +395,17 @@ namespace NavisVisualizer.UI
             {
                 var stage = spool.GetStageAtDate(referenceDate);
                 string stageLabel = SpoolStageInfo.Labels.TryGetValue(stage, out var lbl) ? lbl : stage.ToString();
+                bool isMatched = _matchedSpoolIds.Count == 0 || _matchedSpoolIds.Contains(spool.SpoolId);
 
                 var item = new ListViewItem(spool.SpoolId);
                 item.SubItems.Add(spool.IsoNo ?? "");
                 item.SubItems.Add(stageLabel);
+                item.SubItems.Add(isMatched ? "O" : "X");
                 item.Tag = spool;
                 if (_colorSettings.TryGetValue(stage, out var setting))
                     item.ForeColor = setting.DisplayColor;
+                if (!isMatched && _matchedSpoolIds.Count > 0)
+                    item.ForeColor = Color.Red;
                 _listView.Items.Add(item);
             }
         }
