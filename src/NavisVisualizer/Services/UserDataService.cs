@@ -64,42 +64,71 @@ namespace NavisVisualizer.Services
             if (_enumPropVec != null) return;
 
             Type enumType = null;
+            var diagInfo = new List<string>();
 
-            // Strategy 1: Search all loaded assemblies
+            // Strategy 1: Search all loaded assemblies for any type named nwEObjectType
             foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
             {
-                enumType = asm.GetType("Autodesk.Navisworks.Interop.ComApi.nwEObjectType");
+                string asmName = asm.GetName().Name;
+                if (asmName.Contains("Navisworks") && asmName.Contains("Interop"))
+                {
+                    diagInfo.Add($"Found assembly: {asmName}");
+                    // Search all types for the enum
+                    try
+                    {
+                        foreach (var t in asm.GetExportedTypes())
+                        {
+                            if (t.IsEnum && t.Name == "nwEObjectType")
+                            {
+                                enumType = t;
+                                diagInfo.Add($"Found enum: {t.FullName}");
+                                break;
+                            }
+                        }
+                    }
+                    catch (Exception ex) { diagInfo.Add($"GetExportedTypes failed: {ex.Message}"); }
+                }
                 if (enumType != null) break;
             }
 
-            // Strategy 2: Force-load the Interop assembly by name
+            // Strategy 2: Force-load and search
             if (enumType == null)
             {
                 try
                 {
-                    var asm = Assembly.Load("Autodesk.Navisworks.Interop.ComApi");
-                    enumType = asm.GetType("Autodesk.Navisworks.Interop.ComApi.nwEObjectType");
-                }
-                catch { }
-            }
+                    string navisDir = System.IO.Path.GetDirectoryName(
+                        typeof(Autodesk.Navisworks.Api.Application).Assembly.Location);
+                    diagInfo.Add($"Navisworks dir: {navisDir}");
 
-            // Strategy 3: Load from Navisworks install directory
-            if (enumType == null)
-            {
-                try
-                {
-                    string navisDir = System.IO.Path.GetDirectoryName(typeof(Autodesk.Navisworks.Api.Application).Assembly.Location);
                     string dllPath = System.IO.Path.Combine(navisDir, "Autodesk.Navisworks.Interop.ComApi.dll");
-                    var asm = Assembly.LoadFrom(dllPath);
-                    enumType = asm.GetType("Autodesk.Navisworks.Interop.ComApi.nwEObjectType");
+                    bool exists = System.IO.File.Exists(dllPath);
+                    diagInfo.Add($"DLL exists: {exists}");
+
+                    if (exists)
+                    {
+                        var asm = Assembly.LoadFrom(dllPath);
+                        diagInfo.Add($"Loaded: {asm.FullName}");
+                        foreach (var t in asm.GetExportedTypes())
+                        {
+                            if (t.IsEnum && t.Name.Contains("ObjectType"))
+                            {
+                                diagInfo.Add($"Enum found: {t.FullName}");
+                                if (t.Name == "nwEObjectType")
+                                {
+                                    enumType = t;
+                                    break;
+                                }
+                            }
+                        }
+                    }
                 }
-                catch { }
+                catch (Exception ex) { diagInfo.Add($"Strategy 2 failed: {ex.Message}"); }
             }
 
             if (enumType == null)
                 throw new Exception(
                     "nwEObjectType enum을 찾을 수 없습니다.\n" +
-                    "Autodesk.Navisworks.Interop.ComApi.dll이 설치되어 있는지 확인하세요.");
+                    string.Join("\n", diagInfo));
 
             _enumPropVec = Enum.Parse(enumType, "eObjectType_nwOaPropertyVec");
             _enumProp = Enum.Parse(enumType, "eObjectType_nwOaProperty");
