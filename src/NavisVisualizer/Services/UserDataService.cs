@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Runtime.InteropServices;
 using Autodesk.Navisworks.Api;
 using Autodesk.Navisworks.Api.ComApi;
 using NavisVisualizer.Models;
@@ -14,7 +13,6 @@ namespace NavisVisualizer.Services
 
         /// <summary>
         /// Writes spool performance data as user-defined properties on matched model items.
-        /// Uses dynamic COM interop to avoid hard dependency on Interop.ComApi namespace.
         /// </summary>
         public int WriteSpoolProperties(
             List<SpoolData> spools,
@@ -23,6 +21,7 @@ namespace NavisVisualizer.Services
         {
             dynamic comState = ComApiBridge.State;
             int written = 0;
+            string lastError = null;
 
             foreach (var spool in spools)
             {
@@ -37,51 +36,35 @@ namespace NavisVisualizer.Services
                     {
                         dynamic comPath = ComApiBridge.ToInwOaPath(item);
                         dynamic properties = BuildProperties(comState, spool, stage);
-                        comPath.UserDefined.SetUserDefined(
+
+                        // SetUserDefined is a method on State, not on Path
+                        comState.SetUserDefined(
+                            comPath,
                             0,
                             CategoryInternalName,
                             CategoryDisplayName,
                             properties);
                         written++;
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        lastError = ex.Message;
+                    }
                 }
             }
+
+            if (written == 0 && lastError != null)
+                throw new Exception($"속성 삽입 실패: {lastError}");
 
             return written;
         }
 
-        /// <summary>
-        /// Removes spool performance data from all model items.
-        /// </summary>
-        public void ClearSpoolProperties(Document doc)
-        {
-            foreach (var item in doc.Models.RootItemDescendantsAndSelf)
-            {
-                try
-                {
-                    dynamic comPath = ComApiBridge.ToInwOaPath(item);
-                    dynamic userDefined = comPath.UserDefined;
-                    int count = userDefined.Count;
-                    for (int i = 1; i <= count; i++)
-                    {
-                        dynamic tab = userDefined[i];
-                        if ((string)tab.UserName == CategoryDisplayName ||
-                            (string)tab.Name == CategoryInternalName)
-                        {
-                            userDefined.RemoveUserDefined(i);
-                            break;
-                        }
-                    }
-                }
-                catch { }
-            }
-        }
-
         private dynamic BuildProperties(dynamic comState, SpoolData spool, SpoolStage currentStage)
         {
-            // eObjectType_nwOaPropertyVec = 1
-            dynamic properties = comState.ObjectFactory(1, null, null);
+            // nwEObjectType.eObjectType_nwOaPropertyVec
+            dynamic properties = comState.ObjectFactory(
+                (dynamic)Enum.Parse(GetEnumType(comState), "eObjectType_nwOaPropertyVec"),
+                null, null);
 
             AddProperty(comState, properties, "Spool Number", spool.SpoolId);
 
@@ -105,12 +88,35 @@ namespace NavisVisualizer.Services
 
         private void AddProperty(dynamic comState, dynamic properties, string name, string value)
         {
-            // eObjectType_nwOaProperty = 2
-            dynamic prop = comState.ObjectFactory(2, null, null);
+            // nwEObjectType.eObjectType_nwOaProperty
+            dynamic prop = comState.ObjectFactory(
+                (dynamic)Enum.Parse(GetEnumType(comState), "eObjectType_nwOaProperty"),
+                null, null);
             prop.name = name;
             prop.UserName = name;
             prop.value = value;
             properties.Properties().Add(prop);
+        }
+
+        private Type _enumType;
+        private Type GetEnumType(dynamic comState)
+        {
+            if (_enumType == null)
+            {
+                // Find nwEObjectType enum from the same assembly as the COM state
+                Type stateType = ((object)comState).GetType();
+                _enumType = stateType.Assembly.GetType("Autodesk.Navisworks.Interop.ComApi.nwEObjectType");
+                if (_enumType == null)
+                {
+                    // Fallback: search all loaded assemblies
+                    foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+                    {
+                        _enumType = asm.GetType("Autodesk.Navisworks.Interop.ComApi.nwEObjectType");
+                        if (_enumType != null) break;
+                    }
+                }
+            }
+            return _enumType;
         }
     }
 }
