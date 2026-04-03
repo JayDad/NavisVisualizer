@@ -34,6 +34,9 @@ namespace NavisVisualizer.UI
         private Label    _lblStats;
         private ProgressBar _progressBar;
 
+        private int _sortColumn = -1;
+        private bool _sortAscending = true;
+
         private Dictionary<SpoolStage, (Panel colorBox, Button colorBtn, ComboBox transparencyBox, CheckBox check)> _colorRows
             = new Dictionary<SpoolStage, (Panel, Button, ComboBox, CheckBox)>();
 
@@ -109,6 +112,7 @@ namespace NavisVisualizer.UI
             _listView.Columns.Add("단계", 80);
             _listView.Columns.Add("매칭", 45);
             _listView.SelectedIndexChanged += ListView_SelectedIndexChanged;
+            _listView.ColumnClick += ListView_ColumnClick;
 
             // ListView goes into the first tab, but we'll manage it by moving it
             tabAll.Controls.Add(_listView);
@@ -368,6 +372,32 @@ namespace NavisVisualizer.UI
             collection.AddRange(items);
             doc.CurrentSelection.CopyFrom(collection);
             doc.ActiveView.FocusOnCurrentSelection();
+        }
+
+        private void ListView_ColumnClick(object sender, ColumnClickEventArgs e)
+        {
+            if (e.Column == _sortColumn)
+                _sortAscending = !_sortAscending;
+            else
+            {
+                _sortColumn = e.Column;
+                _sortAscending = true;
+            }
+            _listView.ListViewItemSorter = new ListViewItemComparer(_sortColumn, _sortAscending);
+            _listView.Sort();
+        }
+
+        private class ListViewItemComparer : System.Collections.IComparer
+        {
+            private readonly int _col;
+            private readonly int _dir;
+            public ListViewItemComparer(int column, bool ascending) { _col = column; _dir = ascending ? 1 : -1; }
+            public int Compare(object x, object y)
+            {
+                string a = ((ListViewItem)x).SubItems[_col].Text;
+                string b = ((ListViewItem)y).SubItems[_col].Text;
+                return string.Compare(a, b, StringComparison.OrdinalIgnoreCase) * _dir;
+            }
         }
 
         private void FilterList()
