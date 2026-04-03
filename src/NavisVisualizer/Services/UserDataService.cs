@@ -10,8 +10,8 @@ namespace NavisVisualizer.Services
 {
     public class UserDataService
     {
-        private const string CategoryDisplayName = "Spool 실적";
-        private const string CategoryInternalName = "LcOaNvSpool";
+        private const string CategoryDisplayName = "User Property";
+        private const string CategoryInternalName = "User Property";
 
         private static object _enumPropVec;
         private static object _enumProp;
@@ -129,8 +129,9 @@ namespace NavisVisualizer.Services
             Dictionary<string, List<ModelItem>> searchResult,
             DateTime referenceDate)
         {
-            dynamic comState = ComApiBridge.State;
+            object comState = (object)ComApiBridge.State;
             ResolveEnums();
+            var bf = BindingFlags.InvokeMethod | BindingFlags.Public | BindingFlags.Instance;
 
             int written = 0;
             int attempted = 0;
@@ -148,22 +149,43 @@ namespace NavisVisualizer.Services
                     attempted++;
                     try
                     {
-                        dynamic comPath = ComApiBridge.ToInwOaPath(item);
-                        dynamic propNode = comState.GetGUIPropertyNode(comPath, true);
-                        dynamic propVec = comState.ObjectFactory(_enumPropVec);
+                        object comPath = (object)ComApiBridge.ToInwOaPath(item);
+                        object propNode = comState.GetType().InvokeMember(
+                            "GetGUIPropertyNode", bf, null, comState, new object[] { comPath, true });
+                        object propVec = comState.GetType().InvokeMember(
+                            "ObjectFactory", bf, null, comState, new object[] { _enumPropVec });
 
-                        AddProp(comState, propVec, "test_id", "Spool Number", spool.SpoolId);
+                        // Spool Number
+                        AddProp(comState, propVec, bf, "SpoolNumber", "Spool Number", spool.SpoolId);
 
+                        // ISO No
+                        if (!string.IsNullOrEmpty(spool.IsoNo))
+                            AddProp(comState, propVec, bf, "IsoNo", "ISO No", spool.IsoNo);
+
+                        // Current Stage
                         string stageLabel = SpoolStageInfo.Labels.TryGetValue(stage, out var lbl)
                             ? lbl : stage.ToString();
-                        AddProp(comState, propVec, "test_stage", "현재 단계", stageLabel);
+                        AddProp(comState, propVec, bf, "CurrentStage", "현재 단계", stageLabel);
 
-                        propNode.SetUserDefined(0, CategoryInternalName, CategoryDisplayName, propVec);
+                        // All stage dates
+                        foreach (var s in SpoolStageInfo.OrderedStages)
+                        {
+                            string label = SpoolStageInfo.Labels[s];
+                            string dateStr = spool.StageDates.TryGetValue(s, out var date) && date.HasValue
+                                ? date.Value.ToString("yyyy-MM-dd") : "";
+                            AddProp(comState, propVec, bf, s.ToString(), label, dateStr);
+                        }
+
+                        // Write
+                        propNode.GetType().InvokeMember(
+                            "SetUserDefined", bf, null, propNode,
+                            new object[] { 0, CategoryInternalName, CategoryDisplayName, propVec });
                         written++;
                     }
                     catch (Exception ex)
                     {
-                        lastError = ex.GetType().Name + ": " + ex.Message;
+                        var inner = ex.InnerException;
+                        lastError = (inner ?? ex).GetType().Name + ": " + (inner ?? ex).Message;
                     }
                 }
             }
@@ -176,13 +198,18 @@ namespace NavisVisualizer.Services
             return written;
         }
 
-        private void AddProp(dynamic comState, dynamic propVec, string internalName, string displayName, string value)
+        private void AddProp(object comState, object propVec, BindingFlags bf,
+            string internalName, string displayName, string value)
         {
-            dynamic prop = comState.ObjectFactory(_enumProp);
-            prop.name = internalName;
-            prop.UserName = displayName;
-            prop.value = value;
-            propVec.Properties().Add(prop);
+            object prop = comState.GetType().InvokeMember(
+                "ObjectFactory", bf, null, comState, new object[] { _enumProp });
+            var propType = prop.GetType();
+            propType.InvokeMember("name", BindingFlags.SetProperty, null, prop, new object[] { internalName });
+            propType.InvokeMember("UserName", BindingFlags.SetProperty, null, prop, new object[] { displayName });
+            propType.InvokeMember("value", BindingFlags.SetProperty, null, prop, new object[] { value });
+
+            object propsCol = propVec.GetType().InvokeMember("Properties", bf, null, propVec, null);
+            propsCol.GetType().InvokeMember("Add", bf, null, propsCol, new object[] { prop });
         }
 
         private static void ResolveEnums()
