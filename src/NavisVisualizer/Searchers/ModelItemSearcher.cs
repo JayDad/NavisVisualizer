@@ -9,29 +9,32 @@ namespace NavisVisualizer.Searchers
     {
         private Dictionary<string, List<ModelItem>> _index;
         private bool _isBuilt = false;
+        private string _lastDocumentId;
 
         public bool IsIndexBuilt => _isBuilt;
         public int IndexedCount => _index?.Count ?? 0;
+
+        /// <summary>
+        /// Check if index needs rebuild (model changed or never built).
+        /// </summary>
+        public bool NeedsRebuild(Document doc)
+        {
+            if (!_isBuilt) return true;
+            string currentId = GetDocumentId(doc);
+            return currentId != _lastDocumentId;
+        }
 
         public void BuildIndex(Document doc, Action<int, int> onProgress = null)
         {
             _index = new Dictionary<string, List<ModelItem>>(StringComparer.OrdinalIgnoreCase);
             _isBuilt = false;
+            _lastDocumentId = GetDocumentId(doc);
 
-            // Only index group/container nodes (items with children).
-            // Leaf geometry items (Pipe, Elbow, etc.) are not matching targets
-            // and will be reached via ExpandWithDescendants.
             int current = 0;
-            int progressInterval = 0;
 
             foreach (var item in doc.Models.RootItemDescendantsAndSelf)
             {
                 current++;
-                if (onProgress != null && ++progressInterval >= 500)
-                {
-                    progressInterval = 0;
-                    onProgress.Invoke(current, 0); // total unknown, report current count
-                }
 
                 // Skip leaf geometry — only index containers
                 if (!item.Children.Any()) continue;
@@ -51,7 +54,6 @@ namespace NavisVisualizer.Searchers
                 list.Add(item);
             }
 
-            onProgress?.Invoke(current, current);
             _isBuilt = true;
         }
 
@@ -70,6 +72,25 @@ namespace NavisVisualizer.Searchers
             return result;
         }
 
-        public void Reset() => _isBuilt = false;
+        public void Reset()
+        {
+            _isBuilt = false;
+            _lastDocumentId = null;
+        }
+
+        private string GetDocumentId(Document doc)
+        {
+            // Use file path + model count as a simple identity check
+            try
+            {
+                string path = doc.FileName ?? "";
+                int modelCount = doc.Models.Count;
+                return $"{path}|{modelCount}";
+            }
+            catch
+            {
+                return Guid.NewGuid().ToString();
+            }
+        }
     }
 }
