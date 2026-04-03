@@ -41,7 +41,8 @@ namespace NavisVisualizer.Services
                     {
                         dynamic comPath = ComApiBridge.ToInwOaPath(item);
                         dynamic properties = BuildProperties(comState, spool, stage);
-                        comState.SetUserDefined(comPath, 0, CategoryInternalName, CategoryDisplayName, properties);
+                        dynamic propNode = comState.GetGUIPropertyNode(comPath, true);
+                        propNode.SetUserDefined(0, CategoryInternalName, CategoryDisplayName, properties);
                         written++;
                     }
                     catch (Exception ex)
