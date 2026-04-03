@@ -5,32 +5,54 @@ using System.Linq;
 
 namespace NavisVisualizer.Models
 {
-    public enum HydrotestStatus
+    public enum HydrotestStage
     {
         NotStarted,
-        Completed,
-        Recovery
+        Review,          // Review
+        LineInspection,  // Line inspection
+        Flushing,        // Flushing
+        Hydrotest,       // Hydrotest
+        Drying,          // Drying
+        Reinstatement,   // Reinstatement
+    }
+
+    public static class HydrotestStageInfo
+    {
+        public static readonly HydrotestStage[] OrderedStages =
+        {
+            HydrotestStage.Review, HydrotestStage.LineInspection, HydrotestStage.Flushing,
+            HydrotestStage.Hydrotest, HydrotestStage.Drying, HydrotestStage.Reinstatement
+        };
+
+        public static readonly Dictionary<HydrotestStage, string> Labels = new Dictionary<HydrotestStage, string>
+        {
+            [HydrotestStage.NotStarted]     = "미착수",
+            [HydrotestStage.Review]         = "Review",
+            [HydrotestStage.LineInspection] = "Line Insp.",
+            [HydrotestStage.Flushing]       = "Flushing",
+            [HydrotestStage.Hydrotest]      = "Hydrotest",
+            [HydrotestStage.Drying]         = "Drying",
+            [HydrotestStage.Reinstatement]  = "Reinstate",
+        };
+
+        public static readonly Dictionary<string, HydrotestStage> ColumnMap = new Dictionary<string, HydrotestStage>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Review"]          = HydrotestStage.Review,
+            ["Line inspection"] = HydrotestStage.LineInspection,
+            ["Line Inspection"] = HydrotestStage.LineInspection,
+            ["Flushing"]        = HydrotestStage.Flushing,
+            ["Hydrotest"]       = HydrotestStage.Hydrotest,
+            ["Drying"]          = HydrotestStage.Drying,
+            ["Reinstatement"]   = HydrotestStage.Reinstatement,
+        };
     }
 
     public enum SpoolStage
     {
         NotStarted,
-        // Fabrication
-        BV,           // B/V (Bevel)
-        FitUp,        // F/up
-        WeldDone,     // W/D
-        NDE,          // NDE
-        PWHT,         // PWHT
-        ShipOut,      // S/out
-        PostProcess,  // G-후공정인계
-        Galvanizing,  // Galv2
-        Paint1,       // Pnt1
-        Paint2,       // Pnt2
-        Stock,        // Stock
-        HandOver,     // H/O일자
-        // Install
-        Setting,      // Setting
-        Welding,      // Welding
+        BV, FitUp, WeldDone, NDE, PWHT, ShipOut, PostProcess,
+        Galvanizing, Paint1, Paint2, Stock, HandOver,
+        Setting, Welding,
     }
 
     public static class SpoolStageInfo
@@ -62,23 +84,14 @@ namespace NavisVisualizer.Models
             [SpoolStage.Welding]     = "Welding",
         };
 
-        /// <summary>Excel column header → SpoolStage mapping</summary>
         public static readonly Dictionary<string, SpoolStage> ColumnMap = new Dictionary<string, SpoolStage>(StringComparer.OrdinalIgnoreCase)
         {
-            ["B/V"]        = SpoolStage.BV,
-            ["F/up"]       = SpoolStage.FitUp,
-            ["W/D"]        = SpoolStage.WeldDone,
-            ["NDE"]        = SpoolStage.NDE,
-            ["PWHT"]       = SpoolStage.PWHT,
-            ["S/out"]      = SpoolStage.ShipOut,
-            ["G-후공정인계"] = SpoolStage.PostProcess,
-            ["Galv2"]      = SpoolStage.Galvanizing,
-            ["Pnt1"]       = SpoolStage.Paint1,
-            ["Pnt2"]       = SpoolStage.Paint2,
-            ["Stock"]      = SpoolStage.Stock,
-            ["H/O일자"]    = SpoolStage.HandOver,
-            ["Setting"]    = SpoolStage.Setting,
-            ["Welding"]    = SpoolStage.Welding,
+            ["B/V"] = SpoolStage.BV, ["F/up"] = SpoolStage.FitUp, ["W/D"] = SpoolStage.WeldDone,
+            ["NDE"] = SpoolStage.NDE, ["PWHT"] = SpoolStage.PWHT, ["S/out"] = SpoolStage.ShipOut,
+            ["G-후공정인계"] = SpoolStage.PostProcess, ["Galv2"] = SpoolStage.Galvanizing,
+            ["Pnt1"] = SpoolStage.Paint1, ["Pnt2"] = SpoolStage.Paint2,
+            ["Stock"] = SpoolStage.Stock, ["H/O일자"] = SpoolStage.HandOver,
+            ["Setting"] = SpoolStage.Setting, ["Welding"] = SpoolStage.Welding,
         };
 
         public static readonly SpoolStage[] FabricationStages =
@@ -102,19 +115,22 @@ namespace NavisVisualizer.Models
         public ColorSetting Clone() =>
             new ColorSetting { DisplayColor = DisplayColor, Transparency = Transparency };
 
-        public static Dictionary<HydrotestStatus, ColorSetting> HydrotestDefaults =>
-            new Dictionary<HydrotestStatus, ColorSetting>
+        public static Dictionary<HydrotestStage, ColorSetting> HydrotestDefaults =>
+            new Dictionary<HydrotestStage, ColorSetting>
             {
-                [HydrotestStatus.NotStarted] = new ColorSetting { DisplayColor = Color.FromArgb(169, 169, 169), Transparency = 0.7 },
-                [HydrotestStatus.Completed]  = new ColorSetting { DisplayColor = Color.FromArgb(34, 139, 34),   Transparency = 0.0 },
-                [HydrotestStatus.Recovery]   = new ColorSetting { DisplayColor = Color.FromArgb(220, 20, 60),   Transparency = 0.0 },
+                [HydrotestStage.NotStarted]     = new ColorSetting { DisplayColor = Color.FromArgb(169, 169, 169), Transparency = 0.7 },
+                [HydrotestStage.Review]         = new ColorSetting { DisplayColor = Color.FromArgb(255, 235, 130), Transparency = 0.2 },
+                [HydrotestStage.LineInspection] = new ColorSetting { DisplayColor = Color.FromArgb(255, 215, 0),   Transparency = 0.0 },
+                [HydrotestStage.Flushing]       = new ColorSetting { DisplayColor = Color.FromArgb(135, 206, 235), Transparency = 0.0 },
+                [HydrotestStage.Hydrotest]      = new ColorSetting { DisplayColor = Color.FromArgb(65, 105, 225),  Transparency = 0.0 },
+                [HydrotestStage.Drying]         = new ColorSetting { DisplayColor = Color.FromArgb(138, 43, 226),  Transparency = 0.0 },
+                [HydrotestStage.Reinstatement]  = new ColorSetting { DisplayColor = Color.FromArgb(0, 128, 0),     Transparency = 0.0 },
             };
 
         public static Dictionary<SpoolStage, ColorSetting> SpoolDefaults =>
             new Dictionary<SpoolStage, ColorSetting>
             {
                 [SpoolStage.NotStarted]   = new ColorSetting { DisplayColor = Color.FromArgb(169, 169, 169), Transparency = 0.7  },
-                // Fabrication - warm progression
                 [SpoolStage.BV]           = new ColorSetting { DisplayColor = Color.FromArgb(255, 255, 180), Transparency = 0.2  },
                 [SpoolStage.FitUp]        = new ColorSetting { DisplayColor = Color.FromArgb(255, 235, 130), Transparency = 0.2  },
                 [SpoolStage.WeldDone]     = new ColorSetting { DisplayColor = Color.FromArgb(255, 215, 0),   Transparency = 0.0  },
@@ -127,7 +143,6 @@ namespace NavisVisualizer.Models
                 [SpoolStage.Paint2]       = new ColorSetting { DisplayColor = Color.FromArgb(100, 149, 237), Transparency = 0.0  },
                 [SpoolStage.Stock]        = new ColorSetting { DisplayColor = Color.FromArgb(65, 105, 225),  Transparency = 0.0  },
                 [SpoolStage.HandOver]     = new ColorSetting { DisplayColor = Color.FromArgb(30, 144, 255),  Transparency = 0.0  },
-                // Install
                 [SpoolStage.Setting]      = new ColorSetting { DisplayColor = Color.FromArgb(138, 43, 226),  Transparency = 0.0  },
                 [SpoolStage.Welding]      = new ColorSetting { DisplayColor = Color.FromArgb(0, 128, 0),     Transparency = 0.0  },
             };
@@ -139,12 +154,20 @@ namespace NavisVisualizer.Models
     public class TestPackageData
     {
         public string TestPkgId { get; set; }
-        public HydrotestStatus Status { get; set; }
-        public DateTime? PlannedDate { get; set; }
-        public DateTime? ActualDate { get; set; }
-        public string System { get; set; }
-        public string Remarks { get; set; }
-        public List<string> SpoolIds { get; set; } = new List<string>();
+        public string SystemNo { get; set; }
+        public string LineService { get; set; }
+        public Dictionary<HydrotestStage, DateTime?> StageDates { get; set; } = new Dictionary<HydrotestStage, DateTime?>();
+
+        public HydrotestStage GetStageAtDate(DateTime referenceDate)
+        {
+            var stages = HydrotestStageInfo.OrderedStages;
+            for (int i = stages.Length - 1; i >= 0; i--)
+            {
+                if (StageDates.TryGetValue(stages[i], out var date) && date.HasValue && date.Value.Date <= referenceDate.Date)
+                    return stages[i];
+            }
+            return HydrotestStage.NotStarted;
+        }
     }
 
     public class SpoolData
@@ -153,14 +176,9 @@ namespace NavisVisualizer.Models
         public string IsoNo { get; set; }
         public Dictionary<SpoolStage, DateTime?> StageDates { get; set; } = new Dictionary<SpoolStage, DateTime?>();
 
-        /// <summary>
-        /// Computes the current stage based on a reference date.
-        /// Returns the latest stage whose date exists and is &lt;= referenceDate.
-        /// </summary>
         public SpoolStage GetStageAtDate(DateTime referenceDate)
         {
             var stages = SpoolStageInfo.OrderedStages;
-            // Walk backwards from last stage to find the latest completed one
             for (int i = stages.Length - 1; i >= 0; i--)
             {
                 if (StageDates.TryGetValue(stages[i], out var date) && date.HasValue && date.Value.Date <= referenceDate.Date)

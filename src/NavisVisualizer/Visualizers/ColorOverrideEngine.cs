@@ -20,40 +20,34 @@ namespace NavisVisualizer.Visualizers
         public OverrideResult ApplyHydrotest(
             Document doc,
             List<TestPackageData> packages,
-            Dictionary<HydrotestStatus, ColorSetting> colorSettings,
+            Dictionary<HydrotestStage, ColorSetting> colorSettings,
+            DateTime referenceDate,
             bool hideUnmatched = true)
         {
             var result = new OverrideResult();
             var allMatchedItems = new HashSet<ModelItem>();
 
-            var allSpoolIds = packages.SelectMany(p => p.SpoolIds).Distinct();
-            var searchResult = _searcher.FindBySpoolIds(allSpoolIds);
+            var allPkgIds = packages.Select(p => p.TestPkgId).Distinct();
+            var searchResult = _searcher.FindBySpoolIds(allPkgIds);
 
             foreach (var pkg in packages)
             {
-                var pkgItems = new List<ModelItem>();
-
-                foreach (var spoolId in pkg.SpoolIds)
+                if (!searchResult.TryGetValue(pkg.TestPkgId, out var items) || items.Count == 0)
                 {
-                    if (searchResult.TryGetValue(spoolId, out var items) && items.Count > 0)
-                    {
-                        pkgItems.AddRange(items);
-                        result.MatchedCount++;
-                    }
-                    else
-                    {
-                        result.UnmatchedIds.Add($"{pkg.TestPkgId} → {spoolId}");
-                    }
+                    result.UnmatchedIds.Add(pkg.TestPkgId);
+                    continue;
                 }
 
-                if (pkgItems.Count > 0 && colorSettings.TryGetValue(pkg.Status, out var setting))
+                result.MatchedCount++;
+
+                var stage = pkg.GetStageAtDate(referenceDate);
+                if (colorSettings.TryGetValue(stage, out var setting))
                 {
-                    var withDescendants = ExpandWithDescendants(pkgItems);
+                    var withDescendants = ExpandWithDescendants(items);
                     ApplyOverride(doc, withDescendants, setting);
                     foreach (var item in withDescendants)
                         allMatchedItems.Add(item);
-                    // Mark ancestors so they don't get unmatched treatment
-                    AddAncestors(allMatchedItems, pkgItems);
+                    AddAncestors(allMatchedItems, items);
                 }
             }
 
@@ -93,7 +87,6 @@ namespace NavisVisualizer.Visualizers
                     ApplyOverride(doc, withDescendants, setting);
                     foreach (var item in withDescendants)
                         allMatchedItems.Add(item);
-                    // Mark ancestors so they don't get unmatched treatment
                     AddAncestors(allMatchedItems, items);
                 }
             }
@@ -129,10 +122,6 @@ namespace NavisVisualizer.Visualizers
             ApplyOverride(doc, unmatched, ColorSetting.Unmatched);
         }
 
-        /// <summary>
-        /// Adds all ancestor items (parents up to root) to the matched set,
-        /// so parent groups don't get the unmatched transparent override.
-        /// </summary>
         private void AddAncestors(HashSet<ModelItem> matchedItems, List<ModelItem> items)
         {
             foreach (var item in items)
@@ -140,24 +129,19 @@ namespace NavisVisualizer.Visualizers
                 var parent = item.Parent;
                 while (parent != null)
                 {
-                    if (!matchedItems.Add(parent))
-                        break; // Already in set, ancestors above also already added
+                    if (!matchedItems.Add(parent)) break;
                     parent = parent.Parent;
                 }
             }
         }
 
-        /// <summary>
-        /// Expands matched items to include all their descendants,
-        /// so child geometry items are also marked as matched.
-        /// </summary>
         private List<ModelItem> ExpandWithDescendants(List<ModelItem> items)
         {
             var expanded = new List<ModelItem>();
             foreach (var item in items)
             {
                 expanded.Add(item);
-                expanded.AddRange(item.DescendantsAndSelf.Skip(1)); // Skip self (already added)
+                expanded.AddRange(item.DescendantsAndSelf.Skip(1));
             }
             return expanded;
         }

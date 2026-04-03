@@ -14,10 +14,16 @@ namespace NavisVisualizer.UI
         private readonly MainDockablePanel _main;
 
         private List<TestPackageData> _packages = new List<TestPackageData>();
-        private Dictionary<HydrotestStatus, ColorSetting> _colorSettings;
+        private Dictionary<HydrotestStage, ColorSetting> _colorSettings;
+
+        private HashSet<string> _matchedPkgIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        private List<string> _unmatchedPkgIds = new List<string>();
 
         private Button _btnLoad;
         private Label _lblFile;
+        private DateTimePicker _dtpReference;
+        private TextBox _txtSearch;
+        private TabControl _tabFilter;
         private ListView _listView;
         private Button _btnApply;
         private Button _btnReset;
@@ -26,8 +32,11 @@ namespace NavisVisualizer.UI
         private Label _lblStats;
         private ProgressBar _progressBar;
 
-        private Dictionary<HydrotestStatus, (Panel colorBox, Button colorBtn, ComboBox transparencyBox, CheckBox check)> _colorRows
-            = new Dictionary<HydrotestStatus, (Panel, Button, ComboBox, CheckBox)>();
+        private int _sortColumn = -1;
+        private bool _sortAscending = true;
+
+        private Dictionary<HydrotestStage, (Panel colorBox, Button colorBtn, ComboBox transparencyBox, CheckBox check)> _colorRows
+            = new Dictionary<HydrotestStage, (Panel, Button, ComboBox, CheckBox)>();
 
         public HydrotestTab(MainDockablePanel main)
         {
@@ -46,30 +55,68 @@ namespace NavisVisualizer.UI
                 Padding = new Padding(4)
             };
 
-            _btnLoad = new Button { Text = "📂 Hydrotest Excel 로드", Dock = DockStyle.Fill, Height = 30 };
+            _btnLoad = new Button { Text = "Hydrotest Excel", Dock = DockStyle.Fill, Height = 30 };
             _btnLoad.Click += BtnLoad_Click;
             _lblFile = new Label { Text = "(파일 없음)", Dock = DockStyle.Fill, ForeColor = Color.Gray, AutoSize = false, Height = 18 };
 
+            var datePanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 28, AutoSize = false };
+            var dateLabel = new Label { Text = "기준일:", AutoSize = true, Padding = new Padding(0, 4, 0, 0) };
+            _dtpReference = new DateTimePicker
+            {
+                Format = DateTimePickerFormat.Short,
+                Value = DateTime.Today,
+                Width = 110,
+            };
+            _dtpReference.ValueChanged += (s, e) =>
+            {
+                if (_packages.Count > 0) { FilterList(); UpdateStats(); }
+            };
+            datePanel.Controls.Add(dateLabel);
+            datePanel.Controls.Add(_dtpReference);
+
             var colorPanel = BuildColorPanel();
+
+            _txtSearch = new TextBox { Dock = DockStyle.Fill, Text = "" };
+            _txtSearch.TextChanged += (s, e) => FilterList();
+
+            _lblStats = new Label { Dock = DockStyle.Fill, Text = "로드된 데이터 없음", AutoSize = false, Height = 40 };
+
+            _tabFilter = new TabControl { Dock = DockStyle.Fill, Height = 230 };
+            var tabAll = new TabPage("전체");
+            var tabMatched = new TabPage("매칭");
+            var tabUnmatched = new TabPage("미매칭");
+            _tabFilter.TabPages.Add(tabAll);
+            _tabFilter.TabPages.Add(tabMatched);
+            _tabFilter.TabPages.Add(tabUnmatched);
+            _tabFilter.SelectedIndexChanged += (s, e) =>
+            {
+                var selectedTab = _tabFilter.SelectedTab;
+                if (!selectedTab.Controls.Contains(_listView))
+                    selectedTab.Controls.Add(_listView);
+                FilterList();
+            };
 
             _listView = new ListView
             {
                 Dock = DockStyle.Fill,
-                Height = 200,
                 FullRowSelect = true,
                 GridLines = true,
                 View = View.Details,
             };
-            _listView.Columns.Add("PKG ID", 100);
-            _listView.Columns.Add("상태", 80);
-            _listView.Columns.Add("Spool 수", 60);
+            _listView.Columns.Add("Test Pkg No.", 170);
+            _listView.Columns.Add("System", 80);
+            _listView.Columns.Add("Service", 50);
+            _listView.Columns.Add("단계", 75);
+            _listView.Columns.Add("매칭", 45);
             _listView.SelectedIndexChanged += ListView_SelectedIndexChanged;
+            _listView.ColumnClick += ListView_ColumnClick;
+            tabAll.Controls.Add(_listView);
 
             var btnPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 65, AutoSize = true };
             _btnApply     = new Button { Text = "적용",           Width = 80  };
             _btnReset     = new Button { Text = "전체 초기화",    Width = 90  };
-            _btnViewpoint = new Button { Text = "📷 Viewpoint 저장", Width = 120 };
-            _btnNwd       = new Button { Text = "💾 NWD Export",  Width = 110 };
+            _btnViewpoint = new Button { Text = "Viewpoint 저장", Width = 120 };
+            _btnNwd       = new Button { Text = "NWD Export",     Width = 110 };
             _btnApply.Click     += BtnApply_Click;
             _btnReset.Click     += BtnReset_Click;
             _btnViewpoint.Click += BtnViewpoint_Click;
@@ -77,55 +124,58 @@ namespace NavisVisualizer.UI
             btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnReset, _btnViewpoint, _btnNwd });
 
             _progressBar = new ProgressBar { Dock = DockStyle.Fill, Height = 12, Visible = false };
-            _lblStats    = new Label       { Dock = DockStyle.Fill, Text = "로드된 데이터 없음", AutoSize = false, Height = 18 };
 
             layout.Controls.Add(_btnLoad);
             layout.Controls.Add(_lblFile);
-            layout.Controls.Add(new Label { Text = "상태 & 색상", Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 18 });
+            layout.Controls.Add(datePanel);
+            layout.Controls.Add(new Label { Text = "단계 & 색상", Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 18 });
             layout.Controls.Add(colorPanel);
-            layout.Controls.Add(new Label { Text = "PKG 목록",   Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 18 });
-            layout.Controls.Add(_listView);
             layout.Controls.Add(btnPanel);
             layout.Controls.Add(_progressBar);
             layout.Controls.Add(_lblStats);
+            layout.Controls.Add(_txtSearch);
+            layout.Controls.Add(_tabFilter);
 
             Controls.Add(layout);
         }
 
         private Panel BuildColorPanel()
         {
-            var panel  = new Panel { Dock = DockStyle.Fill, AutoSize = true };
-            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 4, AutoSize = true };
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 80));
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 40));
+            var allStages = new[] { HydrotestStage.NotStarted }.Concat(HydrotestStageInfo.OrderedStages).ToArray();
+            var panel = new Panel { Dock = DockStyle.Fill, AutoSize = true };
+            var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 8, AutoSize = true };
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 85));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 36));
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 22));
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 70));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 62));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 85));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 36));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 22));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 62));
 
-            var statuses = new[] { HydrotestStatus.NotStarted, HydrotestStatus.Completed, HydrotestStatus.Recovery };
-            var labels   = new[] { "미착수", "완료", "복구" };
-
-            for (int i = 0; i < statuses.Length; i++)
+            for (int i = 0; i < allStages.Length; i++)
             {
-                var status  = statuses[i];
-                var setting = _colorSettings[status];
+                var stage = allStages[i];
+                var setting = _colorSettings[stage];
+                string label = HydrotestStageInfo.Labels[stage];
 
-                var chk            = new CheckBox { Text = labels[i], Checked = true, AutoSize = true };
-                var colorBox       = new Panel    { Width = 36, Height = 20, BackColor = setting.DisplayColor, BorderStyle = BorderStyle.FixedSingle };
-                var colorBtn       = new Button   { Text = "▼", Width = 22, Height = 20, FlatStyle = FlatStyle.Flat };
+                var chk = new CheckBox { Text = label, Checked = true, AutoSize = true };
+                var colorBox = new Panel { Width = 32, Height = 20, BackColor = setting.DisplayColor, BorderStyle = BorderStyle.FixedSingle };
+                var colorBtn = new Button { Text = "▼", Width = 22, Height = 20, FlatStyle = FlatStyle.Flat };
                 colorBtn.FlatAppearance.BorderSize = 0;
-                var transparencyBox = new ComboBox { Width = 65, DropDownStyle = ComboBoxStyle.DropDownList };
+                var transparencyBox = new ComboBox { Width = 58, DropDownStyle = ComboBoxStyle.DropDownList };
                 foreach (var t in new[] { "0%", "20%", "40%", "60%", "70%", "80%", "90%", "100%" })
                     transparencyBox.Items.Add(t);
                 transparencyBox.Text = $"{(int)(setting.Transparency * 100)}%";
 
-                var capturedStatus = status;
+                var cs = stage;
                 colorBtn.Click += (s, e) =>
                 {
-                    using (var dlg = new ColorDialog { Color = _colorSettings[capturedStatus].DisplayColor })
+                    using (var dlg = new ColorDialog { Color = _colorSettings[cs].DisplayColor })
                     {
                         if (dlg.ShowDialog() == DialogResult.OK)
                         {
-                            _colorSettings[capturedStatus].DisplayColor = dlg.Color;
+                            _colorSettings[cs].DisplayColor = dlg.Color;
                             colorBox.BackColor = dlg.Color;
                         }
                     }
@@ -133,14 +183,17 @@ namespace NavisVisualizer.UI
                 transparencyBox.SelectedIndexChanged += (s, e) =>
                 {
                     if (double.TryParse(transparencyBox.Text.Replace("%", ""), out double pct))
-                        _colorSettings[capturedStatus].Transparency = pct / 100.0;
+                        _colorSettings[cs].Transparency = pct / 100.0;
                 };
 
-                _colorRows[status] = (colorBox, colorBtn, transparencyBox, chk);
-                layout.Controls.Add(chk);
-                layout.Controls.Add(colorBox);
-                layout.Controls.Add(colorBtn);
-                layout.Controls.Add(transparencyBox);
+                _colorRows[stage] = (colorBox, colorBtn, transparencyBox, chk);
+
+                int row = i / 2;
+                int colOffset = (i % 2) * 4;
+                layout.Controls.Add(chk, colOffset + 0, row);
+                layout.Controls.Add(colorBox, colOffset + 1, row);
+                layout.Controls.Add(colorBtn, colOffset + 2, row);
+                layout.Controls.Add(transparencyBox, colOffset + 3, row);
             }
 
             panel.Controls.Add(layout);
@@ -149,14 +202,20 @@ namespace NavisVisualizer.UI
 
         private void BtnLoad_Click(object sender, EventArgs e)
         {
-            using (var dlg = new OpenFileDialog { Title = "Hydrotest Excel 로드", Filter = "Excel (*.xlsx)|*.xlsx" })
+            using (var dlg = new OpenFileDialog
+            {
+                Title = "Hydrotest Excel 로드",
+                Filter = "Excel 파일 (*.xlsx;*.xls;*.xlsb)|*.xlsx;*.xls;*.xlsb|모든 파일|*.*"
+            })
             {
                 if (dlg.ShowDialog() != DialogResult.OK) return;
                 try
                 {
                     _packages = ExcelLoader.LoadHydrotest(dlg.FileName);
                     _lblFile.Text = Path.GetFileName(dlg.FileName);
-                    RefreshList();
+                    _matchedPkgIds.Clear();
+                    _unmatchedPkgIds.Clear();
+                    FilterList();
                     UpdateStats();
                     if (!_main.Searcher.IsIndexBuilt)
                         BuildIndex();
@@ -195,13 +254,26 @@ namespace NavisVisualizer.UI
             if (!_main.Searcher.IsIndexBuilt)
                 BuildIndex();
 
-            var activeSettings = new Dictionary<HydrotestStatus, ColorSetting>();
+            var activeSettings = new Dictionary<HydrotestStage, ColorSetting>();
             foreach (var kv in _colorRows)
                 if (kv.Value.check.Checked)
                     activeSettings[kv.Key] = _colorSettings[kv.Key];
 
-            var result = _main.OverrideEngine.ApplyHydrotest(doc, _packages, activeSettings);
-            UpdateStats(result.MatchedCount, result.UnmatchedCount, result.UnmatchedIds);
+            var referenceDate = _dtpReference.Value;
+            var result = _main.OverrideEngine.ApplyHydrotest(doc, _packages, activeSettings, referenceDate);
+
+            _unmatchedPkgIds = result.UnmatchedIds;
+            var unmatchedSet = new HashSet<string>(result.UnmatchedIds, StringComparer.OrdinalIgnoreCase);
+            _matchedPkgIds = new HashSet<string>(
+                _packages.Select(p => p.TestPkgId).Where(id => !unmatchedSet.Contains(id)),
+                StringComparer.OrdinalIgnoreCase);
+
+            _tabFilter.TabPages[0].Text = $"전체 ({_packages.Count})";
+            _tabFilter.TabPages[1].Text = $"매칭 ({_matchedPkgIds.Count})";
+            _tabFilter.TabPages[2].Text = $"미매칭 ({_unmatchedPkgIds.Count})";
+
+            UpdateStats(result.MatchedCount, result.UnmatchedCount);
+            FilterList();
         }
 
         private void BtnReset_Click(object sender, EventArgs e)
@@ -239,12 +311,12 @@ namespace NavisVisualizer.UI
         {
             if (_listView.SelectedItems.Count == 0) return;
             var tag = _listView.SelectedItems[0].Tag as TestPackageData;
-            if (tag == null || tag.SpoolIds.Count == 0) return;
+            if (tag == null) return;
 
             var doc = _main.GetDocument();
             if (doc == null || !_main.Searcher.IsIndexBuilt) return;
 
-            var found = _main.Searcher.FindBySpoolIds(tag.SpoolIds);
+            var found = _main.Searcher.FindBySpoolIds(new[] { tag.TestPkgId });
             var items = found.Values.SelectMany(v => v).ToList();
             if (items.Count == 0) return;
 
@@ -254,39 +326,93 @@ namespace NavisVisualizer.UI
             doc.ActiveView.FocusOnCurrentSelection();
         }
 
-        private void RefreshList()
+        private void ListView_ColumnClick(object sender, ColumnClickEventArgs e)
         {
-            _listView.Items.Clear();
-            var statusLabels = new Dictionary<HydrotestStatus, string>
+            if (e.Column == _sortColumn)
+                _sortAscending = !_sortAscending;
+            else
             {
-                [HydrotestStatus.NotStarted] = "미착수",
-                [HydrotestStatus.Completed]  = "완료",
-                [HydrotestStatus.Recovery]   = "복구",
-            };
+                _sortColumn = e.Column;
+                _sortAscending = true;
+            }
+            _listView.ListViewItemSorter = new ListViewItemComparer(_sortColumn, _sortAscending);
+            _listView.Sort();
+        }
 
-            foreach (var pkg in _packages)
+        private class ListViewItemComparer : System.Collections.IComparer
+        {
+            private readonly int _col;
+            private readonly int _dir;
+            public ListViewItemComparer(int column, bool ascending) { _col = column; _dir = ascending ? 1 : -1; }
+            public int Compare(object x, object y)
             {
+                string a = ((ListViewItem)x).SubItems[_col].Text;
+                string b = ((ListViewItem)y).SubItems[_col].Text;
+                return string.Compare(a, b, StringComparison.OrdinalIgnoreCase) * _dir;
+            }
+        }
+
+        private void FilterList()
+        {
+            string keyword = _txtSearch?.Text?.Trim().ToUpperInvariant() ?? "";
+            var referenceDate = _dtpReference.Value;
+            int tabIndex = _tabFilter.SelectedIndex;
+
+            var filtered = _packages.AsEnumerable();
+
+            if (tabIndex == 1 && _matchedPkgIds.Count > 0)
+                filtered = filtered.Where(p => _matchedPkgIds.Contains(p.TestPkgId));
+            else if (tabIndex == 2 && _unmatchedPkgIds.Count > 0)
+                filtered = filtered.Where(p => _unmatchedPkgIds.Contains(p.TestPkgId));
+
+            if (!string.IsNullOrEmpty(keyword))
+                filtered = filtered.Where(p => p.TestPkgId.ToUpperInvariant().Contains(keyword)
+                    || (p.SystemNo ?? "").ToUpperInvariant().Contains(keyword));
+
+            _listView.Items.Clear();
+
+            foreach (var pkg in filtered)
+            {
+                var stage = pkg.GetStageAtDate(referenceDate);
+                string stageLabel = HydrotestStageInfo.Labels.TryGetValue(stage, out var lbl) ? lbl : stage.ToString();
+                bool isMatched = _matchedPkgIds.Count == 0 || _matchedPkgIds.Contains(pkg.TestPkgId);
+
                 var item = new ListViewItem(pkg.TestPkgId);
-                item.SubItems.Add(statusLabels[pkg.Status]);
-                item.SubItems.Add(pkg.SpoolIds.Count.ToString());
+                item.SubItems.Add(pkg.SystemNo ?? "");
+                item.SubItems.Add(pkg.LineService ?? "");
+                item.SubItems.Add(stageLabel);
+                item.SubItems.Add(isMatched ? "O" : "X");
                 item.Tag = pkg;
-                item.ForeColor = _colorSettings[pkg.Status].DisplayColor;
+                if (_colorSettings.TryGetValue(stage, out var setting))
+                    item.ForeColor = setting.DisplayColor;
+                if (!isMatched && _matchedPkgIds.Count > 0)
+                    item.ForeColor = Color.Red;
                 _listView.Items.Add(item);
             }
         }
 
-        private void UpdateStats(int matched = 0, int unmatched = 0, List<string> unmatchedIds = null)
+        private void UpdateStats(int matched = 0, int unmatched = 0)
         {
-            int completed  = _packages.Count(p => p.Status == HydrotestStatus.Completed);
-            int notStarted = _packages.Count(p => p.Status == HydrotestStatus.NotStarted);
-            int recovery   = _packages.Count(p => p.Status == HydrotestStatus.Recovery);
-            _lblStats.Text = $"완료 {completed}  미착수 {notStarted}  복구 {recovery}"
-                           + (matched > 0 ? $"  | 매칭 {matched} / 미매칭 {unmatched}" : "");
+            var referenceDate = _dtpReference.Value;
+            var counts = _packages
+                .GroupBy(p => p.GetStageAtDate(referenceDate))
+                .ToDictionary(g => g.Key, g => g.Count());
+
+            var parts = new List<string>();
+            var allStages = new[] { HydrotestStage.NotStarted }.Concat(HydrotestStageInfo.OrderedStages).Reverse();
+            foreach (var stage in allStages)
+            {
+                if (counts.TryGetValue(stage, out int cnt) && cnt > 0)
+                    parts.Add($"{HydrotestStageInfo.Labels[stage]} {cnt}");
+            }
+
+            _lblStats.Text = string.Join("  ", parts)
+                           + (matched > 0 ? $"\n매칭 {matched} / 미매칭 {unmatched}" : "");
         }
 
-        private Dictionary<HydrotestStatus, ColorSetting> CloneDefaults(Dictionary<HydrotestStatus, ColorSetting> defaults)
+        private Dictionary<HydrotestStage, ColorSetting> CloneDefaults(Dictionary<HydrotestStage, ColorSetting> defaults)
         {
-            var clone = new Dictionary<HydrotestStatus, ColorSetting>();
+            var clone = new Dictionary<HydrotestStage, ColorSetting>();
             foreach (var kv in defaults)
                 clone[kv.Key] = kv.Value.Clone();
             return clone;
