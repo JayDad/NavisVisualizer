@@ -108,6 +108,31 @@ namespace NavisVisualizer.UI
             };
             layout.Controls.Add(_lblStatus);
 
+            // --- User Data Test ---
+            layout.Controls.Add(new Label { Height = 10, Dock = DockStyle.Fill });
+            layout.Controls.Add(new Label
+            {
+                Text = "User Data Test",
+                Font = new Font(Font, FontStyle.Bold),
+                Dock = DockStyle.Fill,
+                Height = 20
+            });
+            layout.Controls.Add(new Label
+            {
+                Text = "Select 1 item -> test COM property write",
+                Dock = DockStyle.Fill,
+                Height = 20,
+                ForeColor = Color.Gray
+            });
+            var btnTestProp = new Button
+            {
+                Text = "Test Write Property (1 item)",
+                Dock = DockStyle.Fill,
+                Height = 30
+            };
+            btnTestProp.Click += BtnTestProp_Click;
+            layout.Controls.Add(btnTestProp);
+
             Controls.Add(layout);
         }
 
@@ -269,6 +294,26 @@ namespace NavisVisualizer.UI
         // -------------------------------------------------------
         // Helpers
         // -------------------------------------------------------
+        private void BtnTestProp_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                var doc = _main.GetDocument();
+                if (doc == null) { MessageBox.Show("No document open."); return; }
+
+                var selection = doc.CurrentSelection.SelectedItems;
+                if (selection.Count == 0) { MessageBox.Show("Select 1 item first."); return; }
+
+                var item = selection.First();
+                string result = _main.UserDataSvc.TestWriteOneProperty(item);
+                MessageBox.Show(result, "User Data Test", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error: {ex.Message}", "User Data Test", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
         private static string Esc(string s) => (s ?? "").Replace("\"", "'");
 
         private static string SaveToDesktop(string prefix, List<string> lines)
