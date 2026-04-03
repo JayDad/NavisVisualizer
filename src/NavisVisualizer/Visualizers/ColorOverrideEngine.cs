@@ -56,16 +56,17 @@ namespace NavisVisualizer.Visualizers
 
             result.TimingMatch = sw.ElapsedMilliseconds;
 
-            // No auto-Reset — user can manually reset via "전체 초기화"
             _cachedStageCollections.Clear();
 
-            // Expand + cache
+            // Hydrotest: apply to package nodes directly without expanding descendants.
+            // Navisworks propagates parent color overrides to children visually.
+            // If not, we fall back to shallow expansion (direct children only).
             long expandMs = 0;
             foreach (var kv in stageItems)
             {
                 var swExpand = Stopwatch.StartNew();
                 string key = kv.Key.ToString();
-                var collection = ExpandToCollection(kv.Value);
+                var collection = ShallowExpandToCollection(kv.Value);
                 _cachedStageCollections[key] = collection;
                 result.TotalItemsColored += collection.Count;
                 expandMs += swExpand.ElapsedMilliseconds;
@@ -166,6 +167,26 @@ namespace NavisVisualizer.Visualizers
             _cachedStageCollections.Clear();
         }
 
+        /// <summary>
+        /// Shallow expansion: adds the item itself and its direct Children only (1 level deep).
+        /// Used for Hydrotest packages where deep expansion is too slow.
+        /// </summary>
+        private ModelItemCollection ShallowExpandToCollection(List<ModelItem> items)
+        {
+            var collection = new ModelItemCollection();
+            foreach (var item in items)
+            {
+                collection.Add(item);
+                foreach (var child in item.Children)
+                    collection.Add(child);
+            }
+            return collection;
+        }
+
+        /// <summary>
+        /// Deep expansion: adds the item and ALL descendants recursively.
+        /// Used for Spool items where subtrees are small.
+        /// </summary>
         private ModelItemCollection ExpandToCollection(List<ModelItem> items)
         {
             var collection = new ModelItemCollection();
