@@ -146,11 +146,17 @@ namespace NavisVisualizer.Visualizers
                 list.AddRange(items);
             }
 
-            // No expansion — matched nodes colored directly (same as Spool/Hydrotest)
+            // Equipment: expand descendants (tag node + all child geometry)
+            // Fast now that prefix loop is eliminated — only expansion cost remains
             foreach (var kv in stageItems)
             {
                 string key = kv.Key.ToString();
-                var collection = ToCollection(kv.Value);
+                var collection = new ModelItemCollection();
+                foreach (var item in kv.Value)
+                {
+                    foreach (var desc in item.DescendantsAndSelf)
+                        collection.Add(desc);
+                }
                 _cachedStageCollections[key] = collection;
 
                 if (colorSettings.TryGetValue(kv.Key, out var setting))
