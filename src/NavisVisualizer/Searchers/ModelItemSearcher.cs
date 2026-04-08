@@ -36,11 +36,13 @@ namespace NavisVisualizer.Searchers
             {
                 current++;
 
-                // Skip leaf geometry — only index containers
-                if (!item.Children.Any()) continue;
-
                 string displayName = item.DisplayName?.Trim();
                 if (string.IsNullOrEmpty(displayName)) continue;
+
+                // Skip unnamed leaf geometry (Pipe, Elbow, etc.)
+                // but keep leaf nodes with tag-like names (contain digits)
+                if (!item.Children.Any() && !ContainsDigit(displayName))
+                    continue;
 
                 string key = displayName.TrimStart('/').Trim();
                 if (string.IsNullOrEmpty(key)) continue;
@@ -111,6 +113,13 @@ namespace NavisVisualizer.Searchers
         {
             _isBuilt = false;
             _lastDocumentId = null;
+        }
+
+        private static bool ContainsDigit(string s)
+        {
+            for (int i = 0; i < s.Length; i++)
+                if (char.IsDigit(s[i])) return true;
+            return false;
         }
 
         private string GetDocumentId(Document doc)
