@@ -14,14 +14,10 @@ namespace NavisVisualizer.Searchers
         public bool IsIndexBuilt => _isBuilt;
         public int IndexedCount => _index?.Count ?? 0;
 
-        /// <summary>
-        /// Check if index needs rebuild (model changed or never built).
-        /// </summary>
         public bool NeedsRebuild(Document doc)
         {
             if (!_isBuilt) return true;
-            string currentId = GetDocumentId(doc);
-            return currentId != _lastDocumentId;
+            return GetDocumentId(doc) != _lastDocumentId;
         }
 
         public void BuildIndex(Document doc, Action<int, int> onProgress = null)
@@ -30,17 +26,12 @@ namespace NavisVisualizer.Searchers
             _isBuilt = false;
             _lastDocumentId = GetDocumentId(doc);
 
-            int current = 0;
-
             foreach (var item in doc.Models.RootItemDescendantsAndSelf)
             {
-                current++;
-
                 string displayName = item.DisplayName?.Trim();
                 if (string.IsNullOrEmpty(displayName)) continue;
 
                 // Skip unnamed leaf geometry (Pipe, Elbow, etc.)
-                // but keep leaf nodes with tag-like names (contain digits)
                 if (!item.Children.Any() && !ContainsDigit(displayName))
                     continue;
 
@@ -48,15 +39,29 @@ namespace NavisVisualizer.Searchers
                 if (string.IsNullOrEmpty(key)) continue;
                 key = key.ToUpperInvariant();
 
-                if (!_index.TryGetValue(key, out var list))
+                AddToIndex(key, item);
+
+                // Also register prefix key (before first '/') for Equipment tag matching
+                // e.g., "101210-ZZZ-10310/VENSKID" → also indexed under "101210-ZZZ-10310"
+                int slashIdx = key.IndexOf('/');
+                if (slashIdx > 0)
                 {
-                    list = new List<ModelItem>();
-                    _index[key] = list;
+                    string prefix = key.Substring(0, slashIdx);
+                    AddToIndex(prefix, item);
                 }
-                list.Add(item);
             }
 
             _isBuilt = true;
+        }
+
+        private void AddToIndex(string key, ModelItem item)
+        {
+            if (!_index.TryGetValue(key, out var list))
+            {
+                list = new List<ModelItem>();
+                _index[key] = list;
+            }
+            list.Add(item);
         }
 
         public Dictionary<string, List<ModelItem>> FindBySpoolIds(IEnumerable<string> spoolIds)
@@ -75,38 +80,12 @@ namespace NavisVisualizer.Searchers
         }
 
         /// <summary>
-        /// Find items by Tag No. with prefix matching support.
-        /// Exact match first; if not found, searches for keys starting with the tag.
-        /// Returns only the first (shallowest) match per tag — skips children.
+        /// Find items by Tag No. — uses exact match via pre-built prefix index.
+        /// No prefix loop needed since BuildIndex registers prefix keys automatically.
         /// </summary>
         public Dictionary<string, List<ModelItem>> FindByTagPrefix(IEnumerable<string> tagNos)
         {
-            if (!_isBuilt)
-                throw new InvalidOperationException("인덱스가 빌드되지 않았습니다.");
-
-            var result = new Dictionary<string, List<ModelItem>>(StringComparer.OrdinalIgnoreCase);
-            foreach (var tag in tagNos)
-            {
-                string key = tag.Trim().TrimStart('/').ToUpperInvariant();
-
-                // Exact match
-                if (_index.TryGetValue(key, out var exactItems))
-                {
-                    result[tag] = exactItems;
-                    continue;
-                }
-
-                // Prefix match: find keys that start with the tag
-                // e.g., tag "101210-PBA-10240" matches "101210-PBA-10240/VENSKID"
-                var prefixMatched = new List<ModelItem>();
-                foreach (var kv in _index)
-                {
-                    if (kv.Key.StartsWith(key, StringComparison.OrdinalIgnoreCase))
-                        prefixMatched.AddRange(kv.Value);
-                }
-                result[tag] = prefixMatched;
-            }
-            return result;
+            return FindBySpoolIds(tagNos); // Same logic — prefix keys already in index
         }
 
         public void Reset()
@@ -124,7 +103,6 @@ namespace NavisVisualizer.Searchers
 
         private string GetDocumentId(Document doc)
         {
-            // Use file path + model count as a simple identity check
             try
             {
                 string path = doc.FileName ?? "";
