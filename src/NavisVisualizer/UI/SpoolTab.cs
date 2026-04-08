@@ -477,7 +477,8 @@ namespace NavisVisualizer.UI
             {
                 var stage = spool.GetStageAtDate(referenceDate);
                 string stageLabel = SpoolStageInfo.Labels.TryGetValue(stage, out var lbl) ? lbl : stage.ToString();
-                bool isMatched = _matchedSpoolIds.Count == 0 || _matchedSpoolIds.Contains(spool.SpoolId);
+                bool hasApplied = _matchedSpoolIds.Count > 0 || _unmatchedSpoolIds.Count > 0;
+                string matchLabel = !hasApplied ? "-" : (_matchedSpoolIds.Contains(spool.SpoolId) ? "O" : "X");
 
                 var item = new ListViewItem(spool.SpoolId);
                 item.UseItemStyleForSubItems = false;
@@ -485,8 +486,8 @@ namespace NavisVisualizer.UI
                 var stageSubItem = item.SubItems.Add(stageLabel);
                 if (_colorSettings.TryGetValue(stage, out var setting))
                     stageSubItem.ForeColor = setting.DisplayColor;
-                var matchSubItem = item.SubItems.Add(isMatched ? "O" : "X");
-                if (!isMatched && _matchedSpoolIds.Count > 0)
+                var matchSubItem = item.SubItems.Add(matchLabel);
+                if (matchLabel == "X")
                     matchSubItem.ForeColor = Color.Red;
                 item.Tag = spool;
                 _listView.Items.Add(item);

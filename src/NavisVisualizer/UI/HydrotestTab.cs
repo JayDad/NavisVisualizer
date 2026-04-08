@@ -408,7 +408,8 @@ namespace NavisVisualizer.UI
             {
                 var stage = pkg.GetStageAtDate(referenceDate);
                 string stageLabel = HydrotestStageInfo.Labels.TryGetValue(stage, out var lbl) ? lbl : stage.ToString();
-                bool isMatched = _matchedPkgIds.Count == 0 || _matchedPkgIds.Contains(pkg.TestPkgId);
+                bool hasApplied = _matchedPkgIds.Count > 0 || _unmatchedPkgIds.Count > 0;
+                string matchLabel = !hasApplied ? "-" : (_matchedPkgIds.Contains(pkg.TestPkgId) ? "O" : "X");
 
                 var item = new ListViewItem(pkg.TestPkgId);
                 item.UseItemStyleForSubItems = false;
@@ -417,8 +418,8 @@ namespace NavisVisualizer.UI
                 var stageSubItem = item.SubItems.Add(stageLabel);
                 if (_colorSettings.TryGetValue(stage, out var setting))
                     stageSubItem.ForeColor = setting.DisplayColor;
-                var matchSubItem = item.SubItems.Add(isMatched ? "O" : "X");
-                if (!isMatched && _matchedPkgIds.Count > 0)
+                var matchSubItem = item.SubItems.Add(matchLabel);
+                if (matchLabel == "X")
                     matchSubItem.ForeColor = Color.Red;
                 item.Tag = pkg;
                 _listView.Items.Add(item);
