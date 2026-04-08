@@ -146,11 +146,11 @@ namespace NavisVisualizer.Visualizers
                 list.AddRange(items);
             }
 
-            // Equipment: expand descendants (tag matches at parent, geometry is in children)
+            // No expansion — matched nodes colored directly (same as Spool/Hydrotest)
             foreach (var kv in stageItems)
             {
                 string key = kv.Key.ToString();
-                var collection = ExpandToCollection(kv.Value);
+                var collection = ToCollection(kv.Value);
                 _cachedStageCollections[key] = collection;
 
                 if (colorSettings.TryGetValue(kv.Key, out var setting))
@@ -180,17 +180,6 @@ namespace NavisVisualizer.Visualizers
         {
             var collection = new ModelItemCollection();
             collection.AddRange(items);
-            return collection;
-        }
-
-        private ModelItemCollection ExpandToCollection(List<ModelItem> items)
-        {
-            var collection = new ModelItemCollection();
-            foreach (var item in items)
-            {
-                foreach (var desc in item.DescendantsAndSelf)
-                    collection.Add(desc);
-            }
             return collection;
         }
 
