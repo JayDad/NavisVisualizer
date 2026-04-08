@@ -85,8 +85,14 @@ namespace NavisVisualizer.UI
             var colorPanels = BuildColorPanel();
 
             // Search box
-            _txtSearch = new TextBox { Dock = DockStyle.Fill, Text = "" };
+            var searchPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 28, AutoSize = false };
+            searchPanel.Controls.Add(new Label { Text = "검색:", AutoSize = true, Padding = new Padding(0, 4, 0, 0) });
+            _txtSearch = new TextBox { Width = 160, Text = "" };
             _txtSearch.TextChanged += (s, e) => FilterList();
+            searchPanel.Controls.Add(_txtSearch);
+            var btnExport = new Button { Text = "매칭 Status 출력", Width = 110, Height = 23 };
+            btnExport.Click += BtnExport_Click;
+            searchPanel.Controls.Add(btnExport);
 
             // Stats label
             _lblStats = new Label { Dock = DockStyle.Fill, Text = "로드된 데이터 없음", AutoSize = false, Height = 36 };
@@ -138,9 +144,7 @@ namespace NavisVisualizer.UI
             _btnWriteProps.Click += BtnWriteProps_Click;
             _btnViewpoint.Click  += BtnViewpoint_Click;
             _btnNwd.Click        += BtnNwd_Click;
-            var btnExport = new Button { Text = "CSV Export", Width = 90 };
-            btnExport.Click += BtnExport_Click;
-            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnReset, _btnWriteProps, btnExport, _btnViewpoint, _btnNwd });
+            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnReset, _btnWriteProps, _btnViewpoint, _btnNwd });
 
             _progressBar = new ProgressBar { Dock = DockStyle.Fill, Height = 12, Visible = false };
 
@@ -154,7 +158,7 @@ namespace NavisVisualizer.UI
             layout.Controls.Add(btnPanel);
             layout.Controls.Add(_progressBar);
             layout.Controls.Add(_lblStats);
-            layout.Controls.Add(_txtSearch);
+            layout.Controls.Add(searchPanel);
             layout.Controls.Add(_tabFilter);
 
             Controls.Add(layout);
