@@ -223,38 +223,30 @@ namespace NavisVisualizer.Services
                     attempted++;
                     try
                     {
-                        object comPath = (object)ComApiBridge.ToInwOaPath(item);
-                        object propNode = comState.GetType().InvokeMember(
-                            "GetGUIPropertyNode", bf, null, comState, new object[] { comPath, true });
-                        object propVec = comState.GetType().InvokeMember(
-                            "ObjectFactory", bf, null, comState, new object[] { _enumPropVec });
+                        object propVec = BuildEquipmentPropVec(comState, bf, equip, stage);
 
-                        AddProp(comState, propVec, bf, "TagNo", "Tag No.", equip.TagNo);
-                        AddProp(comState, propVec, bf, "Description", "Description", equip.Description ?? "");
-                        AddProp(comState, propVec, bf, "SubSystem", "Sub System", equip.SubSystem ?? "");
-                        AddProp(comState, propVec, bf, "RfqNo", "RFQ No.", equip.RfqNo ?? "");
-                        AddProp(comState, propVec, bf, "DeliveryStatus", "Delivery", equip.DeliveryStatus ?? "");
-
-                        string stageLabel = EquipmentStageInfo.Labels.TryGetValue(stage, out var lbl)
-                            ? lbl : stage.ToString();
-                        AddProp(comState, propVec, bf, "CurrentStage", "현재 단계", stageLabel);
-
-                        if (equip.ConfirmedEta.HasValue)
-                            AddProp(comState, propVec, bf, "ETA", "Confirmed ETA", equip.ConfirmedEta.Value.ToString("yyyy-MM-dd"));
-
-                        foreach (var s in EquipmentStageInfo.OrderedStages)
-                        {
-                            if (s == EquipmentStage.Delivery) continue; // Already shown as Delivery + ETA
-                            string label = EquipmentStageInfo.Labels[s];
-                            string dateStr = equip.StageDates.TryGetValue(s, out var date) && date.HasValue
-                                ? date.Value.ToString("yyyy-MM-dd") : "";
-                            AddProp(comState, propVec, bf, s.ToString(), label, dateStr);
-                        }
-
-                        propNode.GetType().InvokeMember(
-                            "SetUserDefined", bf, null, propNode,
-                            new object[] { 0, CategoryInternalName, CategoryDisplayName, propVec });
+                        // Write to the matched item itself
+                        WriteToItem(comState, bf, item, propVec);
                         written++;
+
+                        // Also write to parent (for prefix matches like Tag/VENSKID)
+                        var parent = item.Parent;
+                        if (parent != null)
+                        {
+                            string parentName = parent.DisplayName?.TrimStart('/').Trim() ?? "";
+                            string tagUpper = equip.TagNo.ToUpperInvariant();
+                            // Write to parent if its name matches or starts with the tag
+                            if (parentName.ToUpperInvariant().StartsWith(tagUpper) ||
+                                tagUpper.StartsWith(parentName.ToUpperInvariant()))
+                            {
+                                try
+                                {
+                                    object parentPropVec = BuildEquipmentPropVec(comState, bf, equip, stage);
+                                    WriteToItem(comState, bf, parent, parentPropVec);
+                                }
+                                catch { }
+                            }
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -270,6 +262,45 @@ namespace NavisVisualizer.Services
                 throw new Exception($"0/{attempted}건 실패: {lastError}");
 
             return written;
+        }
+
+        private object BuildEquipmentPropVec(object comState, BindingFlags bf, EquipmentData equip, EquipmentStage stage)
+        {
+            object propVec = comState.GetType().InvokeMember(
+                "ObjectFactory", bf, null, comState, new object[] { _enumPropVec });
+
+            AddProp(comState, propVec, bf, "TagNo", "Tag No.", equip.TagNo);
+            AddProp(comState, propVec, bf, "Description", "Description", equip.Description ?? "");
+            AddProp(comState, propVec, bf, "SubSystem", "Sub System", equip.SubSystem ?? "");
+            AddProp(comState, propVec, bf, "RfqNo", "RFQ No.", equip.RfqNo ?? "");
+            AddProp(comState, propVec, bf, "DeliveryStatus", "Delivery", equip.DeliveryStatus ?? "");
+
+            string stageLabel = EquipmentStageInfo.Labels.TryGetValue(stage, out var lbl) ? lbl : stage.ToString();
+            AddProp(comState, propVec, bf, "CurrentStage", "현재 단계", stageLabel);
+
+            if (equip.ConfirmedEta.HasValue)
+                AddProp(comState, propVec, bf, "ETA", "Confirmed ETA", equip.ConfirmedEta.Value.ToString("yyyy-MM-dd"));
+
+            foreach (var s in EquipmentStageInfo.OrderedStages)
+            {
+                if (s == EquipmentStage.Delivery) continue;
+                string label = EquipmentStageInfo.Labels[s];
+                string dateStr = equip.StageDates.TryGetValue(s, out var date) && date.HasValue
+                    ? date.Value.ToString("yyyy-MM-dd") : "";
+                AddProp(comState, propVec, bf, s.ToString(), label, dateStr);
+            }
+
+            return propVec;
+        }
+
+        private void WriteToItem(object comState, BindingFlags bf, ModelItem item, object propVec)
+        {
+            object comPath = (object)ComApiBridge.ToInwOaPath(item);
+            object propNode = comState.GetType().InvokeMember(
+                "GetGUIPropertyNode", bf, null, comState, new object[] { comPath, true });
+            propNode.GetType().InvokeMember(
+                "SetUserDefined", bf, null, propNode,
+                new object[] { 0, CategoryInternalName, CategoryDisplayName, propVec });
         }
 
         private void AddProp(object comState, object propVec, BindingFlags bf,
