@@ -249,21 +249,47 @@ namespace NavisVisualizer.UI
         private void BtnExport_Click(object sender, EventArgs e)
         {
             if (_equipments.Count == 0) { MessageBox.Show("Excel을 먼저 로드하세요."); return; }
+            var doc = _main.GetDocument();
             var referenceDate = _dtpReference.Value;
+
+            // Get fresh search results for diagnostics
+            Dictionary<string, List<Autodesk.Navisworks.Api.ModelItem>> searchResult = null;
+            if (doc != null && _main.Searcher.IsIndexBuilt)
+            {
+                var allTags = _equipments.Select(eq => eq.TagNo).Distinct();
+                searchResult = _main.Searcher.FindByTagPrefix(allTags);
+            }
+
             var lines = new List<string>();
-            lines.Add("Tag No.,Description,Sub System,RFQ No.,Delivery,ETA,Stage,Matched");
+            lines.Add("Tag No.,Description,Sub System,RFQ No.,Delivery,ETA,Stage,Matched,ModelItems,MatchedDisplayName");
             foreach (var eq in _equipments)
             {
                 var stage = eq.GetStageAtDate(referenceDate);
                 string stageLabel = EquipmentStageInfo.Labels.TryGetValue(stage, out var lbl) ? lbl : stage.ToString();
                 bool matched = _matchedTagNos.Count == 0 || _matchedTagNos.Contains(eq.TagNo);
+
+                int itemCount = 0;
+                string matchedName = "";
+                if (searchResult != null && searchResult.TryGetValue(eq.TagNo, out var items))
+                {
+                    itemCount = items.Count;
+                    if (items.Count > 0)
+                        matchedName = items[0].DisplayName ?? "";
+                }
+
                 lines.Add($"\"{eq.TagNo}\",\"{eq.Description}\",\"{eq.SubSystem}\",\"{eq.RfqNo}\"," +
-                    $"\"{eq.DeliveryStatus}\",\"{eq.ConfirmedEta?.ToString("yyyy-MM-dd") ?? ""}\",\"{stageLabel}\",\"{(matched ? "O" : "X")}\"");
+                    $"\"{eq.DeliveryStatus}\",\"{eq.ConfirmedEta?.ToString("yyyy-MM-dd") ?? ""}\"," +
+                    $"\"{stageLabel}\",\"{(matched ? "O" : "X")}\",{itemCount},\"{matchedName}\"");
             }
+
+            // Add index stats at bottom
+            lines.Add("");
+            lines.Add($"\"인덱스 항목 수: {_main.Searcher.IndexedCount}\"");
+
             string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
                 $"Equipment_Match_{DateTime.Now:yyyyMMdd_HHmmss}.csv");
             File.WriteAllLines(path, lines, System.Text.Encoding.UTF8);
-            MessageBox.Show($"저장 완료: {path}");
+            MessageBox.Show($"저장 완료: {path}\n인덱스: {_main.Searcher.IndexedCount}건");
         }
 
         private void BuildIndex()
