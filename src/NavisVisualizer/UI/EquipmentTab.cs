@@ -124,7 +124,9 @@ namespace NavisVisualizer.UI
             _btnWriteProps.Click += BtnWriteProps_Click;
             _btnViewpoint.Click  += BtnViewpoint_Click;
             _btnNwd.Click        += BtnNwd_Click;
-            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnReset, _btnWriteProps, _btnViewpoint, _btnNwd });
+            var btnExport = new Button { Text = "CSV Export", Width = 90 };
+            btnExport.Click += BtnExport_Click;
+            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnReset, _btnWriteProps, btnExport, _btnViewpoint, _btnNwd });
 
             _progressBar = new ProgressBar { Dock = DockStyle.Fill, Height = 12, Visible = false };
 
@@ -238,6 +240,26 @@ namespace NavisVisualizer.UI
                     MessageBox.Show($"Excel 로드 실패:\n{ex.Message}", "오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
+        }
+
+        private void BtnExport_Click(object sender, EventArgs e)
+        {
+            if (_equipments.Count == 0) { MessageBox.Show("Excel을 먼저 로드하세요."); return; }
+            var referenceDate = _dtpReference.Value;
+            var lines = new List<string>();
+            lines.Add("Tag No.,Description,Sub System,RFQ No.,Delivery,ETA,Stage,Matched");
+            foreach (var eq in _equipments)
+            {
+                var stage = eq.GetStageAtDate(referenceDate);
+                string stageLabel = EquipmentStageInfo.Labels.TryGetValue(stage, out var lbl) ? lbl : stage.ToString();
+                bool matched = _matchedTagNos.Count == 0 || _matchedTagNos.Contains(eq.TagNo);
+                lines.Add($"\"{eq.TagNo}\",\"{eq.Description}\",\"{eq.SubSystem}\",\"{eq.RfqNo}\"," +
+                    $"\"{eq.DeliveryStatus}\",\"{eq.ConfirmedEta?.ToString("yyyy-MM-dd") ?? ""}\",\"{stageLabel}\",\"{(matched ? "O" : "X")}\"");
+            }
+            string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
+                $"Equipment_Match_{DateTime.Now:yyyyMMdd_HHmmss}.csv");
+            File.WriteAllLines(path, lines, System.Text.Encoding.UTF8);
+            MessageBox.Show($"저장 완료: {path}");
         }
 
         private void BuildIndex()
@@ -413,14 +435,15 @@ namespace NavisVisualizer.UI
                 bool isMatched = _matchedTagNos.Count == 0 || _matchedTagNos.Contains(equip.TagNo);
 
                 var item = new ListViewItem(equip.TagNo);
+                item.UseItemStyleForSubItems = false;
                 item.SubItems.Add(equip.Description ?? "");
-                item.SubItems.Add(stageLabel);
-                item.SubItems.Add(isMatched ? "O" : "X");
-                item.Tag = equip;
+                var stageSubItem = item.SubItems.Add(stageLabel);
                 if (_colorSettings.TryGetValue(stage, out var setting))
-                    item.ForeColor = setting.DisplayColor;
+                    stageSubItem.ForeColor = setting.DisplayColor;
+                var matchSubItem = item.SubItems.Add(isMatched ? "O" : "X");
                 if (!isMatched && _matchedTagNos.Count > 0)
-                    item.ForeColor = Color.Red;
+                    matchSubItem.ForeColor = Color.Red;
+                item.Tag = equip;
                 _listView.Items.Add(item);
             }
         }
