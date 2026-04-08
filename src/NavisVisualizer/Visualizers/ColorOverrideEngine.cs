@@ -114,6 +114,53 @@ namespace NavisVisualizer.Visualizers
             return result;
         }
 
+        public OverrideResult ApplyEquipment(
+            Document doc,
+            List<EquipmentData> equipments,
+            Dictionary<EquipmentStage, ColorSetting> colorSettings,
+            DateTime referenceDate)
+        {
+            var result = new OverrideResult();
+            var stageItems = new Dictionary<EquipmentStage, List<ModelItem>>();
+
+            var allTagNos = equipments.Select(e => e.TagNo).Distinct();
+            var searchResult = _searcher.FindByTagPrefix(allTagNos);
+
+            foreach (var equip in equipments)
+            {
+                if (!searchResult.TryGetValue(equip.TagNo, out var items) || items.Count == 0)
+                {
+                    result.UnmatchedIds.Add(equip.TagNo);
+                    continue;
+                }
+                result.MatchedCount++;
+
+                var stage = equip.GetStageAtDate(referenceDate);
+                if (!colorSettings.ContainsKey(stage)) continue;
+
+                if (!stageItems.TryGetValue(stage, out var list))
+                {
+                    list = new List<ModelItem>();
+                    stageItems[stage] = list;
+                }
+                list.AddRange(items);
+            }
+
+            _cachedStageCollections.Clear();
+
+            foreach (var kv in stageItems)
+            {
+                string key = kv.Key.ToString();
+                var collection = ToCollection(kv.Value);
+                _cachedStageCollections[key] = collection;
+
+                if (colorSettings.TryGetValue(kv.Key, out var setting))
+                    ApplyOverride(doc, collection, setting);
+            }
+
+            return result;
+        }
+
         public bool UpdateStageColor(Document doc, string stageKey, ColorSetting setting)
         {
             if (!_cachedStageCollections.TryGetValue(stageKey, out var collection))

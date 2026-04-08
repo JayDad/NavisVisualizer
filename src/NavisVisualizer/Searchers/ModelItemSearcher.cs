@@ -72,6 +72,41 @@ namespace NavisVisualizer.Searchers
             return result;
         }
 
+        /// <summary>
+        /// Find items by Tag No. with prefix matching support.
+        /// Exact match first; if not found, searches for keys starting with the tag.
+        /// Returns only the first (shallowest) match per tag — skips children.
+        /// </summary>
+        public Dictionary<string, List<ModelItem>> FindByTagPrefix(IEnumerable<string> tagNos)
+        {
+            if (!_isBuilt)
+                throw new InvalidOperationException("인덱스가 빌드되지 않았습니다.");
+
+            var result = new Dictionary<string, List<ModelItem>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var tag in tagNos)
+            {
+                string key = tag.Trim().TrimStart('/').ToUpperInvariant();
+
+                // Exact match
+                if (_index.TryGetValue(key, out var exactItems))
+                {
+                    result[tag] = exactItems;
+                    continue;
+                }
+
+                // Prefix match: find keys that start with the tag
+                // e.g., tag "101210-PBA-10240" matches "101210-PBA-10240/VENSKID"
+                var prefixMatched = new List<ModelItem>();
+                foreach (var kv in _index)
+                {
+                    if (kv.Key.StartsWith(key, StringComparison.OrdinalIgnoreCase))
+                        prefixMatched.AddRange(kv.Value);
+                }
+                result[tag] = prefixMatched;
+            }
+            return result;
+        }
+
         public void Reset()
         {
             _isBuilt = false;

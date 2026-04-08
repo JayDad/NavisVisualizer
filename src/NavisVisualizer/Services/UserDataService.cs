@@ -198,6 +198,80 @@ namespace NavisVisualizer.Services
             return written;
         }
 
+        public int WriteEquipmentProperties(
+            List<EquipmentData> equipments,
+            Dictionary<string, List<ModelItem>> searchResult,
+            DateTime referenceDate)
+        {
+            object comState = (object)ComApiBridge.State;
+            ResolveEnums();
+            var bf = BindingFlags.InvokeMethod | BindingFlags.Public | BindingFlags.Instance;
+
+            int written = 0;
+            int attempted = 0;
+            string lastError = null;
+
+            foreach (var equip in equipments)
+            {
+                if (!searchResult.TryGetValue(equip.TagNo, out var items) || items.Count == 0)
+                    continue;
+
+                var stage = equip.GetStageAtDate(referenceDate);
+
+                foreach (var item in items)
+                {
+                    attempted++;
+                    try
+                    {
+                        object comPath = (object)ComApiBridge.ToInwOaPath(item);
+                        object propNode = comState.GetType().InvokeMember(
+                            "GetGUIPropertyNode", bf, null, comState, new object[] { comPath, true });
+                        object propVec = comState.GetType().InvokeMember(
+                            "ObjectFactory", bf, null, comState, new object[] { _enumPropVec });
+
+                        AddProp(comState, propVec, bf, "TagNo", "Tag No.", equip.TagNo);
+                        AddProp(comState, propVec, bf, "Description", "Description", equip.Description ?? "");
+                        AddProp(comState, propVec, bf, "SubSystem", "Sub System", equip.SubSystem ?? "");
+                        AddProp(comState, propVec, bf, "RfqNo", "RFQ No.", equip.RfqNo ?? "");
+                        AddProp(comState, propVec, bf, "DeliveryStatus", "Delivery", equip.DeliveryStatus ?? "");
+
+                        string stageLabel = EquipmentStageInfo.Labels.TryGetValue(stage, out var lbl)
+                            ? lbl : stage.ToString();
+                        AddProp(comState, propVec, bf, "CurrentStage", "현재 단계", stageLabel);
+
+                        if (equip.ConfirmedEta.HasValue)
+                            AddProp(comState, propVec, bf, "ETA", "Confirmed ETA", equip.ConfirmedEta.Value.ToString("yyyy-MM-dd"));
+
+                        foreach (var s in EquipmentStageInfo.OrderedStages)
+                        {
+                            if (s == EquipmentStage.Delivery) continue; // Already shown as Delivery + ETA
+                            string label = EquipmentStageInfo.Labels[s];
+                            string dateStr = equip.StageDates.TryGetValue(s, out var date) && date.HasValue
+                                ? date.Value.ToString("yyyy-MM-dd") : "";
+                            AddProp(comState, propVec, bf, s.ToString(), label, dateStr);
+                        }
+
+                        propNode.GetType().InvokeMember(
+                            "SetUserDefined", bf, null, propNode,
+                            new object[] { 0, CategoryInternalName, CategoryDisplayName, propVec });
+                        written++;
+                    }
+                    catch (Exception ex)
+                    {
+                        var inner = ex.InnerException;
+                        lastError = (inner ?? ex).GetType().Name + ": " + (inner ?? ex).Message;
+                    }
+                }
+            }
+
+            if (attempted == 0)
+                throw new Exception("속성 삽입 대상이 없습니다.");
+            if (written == 0 && lastError != null)
+                throw new Exception($"0/{attempted}건 실패: {lastError}");
+
+            return written;
+        }
+
         private void AddProp(object comState, object propVec, BindingFlags bf,
             string internalName, string displayName, string value)
         {
