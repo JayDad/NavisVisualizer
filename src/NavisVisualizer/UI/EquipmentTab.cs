@@ -462,7 +462,8 @@ namespace NavisVisualizer.UI
             {
                 var stage = equip.GetStageAtDate(referenceDate);
                 string stageLabel = EquipmentStageInfo.Labels.TryGetValue(stage, out var lbl) ? lbl : stage.ToString();
-                bool isMatched = _matchedTagNos.Count == 0 || _matchedTagNos.Contains(equip.TagNo);
+                bool hasApplied = _matchedTagNos.Count > 0 || _unmatchedTagNos.Count > 0;
+                string matchLabel = !hasApplied ? "-" : (_matchedTagNos.Contains(equip.TagNo) ? "O" : "X");
 
                 var item = new ListViewItem(equip.TagNo);
                 item.UseItemStyleForSubItems = false;
@@ -470,8 +471,8 @@ namespace NavisVisualizer.UI
                 var stageSubItem = item.SubItems.Add(stageLabel);
                 if (_colorSettings.TryGetValue(stage, out var setting))
                     stageSubItem.ForeColor = setting.DisplayColor;
-                var matchSubItem = item.SubItems.Add(isMatched ? "O" : "X");
-                if (!isMatched && _matchedTagNos.Count > 0)
+                var matchSubItem = item.SubItems.Add(matchLabel);
+                if (matchLabel == "X")
                     matchSubItem.ForeColor = Color.Red;
                 item.Tag = equip;
                 _listView.Items.Add(item);
