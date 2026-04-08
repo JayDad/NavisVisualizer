@@ -122,7 +122,9 @@ namespace NavisVisualizer.UI
             _btnReset.Click     += BtnReset_Click;
             _btnViewpoint.Click += BtnViewpoint_Click;
             _btnNwd.Click       += BtnNwd_Click;
-            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnReset, _btnViewpoint, _btnNwd });
+            var btnExport = new Button { Text = "CSV Export", Width = 90 };
+            btnExport.Click += BtnExport_Click;
+            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnReset, btnExport, _btnViewpoint, _btnNwd });
 
             _progressBar = new ProgressBar { Dock = DockStyle.Fill, Height = 12, Visible = false };
 
@@ -237,6 +239,25 @@ namespace NavisVisualizer.UI
 
             if (Enum.TryParse<HydrotestStage>(stageKey, out var stage) && _colorSettings.TryGetValue(stage, out var setting))
                 _main.OverrideEngine.UpdateStageColor(doc, stageKey, setting);
+        }
+
+        private void BtnExport_Click(object sender, EventArgs e)
+        {
+            if (_packages.Count == 0) { MessageBox.Show("Excel을 먼저 로드하세요."); return; }
+            var referenceDate = _dtpReference.Value;
+            var lines = new List<string>();
+            lines.Add("Test Pkg No.,System No.,Line Service,Stage,Matched");
+            foreach (var pkg in _packages)
+            {
+                var stage = pkg.GetStageAtDate(referenceDate);
+                string stageLabel = HydrotestStageInfo.Labels.TryGetValue(stage, out var lbl) ? lbl : stage.ToString();
+                bool matched = _matchedPkgIds.Count == 0 || _matchedPkgIds.Contains(pkg.TestPkgId);
+                lines.Add($"\"{pkg.TestPkgId}\",\"{pkg.SystemNo}\",\"{pkg.LineService}\",\"{stageLabel}\",\"{(matched ? "O" : "X")}\"");
+            }
+            string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
+                $"Hydrotest_Match_{DateTime.Now:yyyyMMdd_HHmmss}.csv");
+            File.WriteAllLines(path, lines, System.Text.Encoding.UTF8);
+            MessageBox.Show($"저장 완료: {path}");
         }
 
         private void BuildIndex()
@@ -386,15 +407,16 @@ namespace NavisVisualizer.UI
                 bool isMatched = _matchedPkgIds.Count == 0 || _matchedPkgIds.Contains(pkg.TestPkgId);
 
                 var item = new ListViewItem(pkg.TestPkgId);
+                item.UseItemStyleForSubItems = false;
                 item.SubItems.Add(pkg.SystemNo ?? "");
                 item.SubItems.Add(pkg.LineService ?? "");
-                item.SubItems.Add(stageLabel);
-                item.SubItems.Add(isMatched ? "O" : "X");
-                item.Tag = pkg;
+                var stageSubItem = item.SubItems.Add(stageLabel);
                 if (_colorSettings.TryGetValue(stage, out var setting))
-                    item.ForeColor = setting.DisplayColor;
+                    stageSubItem.ForeColor = setting.DisplayColor;
+                var matchSubItem = item.SubItems.Add(isMatched ? "O" : "X");
                 if (!isMatched && _matchedPkgIds.Count > 0)
-                    item.ForeColor = Color.Red;
+                    matchSubItem.ForeColor = Color.Red;
+                item.Tag = pkg;
                 _listView.Items.Add(item);
             }
         }

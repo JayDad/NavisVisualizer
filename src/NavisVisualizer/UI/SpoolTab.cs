@@ -138,7 +138,9 @@ namespace NavisVisualizer.UI
             _btnWriteProps.Click += BtnWriteProps_Click;
             _btnViewpoint.Click  += BtnViewpoint_Click;
             _btnNwd.Click        += BtnNwd_Click;
-            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnReset, _btnWriteProps, _btnViewpoint, _btnNwd });
+            var btnExport = new Button { Text = "CSV Export", Width = 90 };
+            btnExport.Click += BtnExport_Click;
+            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnReset, _btnWriteProps, btnExport, _btnViewpoint, _btnNwd });
 
             _progressBar = new ProgressBar { Dock = DockStyle.Fill, Height = 12, Visible = false };
 
@@ -264,6 +266,25 @@ namespace NavisVisualizer.UI
             // Parse the stage key back to find the setting
             if (Enum.TryParse<SpoolStage>(stageKey, out var stage) && _colorSettings.TryGetValue(stage, out var setting))
                 _main.OverrideEngine.UpdateStageColor(doc, stageKey, setting);
+        }
+
+        private void BtnExport_Click(object sender, EventArgs e)
+        {
+            if (_spools.Count == 0) { MessageBox.Show("Excel을 먼저 로드하세요."); return; }
+            var referenceDate = _dtpReference.Value;
+            var lines = new List<string>();
+            lines.Add("Spool ID,ISO No,Stage,Matched");
+            foreach (var sp in _spools)
+            {
+                var stage = sp.GetStageAtDate(referenceDate);
+                string stageLabel = SpoolStageInfo.Labels.TryGetValue(stage, out var lbl) ? lbl : stage.ToString();
+                bool matched = _matchedSpoolIds.Count == 0 || _matchedSpoolIds.Contains(sp.SpoolId);
+                lines.Add($"\"{sp.SpoolId}\",\"{sp.IsoNo}\",\"{stageLabel}\",\"{(matched ? "O" : "X")}\"");
+            }
+            string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
+                $"Spool_Match_{DateTime.Now:yyyyMMdd_HHmmss}.csv");
+            File.WriteAllLines(path, lines, System.Text.Encoding.UTF8);
+            MessageBox.Show($"저장 완료: {path}");
         }
 
         private void BuildIndex()
@@ -455,14 +476,15 @@ namespace NavisVisualizer.UI
                 bool isMatched = _matchedSpoolIds.Count == 0 || _matchedSpoolIds.Contains(spool.SpoolId);
 
                 var item = new ListViewItem(spool.SpoolId);
+                item.UseItemStyleForSubItems = false;
                 item.SubItems.Add(spool.IsoNo ?? "");
-                item.SubItems.Add(stageLabel);
-                item.SubItems.Add(isMatched ? "O" : "X");
-                item.Tag = spool;
+                var stageSubItem = item.SubItems.Add(stageLabel);
                 if (_colorSettings.TryGetValue(stage, out var setting))
-                    item.ForeColor = setting.DisplayColor;
+                    stageSubItem.ForeColor = setting.DisplayColor;
+                var matchSubItem = item.SubItems.Add(isMatched ? "O" : "X");
                 if (!isMatched && _matchedSpoolIds.Count > 0)
-                    item.ForeColor = Color.Red;
+                    matchSubItem.ForeColor = Color.Red;
+                item.Tag = spool;
                 _listView.Items.Add(item);
             }
         }
