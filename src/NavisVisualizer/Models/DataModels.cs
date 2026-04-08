@@ -147,6 +147,16 @@ namespace NavisVisualizer.Models
                 [SpoolStage.Welding]      = new ColorSetting { DisplayColor = Color.FromArgb(0, 128, 0),     Transparency = 0.0  },
             };
 
+        public static Dictionary<EquipmentStage, ColorSetting> EquipmentDefaults =>
+            new Dictionary<EquipmentStage, ColorSetting>
+            {
+                [EquipmentStage.NotStarted] = new ColorSetting { DisplayColor = Color.FromArgb(169, 169, 169), Transparency = 0.7 },
+                [EquipmentStage.Delivery]   = new ColorSetting { DisplayColor = Color.FromArgb(255, 215, 0),   Transparency = 0.0 },
+                [EquipmentStage.Loading]    = new ColorSetting { DisplayColor = Color.FromArgb(65, 105, 225),  Transparency = 0.0 },
+                [EquipmentStage.Setting]    = new ColorSetting { DisplayColor = Color.FromArgb(138, 43, 226),  Transparency = 0.0 },
+                [EquipmentStage.Inspection] = new ColorSetting { DisplayColor = Color.FromArgb(0, 128, 0),     Transparency = 0.0 },
+            };
+
         public static ColorSetting Unmatched =>
             new ColorSetting { DisplayColor = Color.FromArgb(200, 200, 200), Transparency = 0.9 };
     }
@@ -185,6 +195,68 @@ namespace NavisVisualizer.Models
                     return stages[i];
             }
             return SpoolStage.NotStarted;
+        }
+    }
+
+    // ============================================================
+    // Equipment
+    // ============================================================
+
+    public enum EquipmentStage
+    {
+        NotStarted,
+        Delivery,    // Delivered (Confirmed ETA as date)
+        Loading,     // Loading
+        Setting,     // Setting
+        Inspection,  // Inspection
+    }
+
+    public static class EquipmentStageInfo
+    {
+        public static readonly EquipmentStage[] OrderedStages =
+        {
+            EquipmentStage.Delivery, EquipmentStage.Loading,
+            EquipmentStage.Setting, EquipmentStage.Inspection
+        };
+
+        public static readonly Dictionary<EquipmentStage, string> Labels = new Dictionary<EquipmentStage, string>
+        {
+            [EquipmentStage.NotStarted] = "미착수",
+            [EquipmentStage.Delivery]   = "Delivery",
+            [EquipmentStage.Loading]    = "Loading",
+            [EquipmentStage.Setting]    = "Setting",
+            [EquipmentStage.Inspection] = "Inspection",
+        };
+
+        /// <summary>Excel column → EquipmentStage (Loading, Setting, Inspection only; Delivery handled separately)</summary>
+        public static readonly Dictionary<string, EquipmentStage> ColumnMap = new Dictionary<string, EquipmentStage>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Loading"]    = EquipmentStage.Loading,
+            ["Setting"]    = EquipmentStage.Setting,
+            ["Inspection"] = EquipmentStage.Inspection,
+        };
+    }
+
+    public class EquipmentData
+    {
+        public string TagNo { get; set; }
+        public string RfqNo { get; set; }
+        public string SubSystem { get; set; }
+        public string Description { get; set; }
+        public string DeliveryStatus { get; set; } // "Delivered" or empty
+        public DateTime? ConfirmedEta { get; set; }
+        public Dictionary<EquipmentStage, DateTime?> StageDates { get; set; } = new Dictionary<EquipmentStage, DateTime?>();
+
+        public EquipmentStage GetStageAtDate(DateTime referenceDate)
+        {
+            // Check from last stage backwards
+            var stages = EquipmentStageInfo.OrderedStages;
+            for (int i = stages.Length - 1; i >= 0; i--)
+            {
+                if (StageDates.TryGetValue(stages[i], out var date) && date.HasValue && date.Value.Date <= referenceDate.Date)
+                    return stages[i];
+            }
+            return EquipmentStage.NotStarted;
         }
     }
 }

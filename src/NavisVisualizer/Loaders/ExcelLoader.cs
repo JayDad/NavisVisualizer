@@ -150,6 +150,83 @@ namespace NavisVisualizer.Loaders
             return spools;
         }
 
+        public static List<EquipmentData> LoadEquipment(string filePath)
+        {
+            var items = new List<EquipmentData>();
+            var tagHeaderNames = new[] { "Tag No.", "Tag No", "TagNo", "Tag Number" };
+
+            using (var stream = File.Open(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            using (var reader = ExcelReaderFactory.CreateReader(stream))
+            {
+                var dataSet = reader.AsDataSet();
+
+                System.Data.DataTable table = null;
+                int headerRowIdx = -1;
+
+                foreach (System.Data.DataTable dt in dataSet.Tables)
+                {
+                    int row = FindHeaderRowInTable(dt, tagHeaderNames);
+                    if (row >= 0) { table = dt; headerRowIdx = row; break; }
+                }
+
+                if (table == null || headerRowIdx < 0)
+                    throw new Exception("'Tag No.' 헤더를 포함한 시트를 찾을 수 없습니다.");
+
+                var cols = BuildColumnMap(table, headerRowIdx);
+
+                // Date stage columns (Loading, Setting, Inspection)
+                var stageColumns = new List<(int colIndex, EquipmentStage stage)>();
+                foreach (var kv in EquipmentStageInfo.ColumnMap)
+                {
+                    if (cols.TryGetValue(kv.Key, out int idx))
+                        stageColumns.Add((idx, kv.Value));
+                }
+
+                int tagCol = FindColumn(cols, tagHeaderNames);
+                int rfqCol = FindColumn(cols, "RFQ No.", "RFQ No", "RFQ");
+                int subSysCol = FindColumn(cols, "SUB SYSTEM", "Sub System", "SubSystem", "System");
+                int descCol = FindColumn(cols, "Equipment Description", "Description", "Desc");
+                int deliveryCol = FindColumn(cols, "Delivery");
+                int etaCol = FindColumn(cols, "Confirmed ETA", "ETA", "Confirmed\nETA");
+
+                if (tagCol < 0)
+                    throw new Exception("'Tag No.' 컬럼을 찾을 수 없습니다.");
+
+                for (int r = headerRowIdx + 1; r < table.Rows.Count; r++)
+                {
+                    var row = table.Rows[r];
+                    string tagNo = row[tagCol]?.ToString()?.Trim();
+                    if (string.IsNullOrEmpty(tagNo)) continue;
+
+                    string deliveryStatus = deliveryCol >= 0 ? row[deliveryCol]?.ToString()?.Trim() ?? "" : "";
+                    DateTime? eta = etaCol >= 0 ? ParseCellValue(row[etaCol]) : null;
+
+                    var equip = new EquipmentData
+                    {
+                        TagNo = tagNo,
+                        RfqNo = rfqCol >= 0 ? row[rfqCol]?.ToString()?.Trim() ?? "" : "",
+                        SubSystem = subSysCol >= 0 ? row[subSysCol]?.ToString()?.Trim() ?? "" : "",
+                        Description = descCol >= 0 ? row[descCol]?.ToString()?.Trim() ?? "" : "",
+                        DeliveryStatus = deliveryStatus,
+                        ConfirmedEta = eta,
+                    };
+
+                    // Delivery stage: only set date if status is "Delivered"
+                    if (deliveryStatus.Equals("Delivered", StringComparison.OrdinalIgnoreCase) && eta.HasValue)
+                        equip.StageDates[EquipmentStage.Delivery] = eta;
+
+                    foreach (var (colIndex, stage) in stageColumns)
+                    {
+                        equip.StageDates[stage] = ParseCellValue(row[colIndex]);
+                    }
+
+                    items.Add(equip);
+                }
+            }
+
+            return items;
+        }
+
         #region Shared helpers
 
         private static Dictionary<string, int> BuildColumnMap(System.Data.DataTable table, int headerRowIdx)
