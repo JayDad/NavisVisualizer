@@ -13,14 +13,27 @@ Excel (.xlsx/.xls/.xlsb)
   → Navisworks 3D View
 ```
 
+## Modules
+
+| 모듈 | Stage 수 | 매칭 키 | 인덱싱 방식 |
+|------|---------|---------|------------|
+| **Spool** | 14 (B/V → Welding) | Spool Number (DisplayName) | 재귀 탐색 (WalkAndIndex) |
+| **Hydrotest** | 6 (Review → Reinstatement) | Test Package No. (DisplayName) | 재귀 탐색 (WalkAndIndex) |
+| **Equipment** | 4 (Delivery → Inspection) | Tag No. (DisplayName, prefix 지원) | 레벨 타겟 (BuildIndexForTags) |
+
 ## Data Flow
 
 ### 1. Excel Loading (`Loaders/ExcelLoader.cs`)
 
 - **ExcelDataReader** 사용 → .xlsx, .xls, .xlsb 모두 지원
-- 헤더 행 자동 탐지: 상위 20행 스캔하여 "Spool Number" 또는 "Test Package No." 포함 행 검색
+- 헤더 행 자동 탐지: 상위 20행 스캔하여 헤더 키워드 포함 행 검색
 - 병합 셀(카테고리 행) 자동 건너뜀
 - 시트 이름이 다를 경우 모든 시트를 순회하며 헤더 검색
+
+**헤더 키워드:**
+- Spool: "Spool Number", "SpoolId", "Spool No"
+- Hydrotest: "Test Package No.", "TestPkgId"
+- Equipment: "Tag No.", "Tag No"
 
 ### 2. Stage Computation (`Models/DataModels.cs`)
 
@@ -33,28 +46,46 @@ GetStageAtDate(referenceDate):
   → 없으면 NotStarted
 ```
 
-- **Spool**: 14단계 (B/V → Welding)
-  - Fabrication: B/V, F/up, W/D, NDE, PWHT, S/out, 후공정인계, Galv, Pnt1, Pnt2, Stock, H/O
-  - Install: Setting, Welding
-- **Hydrotest**: 6단계 (Review → Reinstatement)
-  - Review, Line Inspection, Flushing, Hydrotest, Drying, Reinstatement
+**Spool** (14단계):
+- Fabrication: B/V, F/up, W/D, NDE, PWHT, S/out, 후공정인계, Galv, Pnt1, Pnt2, Stock, H/O
+- Install: Setting, Welding
+
+**Hydrotest** (6단계):
+- Review, Line Inspection, Flushing, Hydrotest, Drying, Reinstatement
+
+**Equipment** (4단계):
+- Delivery (Delivered + Confirmed ETA), Loading, Setting, Inspection
+- Delivery 특수 로직: "Delivered" 텍스트 상태 + Confirmed ETA 날짜 조합
 
 ### 3. Model Item Indexing (`Searchers/ModelItemSearcher.cs`)
 
-**DisplayName 기반 매칭:**
+**두 가지 인덱싱 전략:**
+
+#### A. 재귀 탐색 (`WalkAndIndex`) — Spool/Hydrotest용
 
 ```
-BuildIndex:
-  모델 트리의 모든 아이템을 순회
-  → 자식이 있는 그룹 노드만 인덱싱 (leaf geometry 제외)
-  → DisplayName에서 앞의 '/' 제거 후 대문자 정규화
-  → Dictionary<string, List<ModelItem>>에 저장
+WalkAndIndex(item):
+  DisplayName에 숫자 포함? → 인덱싱
+    자식에도 숫자 포함 노드 있음? → 계속 재귀 (더 깊은 태그 존재)
+    자식에 숫자 없음? → STOP (하위는 geometry)
+  숫자 없음? → 계속 재귀 (태그 레벨 아직 안 도달)
 ```
 
-**성능 최적화:**
-- leaf 노드(Pipe, Elbow 등) 건너뛰기 → 인덱싱 대상 대폭 감소
-- ToList() 없이 스트림 순회 → 메모리 절약
-- 한 번 빌드하면 Spool/Hydrotest 탭 모두 공유
+#### B. 레벨 타겟 (`BuildIndexForTags`) — Equipment용
+
+```
+Step 1: Excel 태그로 트리 탐색 → 첫 매칭 depth 기록
+Step 2: 해당 depth의 노드만 인덱싱 → 나머지 전체 스킵
+
+예: 200개 Equipment 태그가 depth 5에 존재
+  → depth 5만 순회 (~200 노드 인덱싱)
+  → 하위 수백만 geometry 노드 완전 스킵
+```
+
+**공통:**
+- DisplayName에서 앞의 '/' 제거 후 대문자 정규화
+- '/' 포함 키 자동 prefix 등록 (예: `TAG/VENSKID` → `TAG`도 등록)
+- 모델 변경 자동 감지 (`NeedsRebuild` — 파일 경로 + 모델 수 비교)
 
 ### 4. Color Override Engine (`Visualizers/ColorOverrideEngine.cs`)
 
@@ -62,62 +93,73 @@ BuildIndex:
 
 ```
 Apply:
-  1. 각 Spool/Package의 Stage 계산
+  1. 각 항목의 Stage 계산 (기준일 기반)
   2. Stage별로 ModelItem 그룹핑
-  3. Reset (기존 오버라이드 초기화)
-  4. Stage당 1회 API 호출 (OverridePermanentColor + OverridePermanentTransparency)
+  3. Stage당 1회 API 호출 (OverridePermanentColor)
+  4. 투명도 0%인 Stage는 OverridePermanentTransparency 생략
   5. 결과를 캐시에 저장 (Stage → ModelItemCollection)
 ```
 
-**증분 업데이트 (Incremental Update):**
+**증분 업데이트:**
+- 색상/투명도 변경 시 캐시된 Collection 재사용
+- Reset 없이 해당 Stage만 즉시 반영
 
-```
-UpdateStageColor(stageKey, setting):
-  캐시된 ModelItemCollection 재사용
-  → Reset 없이 해당 Stage만 색상/투명도 변경
-  → 색상 피커나 투명도 변경 시 즉시 반영
-```
+**성능 최적화 이력:**
 
-**성능 비교:**
-
-| 방식 | API 호출 수 | 설명 |
-|------|------------|------|
-| 건별 호출 (초기) | N (수천) | Spool/Package 하나당 1회 |
-| Stage별 배치 | 7~15 | Stage 하나당 1회 |
-| 증분 업데이트 | 2 | 변경된 Stage만 (Color + Transparency) |
-
-**미매칭 처리:**
-- Reset으로 초기화 → 매칭된 것만 색칠
-- 미매칭 아이템은 원래 모습 유지 (투명 처리 없음)
-- 전체 모델 순회하여 unmatched 찾는 비용 제거
+| 단계 | 변경 | 효과 |
+|------|------|------|
+| 건별 API 호출 | Stage별 배치 | 수천 → 7~15회 |
+| 전체 투명 처리 | Reset + 매칭만 색칠 | 전체 모델 순회 제거 |
+| 전체 트리 인덱싱 | 레벨 타겟 인덱싱 | Equipment 134s → <1s |
+| DescendantsAndSelf | 매칭 노드만 색칠 | 하위 트리 순회 제거 |
+| 투명도 0% 체크 | API 호출 생략 | Stage당 2→1 API |
 
 ### 5. User-Defined Properties (`Services/UserDataService.cs`)
 
-- COM API (ComApiBridge) 통해 매칭된 요소에 "Spool 실적" 속성 탭 삽입
-- dynamic COM interop 사용 (Interop namespace 의존성 회피)
+- COM API (`ComApiBridge`) + `Type.InvokeMember`로 IDispatch 직접 호출
+- `dynamic` 키워드로는 순수 COM 객체 메서드 접근 불가 → `InvokeMember` 사용
+- `SetUserDefined` (v1): 쓰기 가능, `UserDefined` (v2): 읽기 미지원
+- "User Property" 탭으로 특성 패널에 표시
 - NWD Export 시 속성 포함 → Freedom에서도 확인 가능
+
+**속성 내용:**
+- Spool: Spool Number, ISO No, 현재 단계, 14개 Stage 날짜
+- Equipment: Tag No, Description, Sub System, RFQ No, Delivery, 현재 단계, ETA, 날짜
 
 ### 6. UI Architecture (`UI/`)
 
-- **MainDockablePanel**: Searcher, OverrideEngine, Services를 공유하는 컨테이너
-- **SpoolTab / HydrotestTab**: 동일 패턴
-  - DateTimePicker (기준일)
-  - 2열 색상 패널 (즉시 반영)
-  - 전체/매칭/미매칭 탭 필터
-  - ListView 컬럼 정렬
-  - 텍스트 검색
-- **ToolsTab**: Property Dumper, Model Tree Dumper (디버깅)
+**탭 구성:** Hydrotest | Spool | Equipment | Tools
+
+**공통 패턴 (3개 탭 동일):**
+- DateTimePicker (기준일, 기본: 오늘)
+- 2열 색상 패널 (색상 피커 + 투명도 드롭다운)
+- 색상 변경 시 증분 업데이트 (캐시 활용)
+- 전체/매칭/미매칭 탭 필터 (건수 표시)
+- 검색 + "매칭 Status 출력" CSV Export
+- ListView 컬럼 정렬 (오름차순/내림차순)
+- 적용 / 전체 초기화 / 속성 쓰기 / Viewpoint 저장 / NWD Export
+
+**Tools 탭:**
+- Property Dumper: 선택 아이템 속성 CSV 출력
+- Model Tree Dumper: 모델 트리 구조 CSV 출력
+- User Data Test: COM 속성 쓰기 1건 테스트 + 진단
 
 ## Model Tree Structure
 
 ```
-NWD File
- └─ Project / ISO Group
-    └─ Area
-       └─ System No. / ISO No.
-          └─ Hydrotest Package No.  ← HydrotestTab 매칭 레벨
-             └─ Spool No.           ← SpoolTab 매칭 레벨
-                └─ Pipe, Elbow...   ← Geometry (인덱싱 제외)
+Equipment NWD:
+ └─ Area
+    └─ System
+       └─ Tag No. (101210-PBA-10240)        ← Equipment 매칭 레벨
+       └─ Tag No./VENSKID (prefix 매칭)      ← Equipment 매칭 레벨
+          └─ geometry...                      ← 인덱싱 스킵
+
+Piping NWD:
+ └─ ISO Group
+    └─ ISO No.
+       └─ Hydrotest Package No.              ← Hydrotest 매칭 레벨
+          └─ Spool No.                        ← Spool 매칭 레벨
+             └─ Pipe, Elbow...                ← 인덱싱 스킵
 ```
 
 ## Dependencies
@@ -126,7 +168,7 @@ NWD File
 |---------|---------|------|
 | ExcelDataReader | 3.6.0 | Excel 파일 읽기 (.xlsx/.xls/.xlsb) |
 | ExcelDataReader.DataSet | 3.6.0 | DataSet 변환 |
-| Microsoft.CSharp | 4.7.0 | dynamic 키워드 지원 |
+| Microsoft.CSharp | 4.7.0 | dynamic 키워드 (COM interop) |
 | Autodesk.Navisworks.Api | 2022 | Navisworks .NET API |
 | Autodesk.Navisworks.ComApi | 2022 | COM API Bridge |
-| Autodesk.Navisworks.Interop.ComApi | 2022 | COM 타입 정의 |
+| Autodesk.Navisworks.Interop.ComApi | 2022 | COM 타입 정의 (enum) |
