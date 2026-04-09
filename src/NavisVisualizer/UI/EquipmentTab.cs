@@ -299,7 +299,11 @@ namespace NavisVisualizer.UI
             _progressBar.Style = ProgressBarStyle.Marquee;
             _progressBar.Visible = true;
             Application.DoEvents();
-            _main.Searcher.BuildIndex(doc);
+
+            // Use level-targeted indexing with known tags from Excel
+            var tagSet = new HashSet<string>(_equipments.Select(eq => eq.TagNo));
+            _main.Searcher.BuildIndexForTags(doc, tagSet);
+
             _progressBar.Visible = false;
             _progressBar.Style = ProgressBarStyle.Blocks;
         }
