@@ -224,29 +224,8 @@ namespace NavisVisualizer.Services
                     try
                     {
                         object propVec = BuildEquipmentPropVec(comState, bf, equip, stage);
-
-                        // Write to the matched item itself
                         WriteToItem(comState, bf, item, propVec);
                         written++;
-
-                        // Also write to parent (for prefix matches like Tag/VENSKID)
-                        var parent = item.Parent;
-                        if (parent != null)
-                        {
-                            string parentName = parent.DisplayName?.TrimStart('/').Trim() ?? "";
-                            string tagUpper = equip.TagNo.ToUpperInvariant();
-                            // Write to parent if its name matches or starts with the tag
-                            if (parentName.ToUpperInvariant().StartsWith(tagUpper) ||
-                                tagUpper.StartsWith(parentName.ToUpperInvariant()))
-                            {
-                                try
-                                {
-                                    object parentPropVec = BuildEquipmentPropVec(comState, bf, equip, stage);
-                                    WriteToItem(comState, bf, parent, parentPropVec);
-                                }
-                                catch { }
-                            }
-                        }
                     }
                     catch (Exception ex)
                     {
