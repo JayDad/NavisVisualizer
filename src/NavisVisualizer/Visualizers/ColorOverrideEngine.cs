@@ -146,16 +146,17 @@ namespace NavisVisualizer.Visualizers
                 list.AddRange(items);
             }
 
-            // Equipment: expand descendants (tag node + all child geometry)
-            // Fast now that prefix loop is eliminated — only expansion cost remains
+            // Equipment: tag node + direct children only (1 level)
+            // Avoids full DescendantsAndSelf traversal for speed
             foreach (var kv in stageItems)
             {
                 string key = kv.Key.ToString();
                 var collection = new ModelItemCollection();
                 foreach (var item in kv.Value)
                 {
-                    foreach (var desc in item.DescendantsAndSelf)
-                        collection.Add(desc);
+                    collection.Add(item);
+                    foreach (var child in item.Children)
+                        collection.Add(child);
                 }
                 _cachedStageCollections[key] = collection;
 
