@@ -312,15 +312,8 @@ namespace NavisVisualizer.UI
                 MessageBox.Show("Excel을 먼저 로드하고 모델을 열어주세요.");
                 return;
             }
-
-            var sw = System.Diagnostics.Stopwatch.StartNew();
-            long indexMs = 0;
-
             if (_main.Searcher.NeedsRebuild(doc))
-            {
                 BuildIndex();
-                indexMs = sw.ElapsedMilliseconds;
-            }
 
             var activeSettings = new Dictionary<EquipmentStage, ColorSetting>();
             foreach (var kv in _colorRows)
@@ -328,9 +321,7 @@ namespace NavisVisualizer.UI
                     activeSettings[kv.Key] = _colorSettings[kv.Key];
 
             var referenceDate = _dtpReference.Value;
-            long beforeApply = sw.ElapsedMilliseconds;
             var result = _main.OverrideEngine.ApplyEquipment(doc, _equipments, activeSettings, referenceDate);
-            long applyMs = sw.ElapsedMilliseconds - beforeApply;
 
             _unmatchedTagNos = result.UnmatchedIds;
             var unmatchedSet = new HashSet<string>(result.UnmatchedIds, StringComparer.OrdinalIgnoreCase);
@@ -343,7 +334,6 @@ namespace NavisVisualizer.UI
             _tabFilter.TabPages[2].Text = $"미매칭 ({_unmatchedTagNos.Count})";
 
             UpdateStats(result);
-            _lblStats.Text += $"\n인덱스 {indexMs}ms  적용 {applyMs}ms  총 {sw.ElapsedMilliseconds}ms  인덱스항목 {_main.Searcher.IndexedCount}";
             FilterList();
         }
 

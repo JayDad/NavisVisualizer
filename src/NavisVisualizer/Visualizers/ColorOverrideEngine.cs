@@ -146,18 +146,11 @@ namespace NavisVisualizer.Visualizers
                 list.AddRange(items);
             }
 
-            // Equipment: tag node + direct children only (1 level)
-            // Avoids full DescendantsAndSelf traversal for speed
+            // Equipment: matched nodes only (same as Spool/Hydrotest)
             foreach (var kv in stageItems)
             {
                 string key = kv.Key.ToString();
-                var collection = new ModelItemCollection();
-                foreach (var item in kv.Value)
-                {
-                    collection.Add(item);
-                    foreach (var child in item.Children)
-                        collection.Add(child);
-                }
+                var collection = ToCollection(kv.Value);
                 _cachedStageCollections[key] = collection;
 
                 if (colorSettings.TryGetValue(kv.Key, out var setting))
