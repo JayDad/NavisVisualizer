@@ -26,32 +26,63 @@ namespace NavisVisualizer.Searchers
             _isBuilt = false;
             _lastDocumentId = GetDocumentId(doc);
 
-            foreach (var item in doc.Models.RootItemDescendantsAndSelf)
+            // Recursive walk — stops descending into children of tag-like nodes
+            foreach (var model in doc.Models)
             {
-                string displayName = item.DisplayName?.Trim();
-                if (string.IsNullOrEmpty(displayName)) continue;
-
-                // Skip unnamed leaf geometry (Pipe, Elbow, etc.)
-                if (!item.Children.Any() && !ContainsDigit(displayName))
-                    continue;
-
-                string key = displayName.TrimStart('/').Trim();
-                if (string.IsNullOrEmpty(key)) continue;
-                key = key.ToUpperInvariant();
-
-                AddToIndex(key, item);
-
-                // Also register prefix key (before first '/') for Equipment tag matching
-                // e.g., "101210-ZZZ-10310/VENSKID" → also indexed under "101210-ZZZ-10310"
-                int slashIdx = key.IndexOf('/');
-                if (slashIdx > 0)
-                {
-                    string prefix = key.Substring(0, slashIdx);
-                    AddToIndex(prefix, item);
-                }
+                WalkAndIndex(model.RootItem);
             }
 
             _isBuilt = true;
+        }
+
+        private void WalkAndIndex(ModelItem item)
+        {
+            string displayName = item.DisplayName?.Trim();
+            bool indexed = false;
+
+            if (!string.IsNullOrEmpty(displayName) && ContainsDigit(displayName))
+            {
+                string key = displayName.TrimStart('/').Trim();
+                if (!string.IsNullOrEmpty(key))
+                {
+                    key = key.ToUpperInvariant();
+                    AddToIndex(key, item);
+                    indexed = true;
+
+                    // Prefix key for Equipment tag matching (before first '/')
+                    int slashIdx = key.IndexOf('/');
+                    if (slashIdx > 0)
+                        AddToIndex(key.Substring(0, slashIdx), item);
+                }
+            }
+
+            if (indexed)
+            {
+                // Tag-like node found — index direct children (for sub-tags like /VENSKID)
+                // but do NOT recurse deeper (skip geometry)
+                foreach (var child in item.Children)
+                {
+                    string childName = child.DisplayName?.Trim();
+                    if (!string.IsNullOrEmpty(childName) && ContainsDigit(childName))
+                    {
+                        string childKey = childName.TrimStart('/').Trim();
+                        if (!string.IsNullOrEmpty(childKey))
+                        {
+                            childKey = childKey.ToUpperInvariant();
+                            AddToIndex(childKey, child);
+
+                            int slashIdx = childKey.IndexOf('/');
+                            if (slashIdx > 0)
+                                AddToIndex(childKey.Substring(0, slashIdx), child);
+                        }
+                    }
+                }
+                return; // STOP — don't recurse into geometry children
+            }
+
+            // Not a tag node — keep recursing
+            foreach (var child in item.Children)
+                WalkAndIndex(child);
         }
 
         private void AddToIndex(string key, ModelItem item)
@@ -79,13 +110,9 @@ namespace NavisVisualizer.Searchers
             return result;
         }
 
-        /// <summary>
-        /// Find items by Tag No. — uses exact match via pre-built prefix index.
-        /// No prefix loop needed since BuildIndex registers prefix keys automatically.
-        /// </summary>
         public Dictionary<string, List<ModelItem>> FindByTagPrefix(IEnumerable<string> tagNos)
         {
-            return FindBySpoolIds(tagNos); // Same logic — prefix keys already in index
+            return FindBySpoolIds(tagNos);
         }
 
         public void Reset()
