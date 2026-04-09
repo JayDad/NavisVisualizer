@@ -428,6 +428,8 @@ namespace NavisVisualizer.UI
             if (collection.Count == 0) return;
             doc.CurrentSelection.CopyFrom(collection);
             doc.ActiveView.FocusOnCurrentSelection();
+        }
+
         private void ListView_ColumnClick(object sender, ColumnClickEventArgs e)
         {
             if (e.Column == _sortColumn) _sortAscending = !_sortAscending;
