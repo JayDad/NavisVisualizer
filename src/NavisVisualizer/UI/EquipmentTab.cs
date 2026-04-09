@@ -411,22 +411,23 @@ namespace NavisVisualizer.UI
         private void ListView_SelectedIndexChanged(object sender, EventArgs e)
         {
             if (_listView.SelectedItems.Count == 0) return;
-            var tag = _listView.SelectedItems[0].Tag as EquipmentData;
-            if (tag == null) return;
 
             var doc = _main.GetDocument();
             if (doc == null || !_main.Searcher.IsIndexBuilt || _main.Searcher.NeedsRebuild(doc)) return;
 
-            var found = _main.Searcher.FindByTagPrefix(new[] { tag.TagNo });
-            var items = found.Values.SelectMany(v => v).ToList();
-            if (items.Count == 0) return;
-
             var collection = new Autodesk.Navisworks.Api.ModelItemCollection();
-            collection.AddRange(items);
+            foreach (ListViewItem selected in _listView.SelectedItems)
+            {
+                var equip = selected.Tag as EquipmentData;
+                if (equip == null) continue;
+                var found = _main.Searcher.FindByTagPrefix(new[] { equip.TagNo });
+                foreach (var items in found.Values)
+                    collection.AddRange(items);
+            }
+
+            if (collection.Count == 0) return;
             doc.CurrentSelection.CopyFrom(collection);
             doc.ActiveView.FocusOnCurrentSelection();
-        }
-
         private void ListView_ColumnClick(object sender, ColumnClickEventArgs e)
         {
             if (e.Column == _sortColumn) _sortAscending = !_sortAscending;

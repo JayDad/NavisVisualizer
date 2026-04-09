@@ -410,18 +410,21 @@ namespace NavisVisualizer.UI
         private void ListView_SelectedIndexChanged(object sender, EventArgs e)
         {
             if (_listView.SelectedItems.Count == 0) return;
-            var tag = _listView.SelectedItems[0].Tag as SpoolData;
-            if (tag == null) return;
 
             var doc = _main.GetDocument();
             if (doc == null || !_main.Searcher.IsIndexBuilt || _main.Searcher.NeedsRebuild(doc)) return;
 
-            var found = _main.Searcher.FindBySpoolIds(new[] { tag.SpoolId });
-            var items = found.Values.SelectMany(v => v).ToList();
-            if (items.Count == 0) return;
-
             var collection = new Autodesk.Navisworks.Api.ModelItemCollection();
-            collection.AddRange(items);
+            foreach (ListViewItem selected in _listView.SelectedItems)
+            {
+                var spool = selected.Tag as SpoolData;
+                if (spool == null) continue;
+                var found = _main.Searcher.FindBySpoolIds(new[] { spool.SpoolId });
+                foreach (var items in found.Values)
+                    collection.AddRange(items);
+            }
+
+            if (collection.Count == 0) return;
             doc.CurrentSelection.CopyFrom(collection);
             doc.ActiveView.FocusOnCurrentSelection();
         }
