@@ -26,61 +26,49 @@ namespace NavisVisualizer.Searchers
             _isBuilt = false;
             _lastDocumentId = GetDocumentId(doc);
 
-            // Recursive walk — stops descending into children of tag-like nodes
             foreach (var model in doc.Models)
-            {
                 WalkAndIndex(model.RootItem);
-            }
 
             _isBuilt = true;
         }
 
         private void WalkAndIndex(ModelItem item)
         {
-            string displayName = item.DisplayName?.Trim();
-            bool indexed = false;
+            string name = item.DisplayName?.Trim();
+            bool isTagLike = !string.IsNullOrEmpty(name) && ContainsDigit(name);
 
-            if (!string.IsNullOrEmpty(displayName) && ContainsDigit(displayName))
+            if (isTagLike)
             {
-                string key = displayName.TrimStart('/').Trim();
+                string key = name.TrimStart('/').Trim();
                 if (!string.IsNullOrEmpty(key))
                 {
                     key = key.ToUpperInvariant();
                     AddToIndex(key, item);
-                    indexed = true;
 
-                    // Prefix key for Equipment tag matching (before first '/')
-                    int slashIdx = key.IndexOf('/');
-                    if (slashIdx > 0)
-                        AddToIndex(key.Substring(0, slashIdx), item);
+                    int slash = key.IndexOf('/');
+                    if (slash > 0)
+                        AddToIndex(key.Substring(0, slash), item);
                 }
-            }
 
-            if (indexed)
-            {
-                // Tag-like node found — index direct children (for sub-tags like /VENSKID)
-                // but do NOT recurse deeper (skip geometry)
+                // Check if any child also has a tag-like name
+                // If yes → deeper tags exist → keep recursing
+                // If no → leaf tag (children are geometry) → STOP
+                bool hasTagChild = false;
                 foreach (var child in item.Children)
                 {
                     string childName = child.DisplayName?.Trim();
                     if (!string.IsNullOrEmpty(childName) && ContainsDigit(childName))
                     {
-                        string childKey = childName.TrimStart('/').Trim();
-                        if (!string.IsNullOrEmpty(childKey))
-                        {
-                            childKey = childKey.ToUpperInvariant();
-                            AddToIndex(childKey, child);
-
-                            int slashIdx = childKey.IndexOf('/');
-                            if (slashIdx > 0)
-                                AddToIndex(childKey.Substring(0, slashIdx), child);
-                        }
+                        hasTagChild = true;
+                        break;
                     }
                 }
-                return; // STOP — don't recurse into geometry children
+
+                if (!hasTagChild)
+                    return; // STOP — children are geometry, no deeper tags
             }
 
-            // Not a tag node — keep recursing
+            // Keep recursing
             foreach (var child in item.Children)
                 WalkAndIndex(child);
         }
