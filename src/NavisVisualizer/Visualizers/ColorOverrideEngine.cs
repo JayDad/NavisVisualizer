@@ -169,12 +169,14 @@ namespace NavisVisualizer.Visualizers
             var result = new OverrideResult();
             var stageItems = new Dictionary<EitStage, List<ModelItem>>();
 
-            var allTrayNos = trays.Select(t => t.TrayNumber).Distinct();
-            var searchResult = _searcher.FindBySpoolIds(allTrayNos);
+            // Model indexes strip leading '/' — match Excel tray numbers accordingly
+            var normalizedIds = trays.Select(t => EitTrayData.NormalizeId(t.TrayNumber)).Distinct();
+            var searchResult = _searcher.FindBySpoolIds(normalizedIds);
 
             foreach (var tray in trays)
             {
-                if (!searchResult.TryGetValue(tray.TrayNumber, out var items) || items.Count == 0)
+                string key = EitTrayData.NormalizeId(tray.TrayNumber);
+                if (!searchResult.TryGetValue(key, out var items) || items.Count == 0)
                 {
                     result.UnmatchedIds.Add(tray.TrayNumber);
                     continue;

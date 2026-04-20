@@ -354,7 +354,7 @@ namespace NavisVisualizer.UI
             {
                 var tray = selected.Tag as EitTrayData;
                 if (tray == null) continue;
-                var found = _main.Searcher.FindBySpoolIds(new[] { tray.TrayNumber });
+                var found = _main.Searcher.FindBySpoolIds(new[] { EitTrayData.NormalizeId(tray.TrayNumber) });
                 foreach (var items in found.Values)
                     collection.AddRange(items);
             }

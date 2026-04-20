@@ -336,6 +336,17 @@ namespace NavisVisualizer.Models
             if (cableProgress.Value > 0.0) return EitStage.CablePulling;
             return EitStage.TrayInstalled;
         }
+
+        /// <summary>
+        /// Model tree indexer strips leading '/' from DisplayName, so Excel Tray
+        /// Numbers like "/101890-INT-25018-CM-PDA-CV/B1" must be normalized the
+        /// same way before lookup.
+        /// </summary>
+        public static string NormalizeId(string id)
+        {
+            if (string.IsNullOrEmpty(id)) return "";
+            return id.TrimStart('/').Trim();
+        }
     }
 
     public class EitCableRecord
