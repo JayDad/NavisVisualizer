@@ -151,11 +151,12 @@ namespace NavisVisualizer.UI
             var allStages = new[] { EitStage.NotStarted }.Concat(EitStageInfo.OrderedStages).ToArray();
             var panel = new Panel { Dock = DockStyle.Fill, AutoSize = true };
             var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 8, AutoSize = true };
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 95));
+            // Checkbox column widened to fit "Cable 포설중" (6 chars + checkbox square)
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 36));
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 22));
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 62));
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 95));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 120));
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 36));
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 22));
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 62));
