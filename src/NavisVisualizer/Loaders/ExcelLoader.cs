@@ -227,6 +227,89 @@ namespace NavisVisualizer.Loaders
             return items;
         }
 
+        public static List<EitTrayData> LoadEitTray(string filePath)
+        {
+            var trayHeaderNames = new[] { "Tray Number", "TrayNumber", "Tray No", "Tray No." };
+            var byTray = new Dictionary<string, EitTrayData>(StringComparer.OrdinalIgnoreCase);
+            var order = new List<string>();
+
+            using (var stream = File.Open(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            using (var reader = ExcelReaderFactory.CreateReader(stream))
+            {
+                var dataSet = reader.AsDataSet();
+
+                System.Data.DataTable table = null;
+                int headerRowIdx = -1;
+
+                foreach (System.Data.DataTable dt in dataSet.Tables)
+                {
+                    int row = FindHeaderRowInTable(dt, trayHeaderNames);
+                    if (row >= 0) { table = dt; headerRowIdx = row; break; }
+                }
+
+                if (table == null || headerRowIdx < 0)
+                    throw new Exception("'Tray Number' 헤더를 포함한 시트를 찾을 수 없습니다.");
+
+                var cols = BuildColumnMap(table, headerRowIdx);
+
+                int trayNoCol       = FindColumn(cols, trayHeaderNames);
+                int trayTypeCol     = FindColumn(cols, "Tray type", "Tray Type", "TrayType");
+                int trayMrCol       = FindColumn(cols, "Tray MR", "TrayMR");
+                int trayCompMrCol   = FindColumn(cols, "Tray Complete MR", "Tray Comp MR", "TrayCompleteMR");
+                int trayProgCol     = FindColumn(cols, "Tray Progress", "TrayProgress");
+                int trayDateCol     = FindColumn(cols, "Tray install date", "Tray Install Date", "TrayInstallDate", "Install Date");
+                int routeCol        = FindColumn(cols, "Route Number", "RouteNumber", "Route No", "Route");
+                int cableAssumeCol  = FindColumn(cols, "Cable Assume lth", "Cable Assume Lth", "Cable Assume", "CableAssumeLth");
+                int cablePullCol    = FindColumn(cols, "Cable Pull lth", "Cable Pull Lth", "Cable Pull", "CablePullLth");
+                int cableProgCol    = FindColumn(cols, "Cable Progress", "CableProgress");
+
+                if (trayNoCol < 0)
+                    throw new Exception("'Tray Number' 컬럼을 찾을 수 없습니다.");
+
+                for (int r = headerRowIdx + 1; r < table.Rows.Count; r++)
+                {
+                    var row = table.Rows[r];
+                    string trayNo = row[trayNoCol]?.ToString()?.Trim();
+                    if (string.IsNullOrEmpty(trayNo)) continue;
+
+                    if (!byTray.TryGetValue(trayNo, out var tray))
+                    {
+                        tray = new EitTrayData
+                        {
+                            TrayNumber = trayNo,
+                            TrayType = trayTypeCol >= 0 ? row[trayTypeCol]?.ToString()?.Trim() ?? "" : "",
+                            TrayMr = trayMrCol >= 0 ? ParseDouble(row[trayMrCol]) : null,
+                            TrayCompleteMr = trayCompMrCol >= 0 ? ParseDouble(row[trayCompMrCol]) : null,
+                            TrayProgress = trayProgCol >= 0 ? ParsePercentage(row[trayProgCol]) : null,
+                            TrayInstallDate = trayDateCol >= 0 ? ParseCellValue(row[trayDateCol]) : null,
+                        };
+                        byTray[trayNo] = tray;
+                        order.Add(trayNo);
+                    }
+
+                    string routeNo = routeCol >= 0 ? row[routeCol]?.ToString()?.Trim() ?? "" : "";
+                    double? assume = cableAssumeCol >= 0 ? ParseDouble(row[cableAssumeCol]) : null;
+                    double? pull = cablePullCol >= 0 ? ParseDouble(row[cablePullCol]) : null;
+                    double? cProg = cableProgCol >= 0 ? ParsePercentage(row[cableProgCol]) : null;
+
+                    if (!string.IsNullOrEmpty(routeNo) || assume.HasValue || pull.HasValue || cProg.HasValue)
+                    {
+                        tray.Cables.Add(new EitCableRecord
+                        {
+                            RouteNumber = routeNo,
+                            AssumeLength = assume,
+                            PullLength = pull,
+                            Progress = cProg,
+                        });
+                    }
+                }
+            }
+
+            var result = new List<EitTrayData>(order.Count);
+            foreach (var k in order) result.Add(byTray[k]);
+            return result;
+        }
+
         #region Shared helpers
 
         private static Dictionary<string, int> BuildColumnMap(System.Data.DataTable table, int headerRowIdx)
@@ -276,6 +359,35 @@ namespace NavisVisualizer.Loaders
             string str = value.ToString()?.Trim();
             if (string.IsNullOrEmpty(str)) return null;
             return DateTime.TryParse(str, out var parsed) ? parsed : (DateTime?)null;
+        }
+
+        private static double? ParseDouble(object value)
+        {
+            if (value == null || value == DBNull.Value) return null;
+            if (value is double d) return d;
+            if (value is float f) return f;
+            if (value is int i) return i;
+            if (value is long l) return l;
+            if (value is decimal m) return (double)m;
+            string str = value.ToString()?.Trim();
+            if (string.IsNullOrEmpty(str)) return null;
+            return double.TryParse(str, out var parsed) ? parsed : (double?)null;
+        }
+
+        /// <summary>Parse percentage cell: "100%" → 1.0, 0.19 → 0.19, "19%" → 0.19.</summary>
+        private static double? ParsePercentage(object value)
+        {
+            if (value == null || value == DBNull.Value) return null;
+            if (value is double d) return d > 1.0 ? d / 100.0 : d;
+            if (value is float f) return f > 1.0f ? f / 100.0 : f;
+            if (value is int i) return i > 1 ? i / 100.0 : i;
+            if (value is decimal m) { double dv = (double)m; return dv > 1.0 ? dv / 100.0 : dv; }
+            string str = value.ToString()?.Trim();
+            if (string.IsNullOrEmpty(str)) return null;
+            bool hasPct = str.EndsWith("%");
+            if (hasPct) str = str.Substring(0, str.Length - 1).Trim();
+            if (!double.TryParse(str, out var parsed)) return null;
+            return hasPct || parsed > 1.0 ? parsed / 100.0 : parsed;
         }
 
         #endregion

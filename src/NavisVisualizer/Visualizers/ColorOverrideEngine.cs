@@ -160,6 +160,53 @@ namespace NavisVisualizer.Visualizers
             return result;
         }
 
+        public OverrideResult ApplyEit(
+            Document doc,
+            List<EitTrayData> trays,
+            Dictionary<EitStage, ColorSetting> colorSettings,
+            DateTime referenceDate)
+        {
+            var result = new OverrideResult();
+            var stageItems = new Dictionary<EitStage, List<ModelItem>>();
+
+            var allTrayNos = trays.Select(t => t.TrayNumber).Distinct();
+            var searchResult = _searcher.FindBySpoolIds(allTrayNos);
+
+            foreach (var tray in trays)
+            {
+                if (!searchResult.TryGetValue(tray.TrayNumber, out var items) || items.Count == 0)
+                {
+                    result.UnmatchedIds.Add(tray.TrayNumber);
+                    continue;
+                }
+                result.MatchedCount++;
+
+                var stage = tray.GetStageAtDate(referenceDate);
+                if (!colorSettings.ContainsKey(stage)) continue;
+
+                if (!stageItems.TryGetValue(stage, out var list))
+                {
+                    list = new List<ModelItem>();
+                    stageItems[stage] = list;
+                }
+                list.AddRange(items);
+            }
+
+            _cachedStageCollections.Clear();
+
+            foreach (var kv in stageItems)
+            {
+                string key = kv.Key.ToString();
+                var collection = ToCollection(kv.Value);
+                _cachedStageCollections[key] = collection;
+
+                if (colorSettings.TryGetValue(kv.Key, out var setting))
+                    ApplyOverride(doc, collection, setting);
+            }
+
+            return result;
+        }
+
         public bool UpdateStageColor(Document doc, string stageKey, ColorSetting setting)
         {
             if (!_cachedStageCollections.TryGetValue(stageKey, out var collection))
