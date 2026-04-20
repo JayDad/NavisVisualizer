@@ -240,8 +240,9 @@ namespace NavisVisualizer.Visualizers
         {
             if (collection.Count == 0) return;
             doc.Models.OverridePermanentColor(collection, ToNwColor(setting.DisplayColor));
-            if (setting.Transparency > 0.001)
-                doc.Models.OverridePermanentTransparency(collection, setting.Transparency);
+            // Always call — if a previous apply set transparency > 0 and the user dials it
+            // back to 0, skipping here would leave the old transparency override in place.
+            doc.Models.OverridePermanentTransparency(collection, setting.Transparency);
         }
 
         private NwColor ToNwColor(System.Drawing.Color c) =>

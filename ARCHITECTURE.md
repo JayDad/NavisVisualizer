@@ -124,7 +124,7 @@ Apply:
 | 전체 투명 처리 | Reset + 매칭만 색칠 | 전체 모델 순회 제거 |
 | 전체 트리 인덱싱 | 레벨 타겟 인덱싱 | Equipment 134s → <1s |
 | DescendantsAndSelf | 매칭 노드만 색칠 | 하위 트리 순회 제거 |
-| 투명도 0% 체크 | API 호출 생략 | Stage당 2→1 API |
+| ~~투명도 0% 체크~~ (철회) | ~~API 호출 생략~~ | 투명도 증분 조정 시 이전 override가 남아 복원 불가 — 항상 호출로 복귀 |
 
 ### 5. User-Defined Properties (`Services/UserDataService.cs`)
 
