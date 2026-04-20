@@ -8,7 +8,15 @@ namespace NavisVisualizer.UI
 {
     public class MainDockablePanel : UserControl
     {
-        public ModelItemSearcher Searcher { get; } = new ModelItemSearcher();
+        /// <summary>
+        /// Shared full-walk index for Spool / Hydrotest / EIT Tray.
+        /// All three match by "digit-containing DisplayName" in the same tree traversal pattern.
+        /// </summary>
+        public ModelItemSearcher TagSearcher { get; } = new ModelItemSearcher();
+
+        /// <summary>Dedicated level-targeted index for Equipment (different match strategy).</summary>
+        public ModelItemSearcher EquipmentSearcher { get; } = new ModelItemSearcher();
+
         public ColorOverrideEngine OverrideEngine { get; }
         public ExportService ExportSvc { get; } = new ExportService();
         public UserDataService UserDataSvc { get; } = new UserDataService();
@@ -22,7 +30,7 @@ namespace NavisVisualizer.UI
 
         public MainDockablePanel()
         {
-            OverrideEngine = new ColorOverrideEngine(Searcher);
+            OverrideEngine = new ColorOverrideEngine(TagSearcher, EquipmentSearcher);
             InitializeComponent();
         }
 

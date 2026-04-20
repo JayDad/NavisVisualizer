@@ -254,10 +254,10 @@ namespace NavisVisualizer.UI
 
             // Get fresh search results for diagnostics
             Dictionary<string, List<Autodesk.Navisworks.Api.ModelItem>> searchResult = null;
-            if (doc != null && _main.Searcher.IsIndexBuilt)
+            if (doc != null && _main.EquipmentSearcher.IsIndexBuilt)
             {
                 var allTags = _equipments.Select(eq => eq.TagNo).Distinct();
-                searchResult = _main.Searcher.FindByTagPrefix(allTags);
+                searchResult = _main.EquipmentSearcher.FindByTagPrefix(allTags);
             }
 
             var lines = new List<string>();
@@ -284,12 +284,12 @@ namespace NavisVisualizer.UI
 
             // Add index stats at bottom
             lines.Add("");
-            lines.Add($"\"인덱스 항목 수: {_main.Searcher.IndexedCount}\"");
+            lines.Add($"\"인덱스 항목 수: {_main.EquipmentSearcher.IndexedCount}\"");
 
             string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
                 $"Equipment_Match_{DateTime.Now:yyyyMMdd_HHmmss}.csv");
             File.WriteAllLines(path, lines, System.Text.Encoding.UTF8);
-            MessageBox.Show($"저장 완료: {path}\n인덱스: {_main.Searcher.IndexedCount}건");
+            MessageBox.Show($"저장 완료: {path}\n인덱스: {_main.EquipmentSearcher.IndexedCount}건");
         }
 
         private void BuildIndex()
@@ -302,7 +302,7 @@ namespace NavisVisualizer.UI
 
             // Use level-targeted indexing with known tags from Excel
             var tagSet = new HashSet<string>(_equipments.Select(eq => eq.TagNo));
-            _main.Searcher.BuildIndexForTags(doc, tagSet);
+            _main.EquipmentSearcher.BuildIndexForTags(doc, tagSet);
 
             _progressBar.Visible = false;
             _progressBar.Style = ProgressBarStyle.Blocks;
@@ -316,7 +316,7 @@ namespace NavisVisualizer.UI
                 MessageBox.Show("Excel을 먼저 로드하고 모델을 열어주세요.");
                 return;
             }
-            if (_main.Searcher.NeedsRebuild(doc))
+            if (_main.EquipmentSearcher.NeedsRebuild(doc))
                 BuildIndex();
 
             var activeSettings = new Dictionary<EquipmentStage, ColorSetting>();
@@ -349,7 +349,7 @@ namespace NavisVisualizer.UI
                 MessageBox.Show("Excel을 먼저 로드하고 모델을 열어주세요.");
                 return;
             }
-            if (_main.Searcher.NeedsRebuild(doc))
+            if (_main.EquipmentSearcher.NeedsRebuild(doc))
                 BuildIndex();
 
             try
@@ -361,7 +361,7 @@ namespace NavisVisualizer.UI
 
                 var referenceDate = _dtpReference.Value;
                 var allTagNos = _equipments.Select(eq => eq.TagNo).Distinct();
-                var searchResult = _main.Searcher.FindByTagPrefix(allTagNos);
+                var searchResult = _main.EquipmentSearcher.FindByTagPrefix(allTagNos);
                 int written = _main.UserDataSvc.WriteEquipmentProperties(_equipments, searchResult, referenceDate);
 
                 _lblStats.Text += $"\n속성 {written}건 삽입 완료";
@@ -413,14 +413,14 @@ namespace NavisVisualizer.UI
             if (_listView.SelectedItems.Count == 0) return;
 
             var doc = _main.GetDocument();
-            if (doc == null || !_main.Searcher.IsIndexBuilt || _main.Searcher.NeedsRebuild(doc)) return;
+            if (doc == null || !_main.EquipmentSearcher.IsIndexBuilt || _main.EquipmentSearcher.NeedsRebuild(doc)) return;
 
             var collection = new Autodesk.Navisworks.Api.ModelItemCollection();
             foreach (ListViewItem selected in _listView.SelectedItems)
             {
                 var equip = selected.Tag as EquipmentData;
                 if (equip == null) continue;
-                var found = _main.Searcher.FindByTagPrefix(new[] { equip.TagNo });
+                var found = _main.EquipmentSearcher.FindByTagPrefix(new[] { equip.TagNo });
                 foreach (var items in found.Values)
                     collection.AddRange(items);
             }

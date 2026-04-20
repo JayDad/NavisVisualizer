@@ -273,7 +273,7 @@ namespace NavisVisualizer.UI
             _progressBar.Style = ProgressBarStyle.Marquee;
             _progressBar.Visible = true;
             Application.DoEvents();
-            _main.Searcher.BuildIndex(doc);
+            _main.TagSearcher.BuildIndex(doc);
             _progressBar.Visible = false;
             _progressBar.Style = ProgressBarStyle.Blocks;
         }
@@ -286,7 +286,7 @@ namespace NavisVisualizer.UI
                 MessageBox.Show("Excel을 먼저 로드하고 모델을 열어주세요.");
                 return;
             }
-            if (_main.Searcher.NeedsRebuild(doc))
+            if (_main.TagSearcher.NeedsRebuild(doc))
                 BuildIndex();
 
             var activeSettings = new Dictionary<EitStage, ColorSetting>();
@@ -347,14 +347,14 @@ namespace NavisVisualizer.UI
             if (_listView.SelectedItems.Count == 0) return;
 
             var doc = _main.GetDocument();
-            if (doc == null || !_main.Searcher.IsIndexBuilt || _main.Searcher.NeedsRebuild(doc)) return;
+            if (doc == null || !_main.TagSearcher.IsIndexBuilt || _main.TagSearcher.NeedsRebuild(doc)) return;
 
             var collection = new Autodesk.Navisworks.Api.ModelItemCollection();
             foreach (ListViewItem selected in _listView.SelectedItems)
             {
                 var tray = selected.Tag as EitTrayData;
                 if (tray == null) continue;
-                var found = _main.Searcher.FindBySpoolIds(new[] { EitTrayData.NormalizeId(tray.TrayNumber) });
+                var found = _main.TagSearcher.FindBySpoolIds(new[] { EitTrayData.NormalizeId(tray.TrayNumber) });
                 foreach (var items in found.Values)
                     collection.AddRange(items);
             }

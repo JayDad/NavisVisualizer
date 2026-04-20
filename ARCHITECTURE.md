@@ -15,11 +15,17 @@ Excel (.xlsx/.xls/.xlsb)
 
 ## Modules
 
-| 모듈 | Stage 수 | 매칭 키 | 인덱싱 방식 |
-|------|---------|---------|------------|
-| **Spool** | 14 (B/V → Welding) | Spool Number (DisplayName) | 재귀 탐색 (WalkAndIndex) |
-| **Hydrotest** | 6 (Review → Reinstatement) | Test Package No. (DisplayName) | 재귀 탐색 (WalkAndIndex) |
-| **Equipment** | 4 (Delivery → Inspection) | Tag No. (DisplayName, prefix 지원) | 레벨 타겟 (BuildIndexForTags) |
+| 모듈 | Stage 수 | 매칭 키 | 인덱싱 방식 | Searcher |
+|------|---------|---------|------------|----------|
+| **Spool** | 14 (B/V → Welding) | Spool Number (DisplayName) | 재귀 탐색 (WalkAndIndex) | `TagSearcher` 공유 |
+| **Hydrotest** | 6 (Review → Reinstatement) | Test Package No. (DisplayName) | 재귀 탐색 (WalkAndIndex) | `TagSearcher` 공유 |
+| **Equipment** | 4 (Delivery → Inspection) | Tag No. (DisplayName, prefix 지원) | 레벨 타겟 (BuildIndexForTags) | `EquipmentSearcher` 전용 |
+| **EIT Tray** | 4 (Tray 설치 → Cable 완료) | Tray Number (leading `/` 정규화 후) | 재귀 탐색 (WalkAndIndex) | `TagSearcher` 공유 |
+
+### Searcher 분리 근거
+- **TagSearcher**: Spool / Hydrotest / EIT Tray는 *동일* 매칭 전략(`WalkAndIndex` + `FindBySpoolIds`) — 한 번 빌드하면 셋 다 조회 가능
+- **EquipmentSearcher**: 레벨-타겟 전략으로 인덱스 구조가 근본적으로 달라 충돌 방지 목적의 물리적 분리
+- 단일 Searcher 공유 시: Equipment 먼저 적용 → TagSearcher 탭은 비어 있는 레벨-타겟 인덱스를 재사용 → 0 매칭 (버그)
 
 ## Data Flow
 
@@ -56,6 +62,12 @@ GetStageAtDate(referenceDate):
 **Equipment** (4단계):
 - Delivery (Delivered + Confirmed ETA), Loading, Setting, Inspection
 - Delivery 특수 로직: "Delivered" 텍스트 상태 + Confirmed ETA 날짜 조합
+
+**EIT Tray** (4단계):
+- NotStarted → TrayInstalled → CablePulling → CableCompleted
+- 기준일과 `Tray install date` 비교로 NotStarted/Installed 판정
+- Tray Installed 이후: `Best Cable Progress` 기준 (≥100% → Completed, >0% → Pulling)
+- Cable Progress는 날짜 미보유 → 현재 상태 기준 (입력 데이터에 per-cable 완료일 추가 시 stage별 날짜 로직으로 교체)
 
 ### 3. Model Item Indexing (`Searchers/ModelItemSearcher.cs`)
 

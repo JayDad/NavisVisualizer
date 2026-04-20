@@ -10,14 +10,18 @@ namespace NavisVisualizer.Visualizers
 {
     public class ColorOverrideEngine
     {
-        private readonly ModelItemSearcher _searcher;
+        // Spool / Hydrotest / EIT Tray share the same full-walk index.
+        // Equipment uses its own level-targeted index.
+        private readonly ModelItemSearcher _tagSearcher;
+        private readonly ModelItemSearcher _equipmentSearcher;
 
         private Dictionary<string, ModelItemCollection> _cachedStageCollections
             = new Dictionary<string, ModelItemCollection>();
 
-        public ColorOverrideEngine(ModelItemSearcher searcher)
+        public ColorOverrideEngine(ModelItemSearcher tagSearcher, ModelItemSearcher equipmentSearcher)
         {
-            _searcher = searcher;
+            _tagSearcher = tagSearcher;
+            _equipmentSearcher = equipmentSearcher;
         }
 
         public OverrideResult ApplyHydrotest(
@@ -30,7 +34,7 @@ namespace NavisVisualizer.Visualizers
             var stageItems = new Dictionary<HydrotestStage, List<ModelItem>>();
 
             var allPkgIds = packages.Select(p => p.TestPkgId).Distinct();
-            var searchResult = _searcher.FindBySpoolIds(allPkgIds);
+            var searchResult = _tagSearcher.FindBySpoolIds(allPkgIds);
 
             foreach (var pkg in packages)
             {
@@ -77,7 +81,7 @@ namespace NavisVisualizer.Visualizers
             var stageItems = new Dictionary<SpoolStage, List<ModelItem>>();
 
             var allSpoolIds = spools.Select(s => s.SpoolId).Distinct();
-            var searchResult = _searcher.FindBySpoolIds(allSpoolIds);
+            var searchResult = _tagSearcher.FindBySpoolIds(allSpoolIds);
 
             foreach (var spool in spools)
             {
@@ -124,7 +128,7 @@ namespace NavisVisualizer.Visualizers
             var stageItems = new Dictionary<EquipmentStage, List<ModelItem>>();
 
             var allTagNos = equipments.Select(e => e.TagNo).Distinct();
-            var searchResult = _searcher.FindByTagPrefix(allTagNos);
+            var searchResult = _equipmentSearcher.FindByTagPrefix(allTagNos);
 
             foreach (var equip in equipments)
             {
@@ -171,7 +175,7 @@ namespace NavisVisualizer.Visualizers
 
             // Model indexes strip leading '/' — match Excel tray numbers accordingly
             var normalizedIds = trays.Select(t => EitTrayData.NormalizeId(t.TrayNumber)).Distinct();
-            var searchResult = _searcher.FindBySpoolIds(normalizedIds);
+            var searchResult = _tagSearcher.FindBySpoolIds(normalizedIds);
 
             foreach (var tray in trays)
             {
