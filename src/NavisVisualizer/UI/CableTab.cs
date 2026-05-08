@@ -10,6 +10,7 @@ using NavisVisualizer.Models;
 using NavisVisualizer.Visualizers;
 using Color = System.Drawing.Color;
 using View = System.Windows.Forms.View;
+using Application = System.Windows.Forms.Application;
 
 namespace NavisVisualizer.UI
 {
