@@ -8,6 +8,8 @@ using Autodesk.Navisworks.Api;
 using NavisVisualizer.Loaders;
 using NavisVisualizer.Models;
 using NavisVisualizer.Visualizers;
+using Color = System.Drawing.Color;
+using View = System.Windows.Forms.View;
 
 namespace NavisVisualizer.UI
 {
