@@ -67,13 +67,11 @@ namespace NavisVisualizer.UI
                 Format = DateTimePickerFormat.Short,
                 Value = DateTime.Today,
                 Width = 110,
-            };
-            _dtpReference.ValueChanged += (s, e) =>
-            {
-                if (_trays.Count > 0) { FilterList(); UpdateStats(); }
+                Enabled = false, // 향후 Install date 컬럼 추가에 대비해 UI만 유지
             };
             datePanel.Controls.Add(dateLabel);
             datePanel.Controls.Add(_dtpReference);
+            datePanel.Controls.Add(new Label { Text = "(향후 사용)", AutoSize = true, ForeColor = Color.Gray, Padding = new Padding(4, 4, 0, 0) });
 
             var colorPanel = BuildColorPanel();
 
@@ -110,10 +108,11 @@ namespace NavisVisualizer.UI
                 GridLines = true,
                 View = View.Details,
             };
-            _listView.Columns.Add("Tray No.", 180);
-            _listView.Columns.Add("Type", 45);
-            _listView.Columns.Add("Cable %", 55);
-            _listView.Columns.Add("단계", 85);
+            _listView.Columns.Add("Tray No.", 200);
+            _listView.Columns.Add("Lth", 55);
+            _listView.Columns.Add("Installed", 65);
+            _listView.Columns.Add("Install %", 65);
+            _listView.Columns.Add("단계", 75);
             _listView.Columns.Add("매칭", 40);
             _listView.SelectedIndexChanged += ListView_SelectedIndexChanged;
             _listView.ColumnClick += ListView_ColumnClick;
@@ -248,18 +247,17 @@ namespace NavisVisualizer.UI
         private void BtnExport_Click(object sender, EventArgs e)
         {
             if (_trays.Count == 0) { MessageBox.Show("Excel을 먼저 로드하세요."); return; }
-            var referenceDate = _dtpReference.Value;
             var lines = new List<string>();
-            lines.Add("Tray Type,Tray No.,Tray Progress,Install Date,Cable Count,Best Cable %,Stage,Matched");
+            lines.Add("Tray No.,Tray Lth,Tray Installed,Install %,Stage,Matched");
             foreach (var t in _trays)
             {
-                var stage = t.GetStageAtDate(referenceDate);
+                var stage = t.GetStage();
                 string stageLabel = EitStageInfo.Labels.TryGetValue(stage, out var lbl) ? lbl : stage.ToString();
                 bool matched = _matchedTrayNos.Count == 0 || _matchedTrayNos.Contains(t.TrayNumber);
-                string installDate = t.TrayInstallDate?.ToString("yyyy-MM-dd") ?? "";
-                string trayProg = t.TrayProgress.HasValue ? $"{t.TrayProgress.Value * 100:0}%" : "";
-                string cableProg = t.BestCableProgress.HasValue ? $"{t.BestCableProgress.Value * 100:0}%" : "";
-                lines.Add($"\"{t.TrayType}\",\"{t.TrayNumber}\",\"{trayProg}\",\"{installDate}\",{t.Cables.Count},\"{cableProg}\",\"{stageLabel}\",\"{(matched ? "O" : "X")}\"");
+                string lth = t.TrayLth.HasValue ? t.TrayLth.Value.ToString("0.##") : "";
+                string installed = t.TrayInstalled.HasValue ? t.TrayInstalled.Value.ToString("0.##") : "";
+                string pct = t.InstallProgress.HasValue ? $"{t.InstallProgress.Value * 100:0}%" : "";
+                lines.Add($"\"{t.TrayNumber}\",\"{lth}\",\"{installed}\",\"{pct}\",\"{stageLabel}\",\"{(matched ? "O" : "X")}\"");
             }
             string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
                 $"EitTray_Match_{DateTime.Now:yyyyMMdd_HHmmss}.csv");
@@ -295,8 +293,7 @@ namespace NavisVisualizer.UI
                 if (kv.Value.check.Checked)
                     activeSettings[kv.Key] = _colorSettings[kv.Key];
 
-            var referenceDate = _dtpReference.Value;
-            var result = _main.OverrideEngine.ApplyEit(doc, _trays, activeSettings, referenceDate);
+            var result = _main.OverrideEngine.ApplyEit(doc, _trays, activeSettings);
 
             _unmatchedTrayNos = result.UnmatchedIds;
             var unmatchedSet = new HashSet<string>(result.UnmatchedIds, StringComparer.OrdinalIgnoreCase);
@@ -384,7 +381,6 @@ namespace NavisVisualizer.UI
         private void FilterList()
         {
             string keyword = _txtSearch?.Text?.Trim().ToUpperInvariant() ?? "";
-            var referenceDate = _dtpReference.Value;
             int tabIndex = _tabFilter.SelectedIndex;
 
             var filtered = _trays.AsEnumerable();
@@ -395,24 +391,25 @@ namespace NavisVisualizer.UI
                 filtered = filtered.Where(t => _unmatchedTrayNos.Contains(t.TrayNumber));
 
             if (!string.IsNullOrEmpty(keyword))
-                filtered = filtered.Where(t => (t.TrayNumber ?? "").ToUpperInvariant().Contains(keyword)
-                    || (t.TrayType ?? "").ToUpperInvariant().Contains(keyword));
+                filtered = filtered.Where(t => (t.TrayNumber ?? "").ToUpperInvariant().Contains(keyword));
 
             _listView.Items.Clear();
 
             foreach (var tray in filtered)
             {
-                var stage = tray.GetStageAtDate(referenceDate);
+                var stage = tray.GetStage();
                 string stageLabel = EitStageInfo.Labels.TryGetValue(stage, out var lbl) ? lbl : stage.ToString();
                 bool hasApplied = _matchedTrayNos.Count > 0 || _unmatchedTrayNos.Count > 0;
                 string matchLabel = !hasApplied ? "-" : (_matchedTrayNos.Contains(tray.TrayNumber) ? "O" : "X");
-                string typeShort = string.IsNullOrEmpty(tray.TrayType) ? "" : tray.TrayType.Split('-')[0].Trim();
-                string cableProg = tray.BestCableProgress.HasValue ? $"{tray.BestCableProgress.Value * 100:0}%" : "-";
+                string lth = tray.TrayLth.HasValue ? tray.TrayLth.Value.ToString("0.##") : "-";
+                string installed = tray.TrayInstalled.HasValue ? tray.TrayInstalled.Value.ToString("0.##") : "-";
+                string pct = tray.InstallProgress.HasValue ? $"{tray.InstallProgress.Value * 100:0}%" : "-";
 
                 var item = new ListViewItem(tray.TrayNumber);
                 item.UseItemStyleForSubItems = false;
-                item.SubItems.Add(typeShort);
-                item.SubItems.Add(cableProg);
+                item.SubItems.Add(lth);
+                item.SubItems.Add(installed);
+                item.SubItems.Add(pct);
                 var stageSubItem = item.SubItems.Add(stageLabel);
                 if (_colorSettings.TryGetValue(stage, out var setting))
                     stageSubItem.ForeColor = setting.DisplayColor;
@@ -426,9 +423,8 @@ namespace NavisVisualizer.UI
 
         private void UpdateStats(OverrideResult result = null)
         {
-            var referenceDate = _dtpReference.Value;
             var counts = _trays
-                .GroupBy(t => t.GetStageAtDate(referenceDate))
+                .GroupBy(t => t.GetStage())
                 .ToDictionary(g => g.Key, g => g.Count());
 
             var parts = new List<string>();

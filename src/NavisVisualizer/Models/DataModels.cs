@@ -160,10 +160,17 @@ namespace NavisVisualizer.Models
         public static Dictionary<EitStage, ColorSetting> EitDefaults =>
             new Dictionary<EitStage, ColorSetting>
             {
-                [EitStage.NotStarted]     = new ColorSetting { DisplayColor = Color.FromArgb(169, 169, 169), Transparency = 0.7 },
-                [EitStage.TrayInstalled]  = new ColorSetting { DisplayColor = Color.FromArgb(255, 215, 0),   Transparency = 0.0 },
-                [EitStage.CablePulling]   = new ColorSetting { DisplayColor = Color.FromArgb(65, 105, 225),  Transparency = 0.0 },
-                [EitStage.CableCompleted] = new ColorSetting { DisplayColor = Color.FromArgb(0, 128, 0),     Transparency = 0.0 },
+                [EitStage.NotStarted] = new ColorSetting { DisplayColor = Color.FromArgb(169, 169, 169), Transparency = 0.7 },
+                [EitStage.Installing] = new ColorSetting { DisplayColor = Color.FromArgb(255, 215, 0),   Transparency = 0.0 },
+                [EitStage.Installed]  = new ColorSetting { DisplayColor = Color.FromArgb(0, 128, 0),     Transparency = 0.0 },
+            };
+
+        public static Dictionary<CableStage, ColorSetting> CableDefaults =>
+            new Dictionary<CableStage, ColorSetting>
+            {
+                [CableStage.NotStarted] = new ColorSetting { DisplayColor = Color.FromArgb(169, 169, 169), Transparency = 0.7 },
+                [CableStage.Pulling]    = new ColorSetting { DisplayColor = Color.FromArgb(255, 215, 0),   Transparency = 0.0 },
+                [CableStage.Completed]  = new ColorSetting { DisplayColor = Color.FromArgb(0, 128, 0),     Transparency = 0.0 },
             };
 
         public static ColorSetting Unmatched =>
@@ -275,66 +282,42 @@ namespace NavisVisualizer.Models
 
     public enum EitStage
     {
-        NotStarted,
-        TrayInstalled,   // Tray install date <= referenceDate, no cable pulled
-        CablePulling,    // Some cable pulled but not 100%
-        CableCompleted,  // Cable progress 100%
+        NotStarted,   // Install % == 0 (or null)
+        Installing,   // 0 < Install % < 100
+        Installed,    // Install % == 100
     }
 
     public static class EitStageInfo
     {
         public static readonly EitStage[] OrderedStages =
         {
-            EitStage.TrayInstalled, EitStage.CablePulling, EitStage.CableCompleted
+            EitStage.Installing, EitStage.Installed
         };
 
         public static readonly Dictionary<EitStage, string> Labels = new Dictionary<EitStage, string>
         {
-            [EitStage.NotStarted]     = "미착수",
-            [EitStage.TrayInstalled]  = "Tray 설치",
-            [EitStage.CablePulling]   = "Cable 포설중",
-            [EitStage.CableCompleted] = "Cable 완료",
+            [EitStage.NotStarted] = "미착수",
+            [EitStage.Installing] = "설치중",
+            [EitStage.Installed]  = "설치완료",
         };
     }
 
     public class EitTrayData
     {
-        public string TrayType { get; set; }
-        public string TrayNumber { get; set; }   // Match key (e.g. /101890-INT-22039-CM-MDB/B2)
-        public double? TrayMr { get; set; }
-        public double? TrayCompleteMr { get; set; }
-        public double? TrayProgress { get; set; }   // 0.0 - 1.0
+        public string TrayNumber { get; set; }   // Match key (e.g. /101890-HVT-61003-SM-MEB/B1)
+        public double? TrayLth { get; set; }
+        public double? TrayInstalled { get; set; }
+        public double? InstallProgress { get; set; }   // 0.0 - 1.0 (Install %)
+
+        // Reserved for future date-based filtering; currently unused.
         public DateTime? TrayInstallDate { get; set; }
 
-        // Cable rows (0..N per tray)
-        public List<EitCableRecord> Cables { get; set; } = new List<EitCableRecord>();
-
-        /// <summary>Best cable progress across assigned routes (1.0 if any 100%).</summary>
-        public double? BestCableProgress
+        public EitStage GetStage()
         {
-            get
-            {
-                if (Cables == null || Cables.Count == 0) return null;
-                double? max = null;
-                foreach (var c in Cables)
-                {
-                    if (!c.Progress.HasValue) continue;
-                    if (!max.HasValue || c.Progress.Value > max.Value) max = c.Progress.Value;
-                }
-                return max;
-            }
-        }
-
-        public EitStage GetStageAtDate(DateTime referenceDate)
-        {
-            if (!TrayInstallDate.HasValue || TrayInstallDate.Value.Date > referenceDate.Date)
-                return EitStage.NotStarted;
-
-            var cableProgress = BestCableProgress;
-            if (!cableProgress.HasValue) return EitStage.TrayInstalled;
-            if (cableProgress.Value >= 0.999) return EitStage.CableCompleted;
-            if (cableProgress.Value > 0.0) return EitStage.CablePulling;
-            return EitStage.TrayInstalled;
+            if (!InstallProgress.HasValue) return EitStage.NotStarted;
+            if (InstallProgress.Value >= 0.999) return EitStage.Installed;
+            if (InstallProgress.Value > 0.0) return EitStage.Installing;
+            return EitStage.NotStarted;
         }
 
         /// <summary>
@@ -349,11 +332,94 @@ namespace NavisVisualizer.Models
         }
     }
 
-    public class EitCableRecord
+    // ============================================================
+    // Cable Pull (per-Node aggregation; one Excel row per cable)
+    // ============================================================
+
+    public enum CableStage
     {
-        public string RouteNumber { get; set; }
-        public double? AssumeLength { get; set; }
-        public double? PullLength { get; set; }
-        public double? Progress { get; set; }   // 0.0 - 1.0
+        NotStarted, // overall progress == 0 (or no data)
+        Pulling,    // 0 < overall < 100
+        Completed,  // overall >= 100
+    }
+
+    public static class CableStageInfo
+    {
+        public static readonly CableStage[] OrderedStages =
+        {
+            CableStage.Pulling, CableStage.Completed
+        };
+
+        public static readonly Dictionary<CableStage, string> Labels = new Dictionary<CableStage, string>
+        {
+            [CableStage.NotStarted] = "미착수",
+            [CableStage.Pulling]    = "포설중",
+            [CableStage.Completed]  = "포설완료",
+        };
+    }
+
+    public class CableNodeData
+    {
+        public string NodeId { get; set; }   // Match key, e.g. "101780-EMCT-52101_A-ND"
+        public List<CableRecord> Cables { get; set; } = new List<CableRecord>();
+
+        public double TotalDesignLth =>
+            Cables.Sum(c => c.DesignLth ?? 0.0);
+
+        public double TotalPulledLth =>
+            Cables.Sum(c => c.PulledLth ?? 0.0);
+
+        /// <summary>Aggregate progress = sum(pulled) / sum(design). Null when no design length.</summary>
+        public double? OverallProgress
+        {
+            get
+            {
+                double design = TotalDesignLth;
+                if (design <= 0.0) return null;
+                return TotalPulledLth / design;
+            }
+        }
+
+        public CableStage GetStage()
+        {
+            var p = OverallProgress;
+            if (!p.HasValue) return CableStage.NotStarted;
+            if (p.Value >= 0.999) return CableStage.Completed;
+            if (p.Value > 0.0)    return CableStage.Pulling;
+            return CableStage.NotStarted;
+        }
+
+        /// <summary>Box DisplayName format is "{NodeId}-BOX...", so the index key is
+        /// the prefix before "-BOX". Excel NodeIds are normalized the same way
+        /// (trim, leading '/' stripped, uppercased on lookup).</summary>
+        public static string NormalizeId(string id)
+        {
+            if (string.IsNullOrEmpty(id)) return "";
+            return id.TrimStart('/').Trim();
+        }
+    }
+
+    public class CableRecord
+    {
+        public int? Count { get; set; }
+        public string EquipNo { get; set; }
+        public string RouteSys { get; set; }
+        public string CableNo { get; set; }
+        public double? DesignLth { get; set; }   // Cable Design Lth
+        public double? PulledLth { get; set; }   // Cable Pulled Lth
+        public double? PullingProgress { get; set; } // 0.0 - 1.0
+        public string FromModule { get; set; }
+        public string FromEquip { get; set; }
+        public string ToModule { get; set; }
+        public string ToEquip { get; set; }
+        public string InstallModule { get; set; }
+        public string System { get; set; }
+        public string Type { get; set; }
+        public string Core { get; set; }
+        public string Size { get; set; }
+        public string OutDia { get; set; }
+        public string TraySys { get; set; }
+        public double? RouteDesignLth { get; set; } // separate "Design Lth" col
+        public string LayerCode { get; set; }
     }
 }

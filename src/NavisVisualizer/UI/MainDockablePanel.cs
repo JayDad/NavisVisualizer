@@ -17,6 +17,9 @@ namespace NavisVisualizer.UI
         /// <summary>Dedicated level-targeted index for Equipment (different match strategy).</summary>
         public ModelItemSearcher EquipmentSearcher { get; } = new ModelItemSearcher();
 
+        /// <summary>Dedicated index for Cable Pull boxes (key = prefix before "-BOX").</summary>
+        public ModelItemSearcher CableBoxSearcher { get; } = new ModelItemSearcher();
+
         public ColorOverrideEngine OverrideEngine { get; }
         public ExportService ExportSvc { get; } = new ExportService();
         public UserDataService UserDataSvc { get; } = new UserDataService();
@@ -26,11 +29,12 @@ namespace NavisVisualizer.UI
         private SpoolTab _spoolTab;
         private EquipmentTab _equipmentTab;
         private EitTrayTab _eitTrayTab;
+        private CableTab _cableTab;
         private ToolsTab _toolsTab;
 
         public MainDockablePanel()
         {
-            OverrideEngine = new ColorOverrideEngine(TagSearcher, EquipmentSearcher);
+            OverrideEngine = new ColorOverrideEngine(TagSearcher, EquipmentSearcher, CableBoxSearcher);
             InitializeComponent();
         }
 
@@ -58,6 +62,11 @@ namespace NavisVisualizer.UI
             _eitTrayTab.Dock = DockStyle.Fill;
             eitPage.Controls.Add(_eitTrayTab);
 
+            var cablePage = new TabPage("Cable Pull");
+            _cableTab = new CableTab(this);
+            _cableTab.Dock = DockStyle.Fill;
+            cablePage.Controls.Add(_cableTab);
+
             var toolPage = new TabPage("Tools");
             _toolsTab = new ToolsTab(this);
             _toolsTab.Dock = DockStyle.Fill;
@@ -67,6 +76,7 @@ namespace NavisVisualizer.UI
             _tabControl.TabPages.Add(spPage);
             _tabControl.TabPages.Add(eqPage);
             _tabControl.TabPages.Add(eitPage);
+            _tabControl.TabPages.Add(cablePage);
             _tabControl.TabPages.Add(toolPage);
 
             Controls.Add(_tabControl);

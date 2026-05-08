@@ -185,6 +185,41 @@ namespace NavisVisualizer.Searchers
             list.Add(item);
         }
 
+        /// <summary>
+        /// Cable-box index: walks the tree and indexes any item whose DisplayName
+        /// contains "-BOX". The index key is the prefix BEFORE "-BOX", e.g.
+        /// "101780-EMCT-52101_A-ND-BOX001" → key "101780-EMCT-52101_A-ND".
+        /// Excel Node IDs are looked up against this same key.
+        /// </summary>
+        public void BuildIndexForBoxes(Document doc)
+        {
+            _index = new Dictionary<string, List<ModelItem>>(StringComparer.OrdinalIgnoreCase);
+            _isBuilt = false;
+            _lastDocumentId = GetDocumentId(doc);
+
+            foreach (var model in doc.Models)
+                WalkBoxIndex(model.RootItem);
+
+            _isBuilt = true;
+        }
+
+        private void WalkBoxIndex(ModelItem item)
+        {
+            string name = item.DisplayName?.Trim() ?? "";
+            int idx = name.IndexOf("-BOX", StringComparison.OrdinalIgnoreCase);
+            if (idx > 0)
+            {
+                string key = name.Substring(0, idx).TrimStart('/').Trim();
+                if (!string.IsNullOrEmpty(key))
+                    AddToIndex(key.ToUpperInvariant(), item);
+                // Box leaves usually have geometry below; no need to recurse for indexing.
+                return;
+            }
+
+            foreach (var child in item.Children)
+                WalkBoxIndex(child);
+        }
+
         public Dictionary<string, List<ModelItem>> FindBySpoolIds(IEnumerable<string> spoolIds)
         {
             if (!_isBuilt)
@@ -204,6 +239,22 @@ namespace NavisVisualizer.Searchers
         {
             return FindBySpoolIds(tagNos);
         }
+
+        /// <summary>Return every indexed item whose key is NOT in <paramref name="excluded"/>.</summary>
+        public List<ModelItem> GetItemsExcept(HashSet<string> excluded)
+        {
+            var result = new List<ModelItem>();
+            if (!_isBuilt || _index == null) return result;
+            foreach (var kv in _index)
+            {
+                if (excluded.Contains(kv.Key)) continue;
+                result.AddRange(kv.Value);
+            }
+            return result;
+        }
+
+        public IEnumerable<string> GetIndexedKeys() =>
+            _index?.Keys ?? Enumerable.Empty<string>();
 
         public void Reset()
         {
