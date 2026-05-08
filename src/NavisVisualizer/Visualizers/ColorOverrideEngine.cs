@@ -167,8 +167,7 @@ namespace NavisVisualizer.Visualizers
         public OverrideResult ApplyEit(
             Document doc,
             List<EitTrayData> trays,
-            Dictionary<EitStage, ColorSetting> colorSettings,
-            DateTime referenceDate)
+            Dictionary<EitStage, ColorSetting> colorSettings)
         {
             var result = new OverrideResult();
             var stageItems = new Dictionary<EitStage, List<ModelItem>>();
@@ -187,7 +186,7 @@ namespace NavisVisualizer.Visualizers
                 }
                 result.MatchedCount++;
 
-                var stage = tray.GetStageAtDate(referenceDate);
+                var stage = tray.GetStage();
                 if (!colorSettings.ContainsKey(stage)) continue;
 
                 if (!stageItems.TryGetValue(stage, out var list))

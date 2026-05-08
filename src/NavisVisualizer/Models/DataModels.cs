@@ -160,10 +160,9 @@ namespace NavisVisualizer.Models
         public static Dictionary<EitStage, ColorSetting> EitDefaults =>
             new Dictionary<EitStage, ColorSetting>
             {
-                [EitStage.NotStarted]     = new ColorSetting { DisplayColor = Color.FromArgb(169, 169, 169), Transparency = 0.7 },
-                [EitStage.TrayInstalled]  = new ColorSetting { DisplayColor = Color.FromArgb(255, 215, 0),   Transparency = 0.0 },
-                [EitStage.CablePulling]   = new ColorSetting { DisplayColor = Color.FromArgb(65, 105, 225),  Transparency = 0.0 },
-                [EitStage.CableCompleted] = new ColorSetting { DisplayColor = Color.FromArgb(0, 128, 0),     Transparency = 0.0 },
+                [EitStage.NotStarted] = new ColorSetting { DisplayColor = Color.FromArgb(169, 169, 169), Transparency = 0.7 },
+                [EitStage.Installing] = new ColorSetting { DisplayColor = Color.FromArgb(255, 215, 0),   Transparency = 0.0 },
+                [EitStage.Installed]  = new ColorSetting { DisplayColor = Color.FromArgb(0, 128, 0),     Transparency = 0.0 },
             };
 
         public static ColorSetting Unmatched =>
@@ -275,66 +274,42 @@ namespace NavisVisualizer.Models
 
     public enum EitStage
     {
-        NotStarted,
-        TrayInstalled,   // Tray install date <= referenceDate, no cable pulled
-        CablePulling,    // Some cable pulled but not 100%
-        CableCompleted,  // Cable progress 100%
+        NotStarted,   // Install % == 0 (or null)
+        Installing,   // 0 < Install % < 100
+        Installed,    // Install % == 100
     }
 
     public static class EitStageInfo
     {
         public static readonly EitStage[] OrderedStages =
         {
-            EitStage.TrayInstalled, EitStage.CablePulling, EitStage.CableCompleted
+            EitStage.Installing, EitStage.Installed
         };
 
         public static readonly Dictionary<EitStage, string> Labels = new Dictionary<EitStage, string>
         {
-            [EitStage.NotStarted]     = "미착수",
-            [EitStage.TrayInstalled]  = "Tray 설치",
-            [EitStage.CablePulling]   = "Cable 포설중",
-            [EitStage.CableCompleted] = "Cable 완료",
+            [EitStage.NotStarted] = "미착수",
+            [EitStage.Installing] = "설치중",
+            [EitStage.Installed]  = "설치완료",
         };
     }
 
     public class EitTrayData
     {
-        public string TrayType { get; set; }
-        public string TrayNumber { get; set; }   // Match key (e.g. /101890-INT-22039-CM-MDB/B2)
-        public double? TrayMr { get; set; }
-        public double? TrayCompleteMr { get; set; }
-        public double? TrayProgress { get; set; }   // 0.0 - 1.0
+        public string TrayNumber { get; set; }   // Match key (e.g. /101890-HVT-61003-SM-MEB/B1)
+        public double? TrayLth { get; set; }
+        public double? TrayInstalled { get; set; }
+        public double? InstallProgress { get; set; }   // 0.0 - 1.0 (Install %)
+
+        // Reserved for future date-based filtering; currently unused.
         public DateTime? TrayInstallDate { get; set; }
 
-        // Cable rows (0..N per tray)
-        public List<EitCableRecord> Cables { get; set; } = new List<EitCableRecord>();
-
-        /// <summary>Best cable progress across assigned routes (1.0 if any 100%).</summary>
-        public double? BestCableProgress
+        public EitStage GetStage()
         {
-            get
-            {
-                if (Cables == null || Cables.Count == 0) return null;
-                double? max = null;
-                foreach (var c in Cables)
-                {
-                    if (!c.Progress.HasValue) continue;
-                    if (!max.HasValue || c.Progress.Value > max.Value) max = c.Progress.Value;
-                }
-                return max;
-            }
-        }
-
-        public EitStage GetStageAtDate(DateTime referenceDate)
-        {
-            if (!TrayInstallDate.HasValue || TrayInstallDate.Value.Date > referenceDate.Date)
-                return EitStage.NotStarted;
-
-            var cableProgress = BestCableProgress;
-            if (!cableProgress.HasValue) return EitStage.TrayInstalled;
-            if (cableProgress.Value >= 0.999) return EitStage.CableCompleted;
-            if (cableProgress.Value > 0.0) return EitStage.CablePulling;
-            return EitStage.TrayInstalled;
+            if (!InstallProgress.HasValue) return EitStage.NotStarted;
+            if (InstallProgress.Value >= 0.999) return EitStage.Installed;
+            if (InstallProgress.Value > 0.0) return EitStage.Installing;
+            return EitStage.NotStarted;
         }
 
         /// <summary>
@@ -347,13 +322,5 @@ namespace NavisVisualizer.Models
             if (string.IsNullOrEmpty(id)) return "";
             return id.TrimStart('/').Trim();
         }
-    }
-
-    public class EitCableRecord
-    {
-        public string RouteNumber { get; set; }
-        public double? AssumeLength { get; set; }
-        public double? PullLength { get; set; }
-        public double? Progress { get; set; }   // 0.0 - 1.0
     }
 }
