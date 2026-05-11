@@ -21,6 +21,14 @@ namespace NavisVisualizer.UI
         private HashSet<string> _matchedNodeIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private List<string> _unmatchedNodeIds = new List<string>();
 
+        /// <summary>Cable No → ordered list of Node IDs that the cable passes through.</summary>
+        private Dictionary<string, List<string>> _cableRoutes
+            = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>Cable No → representative metadata (first encountered row).</summary>
+        private Dictionary<string, CableRecord> _cableMeta
+            = new Dictionary<string, CableRecord>(StringComparer.OrdinalIgnoreCase);
+
         private Document _subscribedDoc;
         private bool _suppressSelectionSync;
 
@@ -32,6 +40,7 @@ namespace NavisVisualizer.UI
         private TabControl _tabFilter;
         private ListView _nodeList;
         private ListView _cableList;
+        private ListView _routeList;   // Cable No 단위 + Route(노드 배열)
         private Button _btnApply;
         private Button _btnReset;
         private Button _btnViewpoint;
@@ -136,6 +145,24 @@ namespace NavisVisualizer.UI
             _cableList.Columns.Add("From",       110);
             _cableList.Columns.Add("To",         110);
 
+            _routeList = new ListView
+            {
+                Dock = DockStyle.Fill,
+                FullRowSelect = true,
+                GridLines = true,
+                View = View.Details,
+                HideSelection = false,
+                Height = 180,
+            };
+            _routeList.Columns.Add("Cable No",  170);
+            _routeList.Columns.Add("Equip No",  140);
+            _routeList.Columns.Add("노드수",    50);
+            _routeList.Columns.Add("Design",    65);
+            _routeList.Columns.Add("Pulled",    65);
+            _routeList.Columns.Add("%",         50);
+            _routeList.Columns.Add("Route (Node 배열)", 360);
+            _routeList.SelectedIndexChanged += RouteList_SelectedIndexChanged;
+
             layout.Controls.Add(_btnLoad);
             layout.Controls.Add(_lblFile);
             layout.Controls.Add(new Label { Text = "단계 & 색상", Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 18 });
@@ -149,6 +176,8 @@ namespace NavisVisualizer.UI
             layout.Controls.Add(_nodeList);
             layout.Controls.Add(new Label { Text = "선택된 Node의 Cable 상세", Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 16 });
             layout.Controls.Add(_cableList);
+            layout.Controls.Add(new Label { Text = "Cable 목록 (행 클릭 → 해당 Cable 전체 Route 하이라이트)", Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 16 });
+            layout.Controls.Add(_routeList);
 
             Controls.Add(layout);
         }
@@ -241,6 +270,7 @@ namespace NavisVisualizer.UI
                     _lblFile.Text = Path.GetFileName(dlg.FileName);
                     _matchedNodeIds.Clear();
                     _unmatchedNodeIds.Clear();
+                    BuildCableRoutes();
                     FilterList();
                     UpdateStats();
                 }
@@ -515,6 +545,114 @@ namespace NavisVisualizer.UI
             }
             _nodeList.EndUpdate();
             _cableList.Items.Clear();
+
+            PopulateRouteList(keyword, tabIndex);
+        }
+
+        /// <summary>
+        /// Build Cable No → ordered Node list from raw rows. Each Excel row is one
+        /// cable instance at one node, so a cable that passes through 3 nodes
+        /// appears 3 times — we collapse it into one route here.
+        /// </summary>
+        private void BuildCableRoutes()
+        {
+            _cableRoutes.Clear();
+            _cableMeta.Clear();
+            foreach (var node in _nodes)
+            {
+                foreach (var c in node.Cables)
+                {
+                    string cableNo = (c.CableNo ?? "").Trim();
+                    if (string.IsNullOrEmpty(cableNo)) continue;
+
+                    if (!_cableRoutes.TryGetValue(cableNo, out var list))
+                    {
+                        list = new List<string>();
+                        _cableRoutes[cableNo] = list;
+                        _cableMeta[cableNo] = c; // first encounter = representative metadata
+                    }
+                    if (!list.Contains(node.NodeId, StringComparer.OrdinalIgnoreCase))
+                        list.Add(node.NodeId);
+                }
+            }
+        }
+
+        private void PopulateRouteList(string keywordUpper, int tabIndex)
+        {
+            _routeList.BeginUpdate();
+            _routeList.Items.Clear();
+
+            foreach (var kv in _cableRoutes)
+            {
+                string cableNo = kv.Key;
+                var nodes = kv.Value;
+
+                // Filter tab: 매칭 = at least one node matched; 미매칭 = none matched.
+                if (tabIndex == 1 && _matchedNodeIds.Count > 0 &&
+                    !nodes.Any(n => _matchedNodeIds.Contains(n))) continue;
+                if (tabIndex == 2 && _unmatchedNodeIds.Count > 0 &&
+                    nodes.Any(n => _matchedNodeIds.Contains(n))) continue;
+
+                // Keyword filter: Cable No / Equip No / any Node ID
+                if (!string.IsNullOrEmpty(keywordUpper))
+                {
+                    var meta = _cableMeta.TryGetValue(cableNo, out var m) ? m : null;
+                    bool hit =
+                        cableNo.ToUpperInvariant().Contains(keywordUpper)
+                        || (meta != null && (meta.EquipNo ?? "").ToUpperInvariant().Contains(keywordUpper))
+                        || nodes.Any(n => n.ToUpperInvariant().Contains(keywordUpper));
+                    if (!hit) continue;
+                }
+
+                var meta2 = _cableMeta.TryGetValue(cableNo, out var mm) ? mm : null;
+                string equip = meta2?.EquipNo ?? "";
+                string design = meta2?.DesignLth.HasValue == true ? meta2.DesignLth.Value.ToString("0.##") : "-";
+                string pulled = meta2?.PulledLth.HasValue == true ? meta2.PulledLth.Value.ToString("0.##") : "-";
+                string pct    = meta2?.PullingProgress.HasValue == true ? $"{meta2.PullingProgress.Value * 100:0}%" : "-";
+                string route  = string.Join(", ", nodes);
+
+                var item = new ListViewItem(cableNo);
+                item.SubItems.Add(equip);
+                item.SubItems.Add(nodes.Count.ToString());
+                item.SubItems.Add(design);
+                item.SubItems.Add(pulled);
+                item.SubItems.Add(pct);
+                item.SubItems.Add(route);
+                item.Tag = nodes;
+                _routeList.Items.Add(item);
+            }
+            _routeList.EndUpdate();
+        }
+
+        private void RouteList_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (_routeList.SelectedItems.Count == 0) return;
+            if (_suppressSelectionSync) return;
+
+            var nodes = _routeList.SelectedItems[0].Tag as List<string>;
+            if (nodes == null) return;
+
+            var doc = _main.GetDocument();
+            if (doc == null) return;
+
+            // Aggregate every box on the cable's route. Boxes for unmatched nodes are
+            // skipped silently — they simply don't contribute to the selection.
+            var combined = new ModelItemCollection();
+            foreach (var nodeId in nodes)
+            {
+                var col = _main.OverrideEngine.GetCableNodeItems(nodeId);
+                if (col == null) continue;
+                foreach (ModelItem mi in col) combined.Add(mi);
+            }
+            if (combined.Count == 0) return;
+
+            _suppressSelectionSync = true;
+            try
+            {
+                doc.CurrentSelection.CopyFrom(combined);
+                doc.ActiveView.FocusOnCurrentSelection();
+            }
+            finally { _suppressSelectionSync = false; }
         }
 
         private void UpdateStats(OverrideResult result = null, int hiddenCount = 0)
