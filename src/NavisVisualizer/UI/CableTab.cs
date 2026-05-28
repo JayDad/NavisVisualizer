@@ -180,12 +180,12 @@ namespace NavisVisualizer.UI
             layout.Controls.Add(_lblStats);
             layout.Controls.Add(searchPanel);
             layout.Controls.Add(_tabFilter);
-            layout.Controls.Add(new Label { Text = "Node 목록", Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 16 });
-            layout.Controls.Add(_nodeList);
-            layout.Controls.Add(new Label { Text = "선택된 Node의 Cable 상세", Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 16 });
-            layout.Controls.Add(_cableList);
             layout.Controls.Add(new Label { Text = "Cable 목록 (행 클릭 → 해당 Cable 전체 Route 하이라이트)", Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 16 });
             layout.Controls.Add(_routeList);
+            layout.Controls.Add(new Label { Text = "선택된 Node의 Cable 상세", Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 16 });
+            layout.Controls.Add(_cableList);
+            layout.Controls.Add(new Label { Text = "Node 목록", Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 16 });
+            layout.Controls.Add(_nodeList);
 
             Controls.Add(layout);
         }
