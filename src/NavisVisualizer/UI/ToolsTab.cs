@@ -133,6 +133,47 @@ namespace NavisVisualizer.UI
             btnTestProp.Click += BtnTestProp_Click;
             layout.Controls.Add(btnTestProp);
 
+            // --- Cable Node Box 진단 ---
+            layout.Controls.Add(new Label { Height = 10, Dock = DockStyle.Fill });
+            layout.Controls.Add(new Label
+            {
+                Text = "Cable Node Box 진단",
+                Font = new Font(Font, FontStyle.Bold),
+                Dock = DockStyle.Fill,
+                Height = 20
+            });
+            layout.Controls.Add(new Label
+            {
+                Text = "노드당 박스 2개 이상(매크로 중복 의심) 검사",
+                Dock = DockStyle.Fill,
+                Height = 20,
+                ForeColor = Color.Gray
+            });
+            var btnDupBox = new Button
+            {
+                Text = "Node Box 중복 검사 (CSV)",
+                Dock = DockStyle.Fill,
+                Height = 30
+            };
+            btnDupBox.Click += BtnDupBox_Click;
+            layout.Controls.Add(btnDupBox);
+
+            layout.Controls.Add(new Label
+            {
+                Text = "현재 뷰의 단면(Clip Plane) 평면 값 덤프 — 보이는 것만 필터 보정용",
+                Dock = DockStyle.Fill,
+                Height = 20,
+                ForeColor = Color.Gray
+            });
+            var btnClipDump = new Button
+            {
+                Text = "Clip Plane 덤프",
+                Dock = DockStyle.Fill,
+                Height = 30
+            };
+            btnClipDump.Click += BtnClipDump_Click;
+            layout.Controls.Add(btnClipDump);
+
             Controls.Add(layout);
         }
 
@@ -311,6 +352,90 @@ namespace NavisVisualizer.UI
             catch (Exception ex)
             {
                 MessageBox.Show($"Error: {ex.Message}", "User Data Test", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        // -------------------------------------------------------
+        // Cable Node Box duplicate check
+        // -------------------------------------------------------
+        private void BtnDupBox_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                var doc = _main.GetDocument();
+                if (doc == null || doc.Models.Count == 0)
+                {
+                    MessageBox.Show("No model loaded.");
+                    return;
+                }
+
+                _lblStatus.Text = "Building box index...";
+                Application.DoEvents();
+                if (_main.CableBoxSearcher.NeedsRebuild(doc))
+                    _main.CableBoxSearcher.BuildIndexForBoxes(doc);
+
+                var dups = _main.CableBoxSearcher.GetEntriesWithMultipleItems();
+                int totalNodes = _main.CableBoxSearcher.IndexedCount;
+
+                if (dups.Count == 0)
+                {
+                    _lblStatus.Text = $"Box nodes: {totalNodes}, duplicates: 0";
+                    MessageBox.Show(
+                        $"중복 없음.\n\n인덱싱된 Node Box: {totalNodes}개\n노드당 박스는 모두 1개입니다.",
+                        "Node Box 중복 검사", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                var lines = new List<string>();
+                lines.Add("NodeKey,BoxCount,BoxNames");
+                foreach (var kv in dups)
+                {
+                    var names = string.Join("; ", kv.Value.Select(i => Esc(i.DisplayName ?? "(unnamed)")));
+                    lines.Add($"\"{Esc(kv.Key)}\",{kv.Value.Count},\"{names}\"");
+                }
+
+                string outPath = SaveToDesktop("CableNodeBox_Duplicates", lines);
+                _lblStatus.Text = $"Box nodes: {totalNodes}, duplicates: {dups.Count}";
+                MessageBox.Show(
+                    $"노드당 박스 2개 이상: {dups.Count}개 발견 (전체 {totalNodes}개 중)\n\n저장: {outPath}",
+                    "Node Box 중복 검사", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error: {ex.Message}", "Node Box 중복 검사",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        // -------------------------------------------------------
+        // Clip Plane dump (visibility filter calibration)
+        // -------------------------------------------------------
+        private void BtnClipDump_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                var doc = _main.GetDocument();
+                if (doc == null)
+                {
+                    MessageBox.Show("No document open.");
+                    return;
+                }
+
+                string dump = _main.SectionSvc.DumpClipPlanes(doc);
+
+                string outPath = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
+                    $"ClipPlaneDump_{DateTime.Now:yyyyMMdd_HHmmss}.txt");
+                File.WriteAllText(outPath, dump, System.Text.Encoding.UTF8);
+
+                _lblStatus.Text = "Clip plane dump saved";
+                MessageBox.Show($"{dump}\n\n저장: {outPath}", "Clip Plane 덤프",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error: {ex.Message}", "Clip Plane 덤프",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 

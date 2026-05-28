@@ -256,6 +256,21 @@ namespace NavisVisualizer.Searchers
         public IEnumerable<string> GetIndexedKeys() =>
             _index?.Keys ?? Enumerable.Empty<string>();
 
+        /// <summary>
+        /// Return index entries whose key maps to more than one item. For the cable-box
+        /// index this surfaces nodes that have multiple "-BOX" elements — usually a sign
+        /// the box-generation macro produced duplicates for a single node.
+        /// </summary>
+        public List<KeyValuePair<string, List<ModelItem>>> GetEntriesWithMultipleItems()
+        {
+            var result = new List<KeyValuePair<string, List<ModelItem>>>();
+            if (!_isBuilt || _index == null) return result;
+            foreach (var kv in _index)
+                if (kv.Value != null && kv.Value.Count > 1)
+                    result.Add(kv);
+            return result;
+        }
+
         public void Reset()
         {
             _isBuilt = false;

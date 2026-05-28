@@ -7,6 +7,7 @@ using System.Windows.Forms;
 using Autodesk.Navisworks.Api;
 using NavisVisualizer.Loaders;
 using NavisVisualizer.Models;
+using NavisVisualizer.Services;
 using NavisVisualizer.Visualizers;
 using Color = System.Drawing.Color;
 using View = System.Windows.Forms.View;
@@ -40,6 +41,8 @@ namespace NavisVisualizer.UI
         private TextBox _txtSearch;
         private Button _btnFocusToggle;
         private bool _focusOn;
+        private Button _btnVisibleToggle;
+        private bool _visibleOnly;
         private TabControl _tabFilter;
         private ListView _nodeList;
         private ListView _cableList;
@@ -85,14 +88,16 @@ namespace NavisVisualizer.UI
             _btnApply        = new Button { Text = "적용",           Width = 80  };
             _btnReset        = new Button { Text = "전체 초기화",    Width = 90  };
             _btnFocusToggle  = new Button { Text = "필터 포커스 ON", Width = 110 };
+            _btnVisibleToggle = new Button { Text = "보이는 것만 OFF", Width = 110 };
             _btnViewpoint    = new Button { Text = "Viewpoint 저장", Width = 120 };
             _btnNwd          = new Button { Text = "NWD Export",     Width = 110 };
-            _btnApply.Click       += BtnApply_Click;
-            _btnReset.Click       += BtnReset_Click;
-            _btnFocusToggle.Click += BtnFocusToggle_Click;
-            _btnViewpoint.Click   += BtnViewpoint_Click;
-            _btnNwd.Click         += BtnNwd_Click;
-            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnReset, _btnFocusToggle, _btnViewpoint, _btnNwd });
+            _btnApply.Click         += BtnApply_Click;
+            _btnReset.Click         += BtnReset_Click;
+            _btnFocusToggle.Click   += BtnFocusToggle_Click;
+            _btnVisibleToggle.Click += BtnVisibleToggle_Click;
+            _btnViewpoint.Click     += BtnViewpoint_Click;
+            _btnNwd.Click           += BtnNwd_Click;
+            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnReset, _btnFocusToggle, _btnVisibleToggle, _btnViewpoint, _btnNwd });
 
             _progressBar = new ProgressBar { Dock = DockStyle.Fill, Height = 12, Visible = false };
             _lblStats = new Label { Dock = DockStyle.Fill, Text = "로드된 데이터 없음", AutoSize = false, Height = 36 };
@@ -360,6 +365,8 @@ namespace NavisVisualizer.UI
             _main.OverrideEngine.Reset(doc);
             _focusOn = false;
             _btnFocusToggle.Text = "필터 포커스 ON";
+            _visibleOnly = false;
+            _btnVisibleToggle.Text = "보이는 것만 OFF";
             _lblStats.Text = "전체 초기화 완료";
         }
 
@@ -389,6 +396,64 @@ namespace NavisVisualizer.UI
                 _focusOn = true;
                 _btnFocusToggle.Text = "필터 포커스 OFF";
             }
+        }
+
+        private void BtnVisibleToggle_Click(object sender, EventArgs e)
+        {
+            var doc = _main.GetDocument();
+            if (!_visibleOnly)
+            {
+                if (doc == null || !_main.CableBoxSearcher.IsIndexBuilt)
+                {
+                    MessageBox.Show("먼저 적용을 실행해 박스 인덱스를 빌드하세요.");
+                    return;
+                }
+            }
+            _visibleOnly = !_visibleOnly;
+            _btnVisibleToggle.Text = _visibleOnly ? "보이는 것만 ON" : "보이는 것만 OFF";
+            FilterList();
+        }
+
+        /// <summary>
+        /// Node IDs whose box (a point marker; we test its bounding-box center) is
+        /// currently on screen: not hidden AND inside every active section plane.
+        /// A node with multiple boxes counts as visible if ANY box center is visible.
+        /// Returns null when the filter is off or cannot be evaluated (→ no filtering).
+        /// </summary>
+        private HashSet<string> ComputeVisibleNodeIds()
+        {
+            if (!_visibleOnly) return null;
+
+            var doc = _main.GetDocument();
+            if (doc == null || !_main.CableBoxSearcher.IsIndexBuilt) return null;
+
+            var planes = _main.SectionSvc.GetActiveClipPlanes(doc);
+
+            var search = _main.CableBoxSearcher.FindBySpoolIds(
+                _nodes.Select(n => CableNodeData.NormalizeId(n.NodeId)).Distinct());
+
+            var visible = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var node in _nodes)
+            {
+                string key = CableNodeData.NormalizeId(node.NodeId);
+                if (!search.TryGetValue(key, out var items) || items.Count == 0)
+                    continue; // no box in model → not on screen
+
+                foreach (var item in items)
+                {
+                    if (SectionService.IsEffectivelyHidden(item)) continue;
+                    BoundingBox3D bbox;
+                    try { bbox = item.BoundingBox(); }
+                    catch { continue; }
+                    if (bbox == null) continue;
+                    if (_main.SectionSvc.IsPointVisible(bbox.Center, planes))
+                    {
+                        visible.Add(node.NodeId);
+                        break;
+                    }
+                }
+            }
+            return visible;
         }
 
         private void RefreshFocusIfActive()
@@ -511,6 +576,8 @@ namespace NavisVisualizer.UI
             string keyword = _txtSearch?.Text?.Trim().ToUpperInvariant() ?? "";
             int tabIndex = _tabFilter.SelectedIndex;
 
+            var visibleNodeIds = ComputeVisibleNodeIds();
+
             var filtered = _nodes.AsEnumerable();
 
             if (tabIndex == 1 && _matchedNodeIds.Count > 0)
@@ -520,6 +587,9 @@ namespace NavisVisualizer.UI
 
             if (!string.IsNullOrEmpty(keyword))
                 filtered = filtered.Where(n => NodeMatchesKeyword(n, keyword));
+
+            if (visibleNodeIds != null)
+                filtered = filtered.Where(n => visibleNodeIds.Contains(n.NodeId));
 
             _nodeList.BeginUpdate();
             _nodeList.Items.Clear();
@@ -549,7 +619,7 @@ namespace NavisVisualizer.UI
             _nodeList.EndUpdate();
             _cableList.Items.Clear();
 
-            PopulateRouteList(keyword, tabIndex);
+            PopulateRouteList(keyword, tabIndex, visibleNodeIds);
         }
 
         /// <summary>
@@ -580,7 +650,7 @@ namespace NavisVisualizer.UI
             }
         }
 
-        private void PopulateRouteList(string keywordUpper, int tabIndex)
+        private void PopulateRouteList(string keywordUpper, int tabIndex, HashSet<string> visibleNodeIds)
         {
             _routeList.BeginUpdate();
             _routeList.Items.Clear();
@@ -595,6 +665,10 @@ namespace NavisVisualizer.UI
                     !nodes.Any(n => _matchedNodeIds.Contains(n))) continue;
                 if (tabIndex == 2 && _unmatchedNodeIds.Count > 0 &&
                     nodes.Any(n => _matchedNodeIds.Contains(n))) continue;
+
+                // 보이는 것만: keep a cable if any node on its route is currently visible.
+                if (visibleNodeIds != null && !nodes.Any(n => visibleNodeIds.Contains(n)))
+                    continue;
 
                 // Keyword filter: Cable No / Equip No / any Node ID
                 if (!string.IsNullOrEmpty(keywordUpper))
