@@ -46,6 +46,7 @@ namespace NavisVisualizer.UI
         private bool _visibleOnly;
         private bool _suppressVisibleCheck;
         private Button _btnRefreshVisible;
+        private Button _btnSelCables;
 
         private string _statsBase = "로드된 데이터 없음";
         private string _visDiag = "";
@@ -98,6 +99,7 @@ namespace NavisVisualizer.UI
             _chkFocus          = new CheckBox { Text = "필터 포커스", AutoSize = true, Padding = new Padding(6, 5, 6, 0) };
             _chkVisibleOnly    = new CheckBox { Text = "보이는 것만", AutoSize = true, Padding = new Padding(6, 5, 6, 0) };
             _btnRefreshVisible = new Button { Text = "새로고침", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(6, 0, 6, 0) };
+            _btnSelCables      = new Button { Text = "선택(3D/목록) Cable ↑", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(6, 0, 6, 0) };
             _btnApply.Click                += BtnApply_Click;
             _btnReset.Click                += BtnReset_Click;
             _btnViewpoint.Click            += BtnViewpoint_Click;
@@ -105,8 +107,9 @@ namespace NavisVisualizer.UI
             _chkFocus.CheckedChanged       += ChkFocus_CheckedChanged;
             _chkVisibleOnly.CheckedChanged += ChkVisibleOnly_CheckedChanged;
             _btnRefreshVisible.Click       += BtnRefreshVisible_Click;
-            // Top row: action buttons. Bottom row: filter checkboxes + 새로고침 (forced via flow break).
-            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnReset, _btnViewpoint, _btnNwd, _chkFocus, _chkVisibleOnly, _btnRefreshVisible });
+            _btnSelCables.Click            += (s, e) => ShowCablesForSelectedNodes();
+            // Top row: action buttons. Bottom row: filter checkboxes + 새로고침 + 선택Cable (flow break).
+            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnReset, _btnViewpoint, _btnNwd, _chkFocus, _chkVisibleOnly, _btnRefreshVisible, _btnSelCables });
             btnPanel.SetFlowBreak(_btnNwd, true);
 
             _progressBar = new ProgressBar { Dock = DockStyle.Fill, Height = 12, Visible = false };
@@ -200,12 +203,7 @@ namespace NavisVisualizer.UI
             routeHeader.Controls.Add(btnRouteExcel);
             layout.Controls.Add(routeHeader);
             layout.Controls.Add(_routeList);
-            var nodeHeader = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 26, AutoSize = false };
-            nodeHeader.Controls.Add(new Label { Text = "Node 목록", Font = new Font(Font, FontStyle.Bold), AutoSize = true, Padding = new Padding(0, 5, 0, 0) });
-            var btnSelNodeCables = new Button { Text = "선택(3D/목록) Cable ↑ 보기", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(6, 0, 6, 0) };
-            btnSelNodeCables.Click += (s, e) => ShowCablesForSelectedNodes();
-            nodeHeader.Controls.Add(btnSelNodeCables);
-            layout.Controls.Add(nodeHeader);
+            layout.Controls.Add(new Label { Text = "Node 목록", Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 16 });
             layout.Controls.Add(_nodeList);
             layout.Controls.Add(new Label { Text = "선택된 Node의 Cable 상세", Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 16 });
             layout.Controls.Add(_cableList);
@@ -723,28 +721,7 @@ namespace NavisVisualizer.UI
 
             int seq = 1;
             foreach (var node in filtered)
-            {
-                var stage = node.GetStage();
-                string stageLabel = CableStageInfo.Labels.TryGetValue(stage, out var lbl) ? lbl : stage.ToString();
-                bool hasApplied = _matchedNodeIds.Count > 0 || _unmatchedNodeIds.Count > 0;
-                string matchLabel = !hasApplied ? "-" : (_matchedNodeIds.Contains(node.NodeId) ? "O" : "X");
-                string pct = node.OverallProgress.HasValue ? $"{node.OverallProgress.Value * 100:0}%" : "-";
-
-                var item = new ListViewItem((seq++).ToString());
-                item.UseItemStyleForSubItems = false;
-                item.SubItems.Add(node.NodeId);
-                item.SubItems.Add(node.Cables.Count.ToString());
-                item.SubItems.Add(node.TotalDesignLth.ToString("0.##"));
-                item.SubItems.Add(node.TotalPulledLth.ToString("0.##"));
-                item.SubItems.Add(pct);
-                var stageSub = item.SubItems.Add(stageLabel);
-                if (_colorSettings.TryGetValue(stage, out var setting))
-                    stageSub.ForeColor = setting.DisplayColor;
-                var matchSub = item.SubItems.Add(matchLabel);
-                if (matchLabel == "X") matchSub.ForeColor = Color.Red;
-                item.Tag = node;
-                _nodeList.Items.Add(item);
-            }
+                AddNodeRow(seq++, node);
             _nodeList.EndUpdate();
             _cableList.Items.Clear();
 
@@ -817,6 +794,31 @@ namespace NavisVisualizer.UI
             _routeList.EndUpdate();
         }
 
+        /// <summary>Add one Node 목록 row (No., Node ID, 케이블, Design, Pulled, %, 단계, 매칭).</summary>
+        private void AddNodeRow(int seq, CableNodeData node)
+        {
+            var stage = node.GetStage();
+            string stageLabel = CableStageInfo.Labels.TryGetValue(stage, out var lbl) ? lbl : stage.ToString();
+            bool hasApplied = _matchedNodeIds.Count > 0 || _unmatchedNodeIds.Count > 0;
+            string matchLabel = !hasApplied ? "-" : (_matchedNodeIds.Contains(node.NodeId) ? "O" : "X");
+            string pct = node.OverallProgress.HasValue ? $"{node.OverallProgress.Value * 100:0}%" : "-";
+
+            var item = new ListViewItem(seq.ToString());
+            item.UseItemStyleForSubItems = false;
+            item.SubItems.Add(node.NodeId);
+            item.SubItems.Add(node.Cables.Count.ToString());
+            item.SubItems.Add(node.TotalDesignLth.ToString("0.##"));
+            item.SubItems.Add(node.TotalPulledLth.ToString("0.##"));
+            item.SubItems.Add(pct);
+            var stageSub = item.SubItems.Add(stageLabel);
+            if (_colorSettings.TryGetValue(stage, out var setting))
+                stageSub.ForeColor = setting.DisplayColor;
+            var matchSub = item.SubItems.Add(matchLabel);
+            if (matchLabel == "X") matchSub.ForeColor = Color.Red;
+            item.Tag = node;
+            _nodeList.Items.Add(item);
+        }
+
         /// <summary>Add one Cable 목록 row (No., Cable No, Equip, 노드수, Design, Pulled, %, Route).</summary>
         private void AddRouteRow(int seq, string cableNo, List<string> nodes)
         {
@@ -864,6 +866,7 @@ namespace NavisVisualizer.UI
                 return;
             }
 
+            // Top Cable 목록: cables touching any selected node.
             _routeList.BeginUpdate();
             _routeList.Items.Clear();
             int seq = 1;
@@ -871,6 +874,16 @@ namespace NavisVisualizer.UI
                 if (kv.Value.Any(n => sel.Contains(n)))
                     AddRouteRow(seq++, kv.Key, kv.Value);
             _routeList.EndUpdate();
+
+            // Node 목록 (그 아래): narrow to just the selected nodes.
+            _nodeList.BeginUpdate();
+            _nodeList.Items.Clear();
+            int nseq = 1;
+            foreach (var node in _nodes)
+                if (sel.Contains(node.NodeId))
+                    AddNodeRow(nseq++, node);
+            _nodeList.EndUpdate();
+            _cableList.Items.Clear();
 
             // Only re-select in 3D when the source was the node list (3D already selected).
             if (!from3D) SelectNodeBoxesInView(sel);
