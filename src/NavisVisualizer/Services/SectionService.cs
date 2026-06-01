@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text;
 using Autodesk.Navisworks.Api;
 using Autodesk.Navisworks.Api.ComApi;
+using ComTypes = System.Runtime.InteropServices.ComTypes;
 
 namespace NavisVisualizer.Services
 {
@@ -157,6 +159,11 @@ namespace NavisVisualizer.Services
                         object val = TryGet(lp, name);
                         if (val != null) sb.AppendLine($"    {name} = {Describe(val)}");
                     }
+
+                    // Definitive: enumerate the actual IDispatch member names of the plane.
+                    sb.AppendLine("  [InwLPlane3f 실제 멤버 목록]");
+                    foreach (var m in ListComMembers(lp))
+                        sb.AppendLine($"    · {m}");
                 }
 
                 var parsed = GetActiveClipPlanes(doc);
@@ -238,6 +245,49 @@ namespace NavisVisualizer.Services
         {
             if (o == null) return "(null)";
             try { return o.GetType().Name; } catch { return "?"; }
+        }
+
+        [ComImport, Guid("00020400-0000-0000-C000-000000000046"),
+         InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        private interface IDispatch
+        {
+            void GetTypeInfoCount(out int pctinfo);
+            void GetTypeInfo(int iTInfo, int lcid, out ComTypes.ITypeInfo info);
+            // GetIDsOfNames / Invoke intentionally omitted — not called.
+        }
+
+        /// <summary>List the real IDispatch member names of a COM object via its ITypeInfo.</summary>
+        private static List<string> ListComMembers(object obj)
+        {
+            var result = new List<string>();
+            if (obj == null) return result;
+            try
+            {
+                if (!(obj is IDispatch disp)) { result.Add("(IDispatch 아님)"); return result; }
+                disp.GetTypeInfo(0, 0, out var ti);
+                if (ti == null) { result.Add("(ITypeInfo 없음)"); return result; }
+
+                ti.GetTypeAttr(out IntPtr pAttr);
+                var attr = (ComTypes.TYPEATTR)Marshal.PtrToStructure(pAttr, typeof(ComTypes.TYPEATTR));
+                try
+                {
+                    for (int i = 0; i < attr.cFuncs; i++)
+                    {
+                        ti.GetFuncDesc(i, out IntPtr pFunc);
+                        try
+                        {
+                            var fd = (ComTypes.FUNCDESC)Marshal.PtrToStructure(pFunc, typeof(ComTypes.FUNCDESC));
+                            var names = new string[1];
+                            ti.GetNames(fd.memid, names, 1, out int cn);
+                            if (cn > 0) result.Add($"{names[0]}  (invkind={fd.invkind}, params={fd.cParams})");
+                        }
+                        finally { ti.ReleaseFuncDesc(pFunc); }
+                    }
+                }
+                finally { ti.ReleaseTypeAttr(pAttr); }
+            }
+            catch (Exception ex) { result.Add($"(열거 실패: {ex.Message})"); }
+            return result;
         }
 
         private static string Describe(object val)
