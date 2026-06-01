@@ -39,8 +39,9 @@ namespace NavisVisualizer.UI
         private Button _btnLoad;
         private Label _lblFile;
         private TextBox _txtSearch;
-        private Button _btnFocusToggle;
+        private CheckBox _chkFocus;
         private bool _focusOn;
+        private bool _suppressFocusCheck;
         private CheckBox _chkVisibleOnly;
         private bool _visibleOnly;
         private bool _suppressVisibleCheck;
@@ -88,17 +89,19 @@ namespace NavisVisualizer.UI
             var btnPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 65, AutoSize = true };
             _btnApply        = new Button { Text = "적용",           Width = 80  };
             _btnReset        = new Button { Text = "전체 초기화",    Width = 90  };
-            _btnFocusToggle  = new Button { Text = "필터 포커스 ON", Width = 110 };
-            _chkVisibleOnly  = new CheckBox { Text = "보이는 것만", AutoSize = true, Padding = new Padding(6, 5, 6, 0) };
             _btnViewpoint    = new Button { Text = "Viewpoint 저장", Width = 120 };
             _btnNwd          = new Button { Text = "NWD Export",     Width = 110 };
-            _btnApply.Click             += BtnApply_Click;
-            _btnReset.Click             += BtnReset_Click;
-            _btnFocusToggle.Click       += BtnFocusToggle_Click;
+            _chkFocus        = new CheckBox { Text = "필터 포커스", AutoSize = true, Padding = new Padding(6, 5, 6, 0) };
+            _chkVisibleOnly  = new CheckBox { Text = "보이는 것만", AutoSize = true, Padding = new Padding(6, 5, 6, 0) };
+            _btnApply.Click                += BtnApply_Click;
+            _btnReset.Click                += BtnReset_Click;
+            _btnViewpoint.Click            += BtnViewpoint_Click;
+            _btnNwd.Click                  += BtnNwd_Click;
+            _chkFocus.CheckedChanged       += ChkFocus_CheckedChanged;
             _chkVisibleOnly.CheckedChanged += ChkVisibleOnly_CheckedChanged;
-            _btnViewpoint.Click         += BtnViewpoint_Click;
-            _btnNwd.Click               += BtnNwd_Click;
-            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnReset, _btnFocusToggle, _chkVisibleOnly, _btnViewpoint, _btnNwd });
+            // Top row: action buttons. Bottom row: filter checkboxes (forced via flow break).
+            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnReset, _btnViewpoint, _btnNwd, _chkFocus, _chkVisibleOnly });
+            btnPanel.SetFlowBreak(_btnNwd, true);
 
             _progressBar = new ProgressBar { Dock = DockStyle.Fill, Height = 12, Visible = false };
             _lblStats = new Label { Dock = DockStyle.Fill, Text = "로드된 데이터 없음", AutoSize = false, Height = 36 };
@@ -351,8 +354,7 @@ namespace NavisVisualizer.UI
             _tabFilter.TabPages[1].Text = $"매칭 ({_matchedNodeIds.Count})";
             _tabFilter.TabPages[2].Text = $"미매칭 ({_unmatchedNodeIds.Count})";
 
-            _focusOn = false;
-            _btnFocusToggle.Text = "필터 포커스 ON";
+            SetFocusChecked(false);
 
             UpdateStats(result, hiddenCount);
             FilterList();
@@ -364,38 +366,48 @@ namespace NavisVisualizer.UI
             var doc = _main.GetDocument();
             if (doc == null) return;
             _main.OverrideEngine.Reset(doc);
-            _focusOn = false;
-            _btnFocusToggle.Text = "필터 포커스 ON";
+            SetFocusChecked(false);
             SetVisibleOnlyChecked(false);
             _lblStats.Text = "전체 초기화 완료";
         }
 
-        private void BtnFocusToggle_Click(object sender, EventArgs e)
+        private void ChkFocus_CheckedChanged(object sender, EventArgs e)
         {
+            if (_suppressFocusCheck) return;
+
             var doc = _main.GetDocument();
-            if (doc == null || _matchedNodeIds.Count == 0)
+            if (_chkFocus.Checked)
             {
-                MessageBox.Show("먼저 적용을 실행하세요.");
-                return;
-            }
-            if (_focusOn)
-            {
-                _main.OverrideEngine.ClearCableFilterFocus(doc);
-                _focusOn = false;
-                _btnFocusToggle.Text = "필터 포커스 ON";
-            }
-            else
-            {
+                if (doc == null || _matchedNodeIds.Count == 0)
+                {
+                    MessageBox.Show("먼저 적용을 실행하세요.");
+                    SetFocusChecked(false);
+                    return;
+                }
                 var hits = GetCurrentFilterHitNodeIds();
                 if (hits.Count == 0)
                 {
                     MessageBox.Show("현재 필터에 일치하는 Node가 없습니다.");
+                    SetFocusChecked(false);
                     return;
                 }
                 _main.OverrideEngine.SetCableFilterFocus(doc, hits);
                 _focusOn = true;
-                _btnFocusToggle.Text = "필터 포커스 OFF";
             }
+            else
+            {
+                if (doc != null) _main.OverrideEngine.ClearCableFilterFocus(doc);
+                _focusOn = false;
+            }
+        }
+
+        /// <summary>Set the focus checkbox state without firing the CheckedChanged side effects.</summary>
+        private void SetFocusChecked(bool value)
+        {
+            _suppressFocusCheck = true;
+            _chkFocus.Checked = value;
+            _suppressFocusCheck = false;
+            _focusOn = value;
         }
 
         private void ChkVisibleOnly_CheckedChanged(object sender, EventArgs e)
