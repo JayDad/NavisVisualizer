@@ -200,7 +200,12 @@ namespace NavisVisualizer.UI
             routeHeader.Controls.Add(btnRouteExcel);
             layout.Controls.Add(routeHeader);
             layout.Controls.Add(_routeList);
-            layout.Controls.Add(new Label { Text = "Node 목록", Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 16 });
+            var nodeHeader = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 26, AutoSize = false };
+            nodeHeader.Controls.Add(new Label { Text = "Node 목록", Font = new Font(Font, FontStyle.Bold), AutoSize = true, Padding = new Padding(0, 5, 0, 0) });
+            var btnSelNodeCables = new Button { Text = "선택 노드 Cable ↑ 보기", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(6, 0, 6, 0) };
+            btnSelNodeCables.Click += (s, e) => ShowCablesForSelectedNodes();
+            nodeHeader.Controls.Add(btnSelNodeCables);
+            layout.Controls.Add(nodeHeader);
             layout.Controls.Add(_nodeList);
             layout.Controls.Add(new Label { Text = "선택된 Node의 Cable 상세", Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 16 });
             layout.Controls.Add(_cableList);
@@ -807,25 +812,81 @@ namespace NavisVisualizer.UI
                     if (!hit) continue;
                 }
 
-                var meta2 = _cableMeta.TryGetValue(cableNo, out var mm) ? mm : null;
-                string equip = meta2?.EquipNo ?? "";
-                string design = meta2?.DesignLth.HasValue == true ? meta2.DesignLth.Value.ToString("0.##") : "-";
-                string pulled = meta2?.PulledLth.HasValue == true ? meta2.PulledLth.Value.ToString("0.##") : "-";
-                string pct    = meta2?.PullingProgress.HasValue == true ? $"{meta2.PullingProgress.Value * 100:0}%" : "-";
-                string route  = string.Join(", ", nodes);
-
-                var item = new ListViewItem((seq++).ToString());
-                item.SubItems.Add(cableNo);
-                item.SubItems.Add(equip);
-                item.SubItems.Add(nodes.Count.ToString());
-                item.SubItems.Add(design);
-                item.SubItems.Add(pulled);
-                item.SubItems.Add(pct);
-                item.SubItems.Add(route);
-                item.Tag = nodes;
-                _routeList.Items.Add(item);
+                AddRouteRow(seq++, cableNo, nodes);
             }
             _routeList.EndUpdate();
+        }
+
+        /// <summary>Add one Cable 목록 row (No., Cable No, Equip, 노드수, Design, Pulled, %, Route).</summary>
+        private void AddRouteRow(int seq, string cableNo, List<string> nodes)
+        {
+            var meta2 = _cableMeta.TryGetValue(cableNo, out var mm) ? mm : null;
+            string equip = meta2?.EquipNo ?? "";
+            string design = meta2?.DesignLth.HasValue == true ? meta2.DesignLth.Value.ToString("0.##") : "-";
+            string pulled = meta2?.PulledLth.HasValue == true ? meta2.PulledLth.Value.ToString("0.##") : "-";
+            string pct    = meta2?.PullingProgress.HasValue == true ? $"{meta2.PullingProgress.Value * 100:0}%" : "-";
+            string route  = string.Join(", ", nodes);
+
+            var item = new ListViewItem(seq.ToString());
+            item.SubItems.Add(cableNo);
+            item.SubItems.Add(equip);
+            item.SubItems.Add(nodes.Count.ToString());
+            item.SubItems.Add(design);
+            item.SubItems.Add(pulled);
+            item.SubItems.Add(pct);
+            item.SubItems.Add(route);
+            item.Tag = nodes;
+            _routeList.Items.Add(item);
+        }
+
+        /// <summary>
+        /// Show, in the top Cable 목록, every cable whose route passes through any of the
+        /// given nodes (drag-select multiple nodes → button). Also selects those nodes'
+        /// boxes in the 3D view. This is an on-demand view that the normal filters replace.
+        /// </summary>
+        private void ShowCablesForSelectedNodes()
+        {
+            var sel = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (ListViewItem it in _nodeList.SelectedItems)
+                if (it.Tag is CableNodeData n) sel.Add(n.NodeId);
+
+            if (sel.Count == 0)
+            {
+                MessageBox.Show("Node 목록에서 노드를 선택하세요. (드래그로 여러 개 선택 가능)");
+                return;
+            }
+
+            _routeList.BeginUpdate();
+            _routeList.Items.Clear();
+            int seq = 1;
+            foreach (var kv in _cableRoutes)
+                if (kv.Value.Any(n => sel.Contains(n)))
+                    AddRouteRow(seq++, kv.Key, kv.Value);
+            _routeList.EndUpdate();
+
+            SelectNodeBoxesInView(sel);
+        }
+
+        /// <summary>Select every box of the given nodes in the 3D view (multi-node).</summary>
+        private void SelectNodeBoxesInView(IEnumerable<string> nodeIds)
+        {
+            var doc = _main.GetDocument();
+            if (doc == null) return;
+            var combined = new ModelItemCollection();
+            foreach (var id in nodeIds)
+            {
+                var col = _main.OverrideEngine.GetCableNodeItems(id);
+                if (col == null) continue;
+                foreach (ModelItem mi in col) combined.Add(mi);
+            }
+            if (combined.Count == 0) return;
+            _suppressSelectionSync = true;
+            try
+            {
+                doc.CurrentSelection.CopyFrom(combined);
+                doc.ActiveView.FocusOnCurrentSelection();
+            }
+            finally { _suppressSelectionSync = false; }
         }
 
         private void RouteList_SelectedIndexChanged(object sender, EventArgs e)
