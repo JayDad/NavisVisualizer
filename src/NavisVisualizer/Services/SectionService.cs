@@ -158,9 +158,9 @@ namespace NavisVisualizer.Services
                     sb.AppendLine($"  Plane type = {TypeName(lp)}");
 
                     // Probe every plausible accessor so the real representation shows up.
-                    foreach (var name in new[] { "data1", "data2", "data3", "data4",
-                                                 "A", "B", "C", "D", "a", "b", "c", "d",
-                                                 "distance", "Distance", "normal", "Normal" })
+                    foreach (var name in new[] { "GetNormal", "distance", "DistanceEx",
+                                                 "data1", "data2", "data3", "data4",
+                                                 "normal", "Normal" })
                     {
                         object val = TryGet(lp, name);
                         if (val != null) sb.AppendLine($"    {name} = {Describe(val)}");
@@ -192,15 +192,28 @@ namespace NavisVisualizer.Services
         // -------------------------------------------------------------------
 
         /// <summary>
-        /// Extract the plane equation. Inw geometry structs expose components as
-        /// data1..dataN (cf. InwLPos3f/InwLVec3f), so InwLPlane3f is read as
-        /// data1..data4 = A,B,C,D. Falls back to normal+distance if present.
+        /// Extract the plane equation. Confirmed on Navisworks 2022: InwLPlane3f exposes
+        /// GetNormal() (method → unit vector with data1/2/3) and distance() (method →
+        /// signed distance of the plane from the origin along the normal).
+        /// We store Eval(p) = n·p - distance = signed distance of p from the plane;
+        /// the kept side is chosen by <see cref="KeepPositiveSide"/>.
         /// </summary>
         private static bool TryReadPlane(object lp, out ClipPlane cp)
         {
             cp = new ClipPlane();
             try
             {
+                object normal = Invoke(lp, "GetNormal");   // InwLUnitVec3f
+                object distObj = Invoke(lp, "distance");
+                if (normal != null && distObj != null && TryReadVec(normal, out double nx, out double ny, out double nz))
+                {
+                    double dist = Convert.ToDouble(distObj);
+                    cp.A = nx; cp.B = ny; cp.C = nz;
+                    cp.D = -dist;                          // n·p - distance = 0 at the plane
+                    return true;
+                }
+
+                // Fallbacks (older/other builds): data1..4 = A,B,C,D, or normal+distance.
                 object d1 = TryGet(lp, "data1");
                 object d2 = TryGet(lp, "data2");
                 object d3 = TryGet(lp, "data3");
@@ -213,20 +226,22 @@ namespace NavisVisualizer.Services
                     cp.D = Convert.ToDouble(d4);
                     return true;
                 }
-
-                object normal = TryGet(lp, "normal");
-                object dist = TryGet(lp, "distance");
-                if (normal != null && dist != null)
-                {
-                    cp.A = Convert.ToDouble(TryGet(normal, "data1"));
-                    cp.B = Convert.ToDouble(TryGet(normal, "data2"));
-                    cp.C = Convert.ToDouble(TryGet(normal, "data3"));
-                    cp.D = Convert.ToDouble(dist);
-                    return true;
-                }
             }
             catch { }
             return false;
+        }
+
+        /// <summary>Read a 3-component Inw vector, trying the known component accessors.</summary>
+        private static bool TryReadVec(object vec, out double x, out double y, out double z)
+        {
+            x = y = z = 0;
+            if (vec == null) return false;
+            object vx = TryGet(vec, "data1") ?? TryGet(vec, "x") ?? TryGet(vec, "X");
+            object vy = TryGet(vec, "data2") ?? TryGet(vec, "y") ?? TryGet(vec, "Y");
+            object vz = TryGet(vec, "data3") ?? TryGet(vec, "z") ?? TryGet(vec, "Z");
+            if (vx == null || vy == null || vz == null) return false;
+            x = Convert.ToDouble(vx); y = Convert.ToDouble(vy); z = Convert.ToDouble(vz);
+            return true;
         }
 
         /// <summary>Invoke a COM member, trying property-get first then method call. Null on failure.</summary>
@@ -301,7 +316,9 @@ namespace NavisVisualizer.Services
             if (val == null) return "(null)";
             var t = val.GetType();
             if (t.IsPrimitive || val is string) return val.ToString();
-            // Nested struct (e.g. normal vector) — show its data fields.
+            // Nested struct (e.g. normal vector) — show its components.
+            if (TryReadVec(val, out double x, out double y, out double z))
+                return $"{TypeName(val)}(vec) {{ {x}, {y}, {z} }}";
             var sb = new StringBuilder(t.Name + " {");
             foreach (var name in new[] { "data1", "data2", "data3" })
             {
