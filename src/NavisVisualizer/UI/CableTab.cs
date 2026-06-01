@@ -117,7 +117,7 @@ namespace NavisVisualizer.UI
             _txtSearch = new TextBox { Width = 180, Text = "" };
             _txtSearch.TextChanged += (s, e) => { FilterList(); RefreshFocusIfActive(); };
             searchPanel.Controls.Add(_txtSearch);
-            var btnExport = new Button { Text = "매칭 Status 출력", Width = 120, Height = 23 };
+            var btnExport = new Button { Text = "매칭 Status 출력", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(6, 0, 6, 0) };
             btnExport.Click += BtnExport_Click;
             searchPanel.Controls.Add(btnExport);
 
@@ -195,7 +195,7 @@ namespace NavisVisualizer.UI
             layout.Controls.Add(_tabFilter);
             var routeHeader = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 26, AutoSize = false };
             routeHeader.Controls.Add(new Label { Text = "Cable 목록 (행 클릭 → Route 하이라이트)", Font = new Font(Font, FontStyle.Bold), AutoSize = true, Padding = new Padding(0, 5, 0, 0) });
-            var btnRouteExcel = new Button { Text = "Excel 출력", Width = 80, Height = 22 };
+            var btnRouteExcel = new Button { Text = "Cable 목록 Excel 출력", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(6, 0, 6, 0) };
             btnRouteExcel.Click += BtnRouteExcel_Click;
             routeHeader.Controls.Add(btnRouteExcel);
             layout.Controls.Add(routeHeader);
