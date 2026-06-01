@@ -48,26 +48,26 @@ namespace NavisVisualizer.Services
 
             try
             {
-                var bf = BindingFlags.InvokeMethod | BindingFlags.Public | BindingFlags.Instance;
                 object comState = (object)ComApiBridge.State;
-
-                object view = Get(comState, "CurrentView");
+                object view = Invoke(comState, "CurrentView");
                 if (view == null) return planes;
 
-                object clipColl = view.GetType().InvokeMember("ClippingPlanes", bf, null, view, null);
+                object clipColl = Invoke(view, "ClippingPlanes");
                 if (clipColl == null) return planes;
 
-                int count = Convert.ToInt32(Get(clipColl, "Count"));
+                object countObj = Invoke(clipColl, "Count");
+                if (countObj == null) return planes;
+                int count = Convert.ToInt32(countObj);
+
                 for (int i = 1; i <= count; i++) // COM collections are 1-based
                 {
-                    object plane = clipColl.GetType().InvokeMember(
-                        "Item", bf, null, clipColl, new object[] { i });
+                    object plane = Invoke(clipColl, "Item", i);
                     if (plane == null) continue;
 
-                    bool enabled = Convert.ToBoolean(Get(plane, "Enabled"));
-                    if (!enabled) continue;
+                    object enabledObj = Invoke(plane, "Enabled");
+                    if (enabledObj == null || !Convert.ToBoolean(enabledObj)) continue;
 
-                    object lp = Get(plane, "Plane"); // InwLPlane3f
+                    object lp = Invoke(plane, "Plane"); // InwLPlane3f
                     if (lp == null) continue;
 
                     if (TryReadPlane(lp, out var cp))
@@ -118,46 +118,54 @@ namespace NavisVisualizer.Services
 
             try
             {
-                var bf = BindingFlags.InvokeMethod | BindingFlags.Public | BindingFlags.Instance;
                 object comState = (object)ComApiBridge.State;
-                object view = Get(comState, "CurrentView");
-                if (view == null) { return "CurrentView == null"; }
+                sb.AppendLine($"State type   = {TypeName(comState)}");
 
-                object clipColl = view.GetType().InvokeMember("ClippingPlanes", bf, null, view, null);
-                if (clipColl == null) { return "ClippingPlanes() == null"; }
+                object view = Invoke(comState, "CurrentView");
+                sb.AppendLine($"CurrentView  = {(view == null ? "NULL (멤버명 다름?)" : TypeName(view))}");
+                if (view == null) { sb.AppendLine("→ CurrentView를 못 읽음. 여기서 중단."); return sb.ToString(); }
 
-                int count = Convert.ToInt32(Get(clipColl, "Count"));
-                sb.AppendLine($"ClippingPlanes.Count = {count}");
+                object clipColl = Invoke(view, "ClippingPlanes");
+                sb.AppendLine($"ClippingPlanes = {(clipColl == null ? "NULL (멤버명 다름?)" : TypeName(clipColl))}");
+                if (clipColl == null) { sb.AppendLine("→ ClippingPlanes를 못 읽음. 여기서 중단."); return sb.ToString(); }
+
+                object countObj = Invoke(clipColl, "Count");
+                sb.AppendLine($"Count        = {(countObj?.ToString() ?? "NULL")}");
                 sb.AppendLine($"KeepPositiveSide = {KeepPositiveSide}");
                 sb.AppendLine();
 
+                int count = countObj == null ? 0 : Convert.ToInt32(countObj);
                 for (int i = 1; i <= count; i++)
                 {
-                    object plane = clipColl.GetType().InvokeMember(
-                        "Item", bf, null, clipColl, new object[] { i });
+                    object plane = Invoke(clipColl, "Item", i);
                     sb.AppendLine($"--- Plane {i} ---");
-                    if (plane == null) { sb.AppendLine("(null)"); continue; }
+                    if (plane == null) { sb.AppendLine("Item() = NULL"); continue; }
+                    sb.AppendLine($"  plane type = {TypeName(plane)}");
 
-                    object enabled = TryGet(plane, "Enabled");
-                    sb.AppendLine($"Enabled = {enabled}");
+                    object enabled = Invoke(plane, "Enabled");
+                    sb.AppendLine($"  Enabled = {(enabled?.ToString() ?? "NULL")}");
 
-                    object lp = TryGet(plane, "Plane");
-                    if (lp == null) { sb.AppendLine("Plane = (null)"); continue; }
+                    object lp = Invoke(plane, "Plane");
+                    if (lp == null) { sb.AppendLine("  Plane = NULL"); continue; }
+                    sb.AppendLine($"  Plane type = {TypeName(lp)}");
 
-                    sb.AppendLine($"Plane type = {lp.GetType().Name}");
-                    // Dump every readable member so the real representation is visible.
-                    foreach (var name in new[] { "data1", "data2", "data3", "data4", "distance", "normal" })
+                    // Probe every plausible accessor so the real representation shows up.
+                    foreach (var name in new[] { "data1", "data2", "data3", "data4",
+                                                 "A", "B", "C", "D", "a", "b", "c", "d",
+                                                 "distance", "Distance", "normal", "Normal" })
                     {
                         object val = TryGet(lp, name);
-                        if (val != null) sb.AppendLine($"  {name} = {Describe(val)}");
+                        if (val != null) sb.AppendLine($"    {name} = {Describe(val)}");
                     }
                 }
 
                 var parsed = GetActiveClipPlanes(doc);
                 sb.AppendLine();
-                sb.AppendLine($"Parsed enabled planes = {parsed.Count}");
+                sb.AppendLine($"==> 파싱된 활성 평면 수 = {parsed.Count}");
                 foreach (var p in parsed)
-                    sb.AppendLine($"  A={p.A:0.###} B={p.B:0.###} C={p.C:0.###} D={p.D:0.###}");
+                    sb.AppendLine($"    A={p.A:0.###} B={p.B:0.###} C={p.C:0.###} D={p.D:0.###}");
+                if (parsed.Count == 0)
+                    sb.AppendLine("(0이면 보이는 것만 필터가 단면을 인식 못함 → 위 멤버명 확인 필요)");
             }
             catch (Exception ex)
             {
@@ -208,13 +216,28 @@ namespace NavisVisualizer.Services
             return false;
         }
 
-        private static object Get(object obj, string member) =>
-            obj.GetType().InvokeMember(member, BindingFlags.GetProperty, null, obj, null);
+        /// <summary>Invoke a COM member, trying property-get first then method call. Null on failure.</summary>
+        private static object Invoke(object obj, string member, params object[] args)
+        {
+            if (obj == null) return null;
+            var t = obj.GetType();
+            try { return t.InvokeMember(member, BindingFlags.GetProperty, null, obj, args); }
+            catch { }
+            try { return t.InvokeMember(member, BindingFlags.InvokeMethod, null, obj, args); }
+            catch { return null; }
+        }
 
         private static object TryGet(object obj, string member)
         {
+            if (obj == null) return null;
             try { return obj.GetType().InvokeMember(member, BindingFlags.GetProperty, null, obj, null); }
             catch { try { return obj.GetType().InvokeMember(member, BindingFlags.InvokeMethod, null, obj, null); } catch { return null; } }
+        }
+
+        private static string TypeName(object o)
+        {
+            if (o == null) return "(null)";
+            try { return o.GetType().Name; } catch { return "?"; }
         }
 
         private static string Describe(object val)
