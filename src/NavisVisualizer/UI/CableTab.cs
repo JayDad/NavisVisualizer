@@ -45,6 +45,10 @@ namespace NavisVisualizer.UI
         private CheckBox _chkVisibleOnly;
         private bool _visibleOnly;
         private bool _suppressVisibleCheck;
+        private Button _btnRefreshVisible;
+
+        private string _statsBase = "로드된 데이터 없음";
+        private string _visDiag = "";
         private TabControl _tabFilter;
         private ListView _nodeList;
         private ListView _cableList;
@@ -91,20 +95,24 @@ namespace NavisVisualizer.UI
             _btnReset        = new Button { Text = "전체 초기화",    Width = 90  };
             _btnViewpoint    = new Button { Text = "Viewpoint 저장", Width = 120 };
             _btnNwd          = new Button { Text = "NWD Export",     Width = 110 };
-            _chkFocus        = new CheckBox { Text = "필터 포커스", AutoSize = true, Padding = new Padding(6, 5, 6, 0) };
-            _chkVisibleOnly  = new CheckBox { Text = "보이는 것만", AutoSize = true, Padding = new Padding(6, 5, 6, 0) };
+            _chkFocus          = new CheckBox { Text = "필터 포커스", AutoSize = true, Padding = new Padding(6, 5, 6, 0) };
+            _chkVisibleOnly    = new CheckBox { Text = "보이는 것만", AutoSize = true, Padding = new Padding(6, 5, 6, 0) };
+            _btnRefreshVisible = new Button { Text = "새로고침", Width = 70 };
             _btnApply.Click                += BtnApply_Click;
             _btnReset.Click                += BtnReset_Click;
             _btnViewpoint.Click            += BtnViewpoint_Click;
             _btnNwd.Click                  += BtnNwd_Click;
             _chkFocus.CheckedChanged       += ChkFocus_CheckedChanged;
             _chkVisibleOnly.CheckedChanged += ChkVisibleOnly_CheckedChanged;
-            // Top row: action buttons. Bottom row: filter checkboxes (forced via flow break).
-            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnReset, _btnViewpoint, _btnNwd, _chkFocus, _chkVisibleOnly });
+            // 새로고침: re-evaluate 보이는 것만 against the *current* section/hide state
+            // (there is no auto event for section/visibility changes).
+            _btnRefreshVisible.Click       += (s, e) => { if (_visibleOnly) FilterList(); };
+            // Top row: action buttons. Bottom row: filter checkboxes + refresh (forced via flow break).
+            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnReset, _btnViewpoint, _btnNwd, _chkFocus, _chkVisibleOnly, _btnRefreshVisible });
             btnPanel.SetFlowBreak(_btnNwd, true);
 
             _progressBar = new ProgressBar { Dock = DockStyle.Fill, Height = 12, Visible = false };
-            _lblStats = new Label { Dock = DockStyle.Fill, Text = "로드된 데이터 없음", AutoSize = false, Height = 36 };
+            _lblStats = new Label { Dock = DockStyle.Fill, Text = "로드된 데이터 없음", AutoSize = false, Height = 54 };
 
             var searchPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 28, AutoSize = false };
             searchPanel.Controls.Add(new Label { Text = "검색(Node/Cable No/Equip No):", AutoSize = true, Padding = new Padding(0, 4, 0, 0) });
@@ -368,7 +376,9 @@ namespace NavisVisualizer.UI
             _main.OverrideEngine.Reset(doc);
             SetFocusChecked(false);
             SetVisibleOnlyChecked(false);
-            _lblStats.Text = "전체 초기화 완료";
+            _statsBase = "전체 초기화 완료";
+            _visDiag = "";
+            RefreshStatsLabel();
         }
 
         private void ChkFocus_CheckedChanged(object sender, EventArgs e)
@@ -445,16 +455,22 @@ namespace NavisVisualizer.UI
         /// </summary>
         private HashSet<string> ComputeVisibleNodeIds()
         {
+            _visDiag = "";
             if (!_visibleOnly) return null;
 
             var doc = _main.GetDocument();
-            if (doc == null || !_main.CableBoxSearcher.IsIndexBuilt) return null;
+            if (doc == null || !_main.CableBoxSearcher.IsIndexBuilt)
+            {
+                _visDiag = "보이는것만: 모델/인덱스 없음 → 필터 미적용";
+                return null;
+            }
 
             var planes = _main.SectionSvc.GetActiveClipPlanes(doc);
 
             var search = _main.CableBoxSearcher.FindBySpoolIds(
                 _nodes.Select(n => CableNodeData.NormalizeId(n.NodeId)).Distinct());
 
+            int nodesWithBox = 0, hiddenAll = 0, clippedAll = 0;
             var visible = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var node in _nodes)
             {
@@ -462,20 +478,30 @@ namespace NavisVisualizer.UI
                 if (!search.TryGetValue(key, out var items) || items.Count == 0)
                     continue; // no box in model → not on screen
 
+                nodesWithBox++;
+                bool anyVisible = false, anyNotHidden = false;
                 foreach (var item in items)
                 {
                     if (SectionService.IsEffectivelyHidden(item)) continue;
+                    anyNotHidden = true;
                     BoundingBox3D bbox;
                     try { bbox = item.BoundingBox(); }
                     catch { continue; }
                     if (bbox == null) continue;
                     if (_main.SectionSvc.IsPointVisible(bbox.Center, planes))
                     {
-                        visible.Add(node.NodeId);
+                        anyVisible = true;
                         break;
                     }
                 }
+
+                if (anyVisible) visible.Add(node.NodeId);
+                else if (!anyNotHidden) hiddenAll++;   // every box hidden
+                else clippedAll++;                      // not hidden but outside section
             }
+
+            _visDiag = $"보이는것만 진단: 박스노드 {nodesWithBox}, 활성평면 {planes.Count}, "
+                     + $"숨김제외 {hiddenAll}, 단면제외 {clippedAll}, 표시 {visible.Count}";
             return visible;
         }
 
@@ -675,6 +701,7 @@ namespace NavisVisualizer.UI
             _cableList.Items.Clear();
 
             PopulateRouteList(keyword, tabIndex, visibleNodeIds);
+            RefreshStatsLabel();
         }
 
         /// <summary>
@@ -804,8 +831,16 @@ namespace NavisVisualizer.UI
             string line2 = "";
             if (result != null)
                 line2 = $"매칭 {result.MatchedCount} / 미매칭 {result.UnmatchedCount} / 숨김 박스 {hiddenCount}";
-            _lblStats.Text = string.Join("  ", parts)
+            _statsBase = string.Join("  ", parts)
                            + (!string.IsNullOrEmpty(line2) ? $"\n{line2}" : "");
+            RefreshStatsLabel();
+        }
+
+        /// <summary>Compose the stats label = base apply stats + (보이는것만 진단 when active).</summary>
+        private void RefreshStatsLabel()
+        {
+            _lblStats.Text = _statsBase
+                + (_visibleOnly && !string.IsNullOrEmpty(_visDiag) ? $"\n{_visDiag}" : "");
         }
 
         // ----- Bidirectional selection sync -----
