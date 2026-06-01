@@ -594,12 +594,44 @@ namespace NavisVisualizer.UI
             }
         }
 
+        /// <summary>
+        /// Refresh the 전체/매칭/미매칭 tab labels. With "보이는 것만" on, counts become
+        /// "화면표시/전체" so the user sees the numbers shrink as the section clips nodes.
+        /// </summary>
+        private void UpdateTabCounts(HashSet<string> visibleNodeIds)
+        {
+            bool applied = _matchedNodeIds.Count > 0 || _unmatchedNodeIds.Count > 0;
+            if (!applied)
+            {
+                _tabFilter.TabPages[0].Text = $"전체 ({_nodes.Count})";
+                _tabFilter.TabPages[1].Text = "매칭";
+                _tabFilter.TabPages[2].Text = "미매칭";
+                return;
+            }
+
+            if (visibleNodeIds == null)
+            {
+                _tabFilter.TabPages[0].Text = $"전체 ({_nodes.Count})";
+                _tabFilter.TabPages[1].Text = $"매칭 ({_matchedNodeIds.Count})";
+                _tabFilter.TabPages[2].Text = $"미매칭 ({_unmatchedNodeIds.Count})";
+                return;
+            }
+
+            int vTotal = _nodes.Count(n => visibleNodeIds.Contains(n.NodeId));
+            int vMatched = _nodes.Count(n => visibleNodeIds.Contains(n.NodeId) && _matchedNodeIds.Contains(n.NodeId));
+            int vUnmatched = _nodes.Count(n => visibleNodeIds.Contains(n.NodeId) && _unmatchedNodeIds.Contains(n.NodeId));
+            _tabFilter.TabPages[0].Text = $"전체 ({vTotal}/{_nodes.Count})";
+            _tabFilter.TabPages[1].Text = $"매칭 ({vMatched}/{_matchedNodeIds.Count})";
+            _tabFilter.TabPages[2].Text = $"미매칭 ({vUnmatched}/{_unmatchedNodeIds.Count})";
+        }
+
         private void FilterList()
         {
             string keyword = _txtSearch?.Text?.Trim().ToUpperInvariant() ?? "";
             int tabIndex = _tabFilter.SelectedIndex;
 
             var visibleNodeIds = ComputeVisibleNodeIds();
+            UpdateTabCounts(visibleNodeIds);
 
             var filtered = _nodes.AsEnumerable();
 
