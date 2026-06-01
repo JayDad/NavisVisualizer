@@ -97,17 +97,15 @@ namespace NavisVisualizer.UI
             _btnNwd          = new Button { Text = "NWD Export",     Width = 110 };
             _chkFocus          = new CheckBox { Text = "필터 포커스", AutoSize = true, Padding = new Padding(6, 5, 6, 0) };
             _chkVisibleOnly    = new CheckBox { Text = "보이는 것만", AutoSize = true, Padding = new Padding(6, 5, 6, 0) };
-            _btnRefreshVisible = new Button { Text = "새로고침", Width = 70 };
+            _btnRefreshVisible = new Button { Text = "새로고침", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(6, 0, 6, 0) };
             _btnApply.Click                += BtnApply_Click;
             _btnReset.Click                += BtnReset_Click;
             _btnViewpoint.Click            += BtnViewpoint_Click;
             _btnNwd.Click                  += BtnNwd_Click;
             _chkFocus.CheckedChanged       += ChkFocus_CheckedChanged;
             _chkVisibleOnly.CheckedChanged += ChkVisibleOnly_CheckedChanged;
-            // 새로고침: re-evaluate 보이는 것만 against the *current* section/hide state
-            // (there is no auto event for section/visibility changes).
-            _btnRefreshVisible.Click       += (s, e) => { if (_visibleOnly) FilterList(); };
-            // Top row: action buttons. Bottom row: filter checkboxes + refresh (forced via flow break).
+            _btnRefreshVisible.Click       += BtnRefreshVisible_Click;
+            // Top row: action buttons. Bottom row: filter checkboxes + 새로고침 (forced via flow break).
             btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnReset, _btnViewpoint, _btnNwd, _chkFocus, _chkVisibleOnly, _btnRefreshVisible });
             btnPanel.SetFlowBreak(_btnNwd, true);
 
@@ -138,6 +136,7 @@ namespace NavisVisualizer.UI
                 HideSelection = false,
                 Height = 220,
             };
+            _nodeList.Columns.Add("No.", 34);
             _nodeList.Columns.Add("Node ID", 220);
             _nodeList.Columns.Add("케이블", 50);
             _nodeList.Columns.Add("Design", 65);
@@ -156,6 +155,7 @@ namespace NavisVisualizer.UI
                 View = View.Details,
                 Height = 180,
             };
+            _cableList.Columns.Add("No.",        34);
             _cableList.Columns.Add("Cable No",   170);
             _cableList.Columns.Add("Equip No",   140);
             _cableList.Columns.Add("Route",      40);
@@ -174,6 +174,7 @@ namespace NavisVisualizer.UI
                 HideSelection = false,
                 Height = 180,
             };
+            _routeList.Columns.Add("No.",       34);
             _routeList.Columns.Add("Cable No",  170);
             _routeList.Columns.Add("Equip No",  140);
             _routeList.Columns.Add("노드수",    50);
@@ -192,7 +193,12 @@ namespace NavisVisualizer.UI
             layout.Controls.Add(_lblStats);
             layout.Controls.Add(searchPanel);
             layout.Controls.Add(_tabFilter);
-            layout.Controls.Add(new Label { Text = "Cable 목록 (행 클릭 → 해당 Cable 전체 Route 하이라이트)", Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 16 });
+            var routeHeader = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 26, AutoSize = false };
+            routeHeader.Controls.Add(new Label { Text = "Cable 목록 (행 클릭 → Route 하이라이트)", Font = new Font(Font, FontStyle.Bold), AutoSize = true, Padding = new Padding(0, 5, 0, 0) });
+            var btnRouteExcel = new Button { Text = "Excel 출력", Width = 80, Height = 22 };
+            btnRouteExcel.Click += BtnRouteExcel_Click;
+            routeHeader.Controls.Add(btnRouteExcel);
+            layout.Controls.Add(routeHeader);
             layout.Controls.Add(_routeList);
             layout.Controls.Add(new Label { Text = "Node 목록", Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 16 });
             layout.Controls.Add(_nodeList);
@@ -320,6 +326,25 @@ namespace NavisVisualizer.UI
             MessageBox.Show($"저장 완료: {path}");
         }
 
+        /// <summary>Export the (currently filtered) Cable 목록 to a CSV that Excel opens directly.</summary>
+        private void BtnRouteExcel_Click(object sender, EventArgs e)
+        {
+            if (_routeList.Items.Count == 0) { MessageBox.Show("내보낼 Cable 목록이 없습니다."); return; }
+            var lines = new List<string>();
+            lines.Add("No.,Cable No,Equip No,노드수,Design,Pulled,%,Route");
+            foreach (ListViewItem item in _routeList.Items)
+            {
+                var s = item.SubItems;
+                string Cell(int i) => i < s.Count ? s[i].Text.Replace("\"", "'") : "";
+                lines.Add($"\"{Cell(0)}\",\"{Cell(1)}\",\"{Cell(2)}\",\"{Cell(3)}\",\"{Cell(4)}\",\"{Cell(5)}\",\"{Cell(6)}\",\"{Cell(7)}\"");
+            }
+            string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
+                $"CableList_{DateTime.Now:yyyyMMdd_HHmmss}.csv");
+            // UTF-8 BOM so Excel renders Korean correctly.
+            File.WriteAllText(path, string.Join("\r\n", lines), new System.Text.UTF8Encoding(true));
+            MessageBox.Show($"저장 완료: {path}");
+        }
+
         private void BuildIndex()
         {
             var doc = _main.GetDocument();
@@ -436,6 +461,17 @@ namespace NavisVisualizer.UI
             }
             _visibleOnly = _chkVisibleOnly.Checked;
             FilterList();
+        }
+
+        /// <summary>
+        /// Re-evaluate the lists against the *current* section/hide state. There is no
+        /// auto event for section or visibility changes, so after sectioning or hiding
+        /// in Navisworks the user clicks this to refresh.
+        /// </summary>
+        private void BtnRefreshVisible_Click(object sender, EventArgs e)
+        {
+            FilterList();
+            RefreshFocusIfActive();
         }
 
         /// <summary>Set the checkbox state without firing the CheckedChanged side effects.</summary>
@@ -587,6 +623,9 @@ namespace NavisVisualizer.UI
             else { _sortColumn = e.Column; _sortAscending = true; }
             _nodeList.ListViewItemSorter = new ListViewItemComparer(_sortColumn, _sortAscending);
             _nodeList.Sort();
+            // Keep the No. column sequential top-to-bottom after re-sorting.
+            for (int i = 0; i < _nodeList.Items.Count; i++)
+                _nodeList.Items[i].SubItems[0].Text = (i + 1).ToString();
         }
 
         private class ListViewItemComparer : System.Collections.IComparer
@@ -601,6 +640,7 @@ namespace NavisVisualizer.UI
         {
             _cableList.Items.Clear();
             if (node == null) return;
+            int seq = 1;
             foreach (var c in node.Cables)
             {
                 string design = c.DesignLth.HasValue ? c.DesignLth.Value.ToString("0.##") : "-";
@@ -608,7 +648,8 @@ namespace NavisVisualizer.UI
                 string pct = c.PullingProgress.HasValue ? $"{c.PullingProgress.Value * 100:0}%" : "-";
                 string from = string.IsNullOrEmpty(c.FromModule) ? c.FromEquip : $"{c.FromModule}/{c.FromEquip}";
                 string to = string.IsNullOrEmpty(c.ToModule) ? c.ToEquip : $"{c.ToModule}/{c.ToEquip}";
-                var item = new ListViewItem(c.CableNo ?? "");
+                var item = new ListViewItem((seq++).ToString());
+                item.SubItems.Add(c.CableNo ?? "");
                 item.SubItems.Add(c.EquipNo ?? "");
                 item.SubItems.Add(c.RouteSys ?? "");
                 item.SubItems.Add(design);
@@ -675,6 +716,7 @@ namespace NavisVisualizer.UI
             _nodeList.BeginUpdate();
             _nodeList.Items.Clear();
 
+            int seq = 1;
             foreach (var node in filtered)
             {
                 var stage = node.GetStage();
@@ -683,8 +725,9 @@ namespace NavisVisualizer.UI
                 string matchLabel = !hasApplied ? "-" : (_matchedNodeIds.Contains(node.NodeId) ? "O" : "X");
                 string pct = node.OverallProgress.HasValue ? $"{node.OverallProgress.Value * 100:0}%" : "-";
 
-                var item = new ListViewItem(node.NodeId);
+                var item = new ListViewItem((seq++).ToString());
                 item.UseItemStyleForSubItems = false;
+                item.SubItems.Add(node.NodeId);
                 item.SubItems.Add(node.Cables.Count.ToString());
                 item.SubItems.Add(node.TotalDesignLth.ToString("0.##"));
                 item.SubItems.Add(node.TotalPulledLth.ToString("0.##"));
@@ -737,6 +780,7 @@ namespace NavisVisualizer.UI
             _routeList.BeginUpdate();
             _routeList.Items.Clear();
 
+            int seq = 1;
             foreach (var kv in _cableRoutes)
             {
                 string cableNo = kv.Key;
@@ -770,7 +814,8 @@ namespace NavisVisualizer.UI
                 string pct    = meta2?.PullingProgress.HasValue == true ? $"{meta2.PullingProgress.Value * 100:0}%" : "-";
                 string route  = string.Join(", ", nodes);
 
-                var item = new ListViewItem(cableNo);
+                var item = new ListViewItem((seq++).ToString());
+                item.SubItems.Add(cableNo);
                 item.SubItems.Add(equip);
                 item.SubItems.Add(nodes.Count.ToString());
                 item.SubItems.Add(design);
