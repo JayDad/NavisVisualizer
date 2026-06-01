@@ -202,7 +202,7 @@ namespace NavisVisualizer.UI
             layout.Controls.Add(_routeList);
             var nodeHeader = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 26, AutoSize = false };
             nodeHeader.Controls.Add(new Label { Text = "Node 목록", Font = new Font(Font, FontStyle.Bold), AutoSize = true, Padding = new Padding(0, 5, 0, 0) });
-            var btnSelNodeCables = new Button { Text = "선택 노드 Cable ↑ 보기", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(6, 0, 6, 0) };
+            var btnSelNodeCables = new Button { Text = "선택(3D/목록) Cable ↑ 보기", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(6, 0, 6, 0) };
             btnSelNodeCables.Click += (s, e) => ShowCablesForSelectedNodes();
             nodeHeader.Controls.Add(btnSelNodeCables);
             layout.Controls.Add(nodeHeader);
@@ -841,18 +841,26 @@ namespace NavisVisualizer.UI
 
         /// <summary>
         /// Show, in the top Cable 목록, every cable whose route passes through any of the
-        /// given nodes (drag-select multiple nodes → button). Also selects those nodes'
-        /// boxes in the 3D view. This is an on-demand view that the normal filters replace.
+        /// currently selected nodes. Source priority: the 3D view's current multi-selection
+        /// (resolve each selected box → its Node), else the Node 목록 selection.
         /// </summary>
         private void ShowCablesForSelectedNodes()
         {
-            var sel = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (ListViewItem it in _nodeList.SelectedItems)
-                if (it.Tag is CableNodeData n) sel.Add(n.NodeId);
+            var doc = _main.GetDocument();
+
+            // 1) Prefer the 3D view's multi-selection.
+            HashSet<string> sel = doc != null ? ResolveSelectedCableNodeIds(doc)
+                                              : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            bool from3D = sel.Count > 0;
+
+            // 2) Fall back to the Node 목록 selection.
+            if (!from3D)
+                foreach (ListViewItem it in _nodeList.SelectedItems)
+                    if (it.Tag is CableNodeData n) sel.Add(n.NodeId);
 
             if (sel.Count == 0)
             {
-                MessageBox.Show("Node 목록에서 노드를 선택하세요. (드래그로 여러 개 선택 가능)");
+                MessageBox.Show("3D 뷰에서 노드 박스를 선택하거나, Node 목록에서 노드를 선택하세요. (여러 개 가능)");
                 return;
             }
 
@@ -864,7 +872,41 @@ namespace NavisVisualizer.UI
                     AddRouteRow(seq++, kv.Key, kv.Value);
             _routeList.EndUpdate();
 
-            SelectNodeBoxesInView(sel);
+            // Only re-select in 3D when the source was the node list (3D already selected).
+            if (!from3D) SelectNodeBoxesInView(sel);
+        }
+
+        /// <summary>
+        /// Resolve every cable Node from the current 3D selection: for each selected item,
+        /// walk it + ancestors for a "-BOX" DisplayName and map the prefix to a known NodeId.
+        /// </summary>
+        private HashSet<string> ResolveSelectedCableNodeIds(Document doc)
+        {
+            var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            // normalized box key → canonical Excel NodeId
+            var keyToNode = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var n in _nodes)
+                keyToNode[CableNodeData.NormalizeId(n.NodeId)] = n.NodeId;
+
+            foreach (ModelItem selected in doc.CurrentSelection.SelectedItems)
+            {
+                var item = selected;
+                while (item != null)
+                {
+                    string name = item.DisplayName?.Trim() ?? "";
+                    int idx = name.IndexOf("-BOX", StringComparison.OrdinalIgnoreCase);
+                    if (idx > 0)
+                    {
+                        string key = name.Substring(0, idx).TrimStart('/').Trim();
+                        if (keyToNode.TryGetValue(key, out var nodeId))
+                            result.Add(nodeId);
+                        break; // this selected item resolved; move to the next
+                    }
+                    item = item.Parent;
+                }
+            }
+            return result;
         }
 
         /// <summary>Select every box of the given nodes in the 3D view (multi-node).</summary>
