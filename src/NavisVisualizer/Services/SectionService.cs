@@ -144,6 +144,12 @@ namespace NavisVisualizer.Services
                     if (plane == null) { sb.AppendLine("Item() = NULL"); continue; }
                     sb.AppendLine($"  plane type = {TypeName(plane)}");
 
+                    // The normal/alignment may live on the clip-plane object itself
+                    // (set by the Sectioning "정렬 방향"), not only on InwLPlane3f.
+                    sb.AppendLine("  [ClipPlane(InwOaClipPlane) 실제 멤버 목록]");
+                    foreach (var m in ListComMembers(plane))
+                        sb.AppendLine($"    · {m}");
+
                     object enabled = Invoke(plane, "Enabled");
                     sb.AppendLine($"  Enabled = {(enabled?.ToString() ?? "NULL")}");
 
