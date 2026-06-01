@@ -48,13 +48,13 @@ Document
 
 ### 4. Cable "보이는 것만" 필터 — 단면(Clip Plane) 보정 (Windows 검증 필요)
 
-`CableTab`의 `보이는 것만 ON/OFF` 토글은 노드별 박스(점 마커)의 `BoundingBox().Center`가 화면에 보이는지로 리스트를 거른다. 판정 = **비숨김(`SectionService.IsEffectivelyHidden`, 조상까지 검사) AND 활성 단면 평면 내부**. 노드에 박스 여러 개면 하나라도 보이면 visible.
+`CableTab`의 `보이는 것만` 체크박스는 노드별 박스(점 마커)의 `BoundingBox().Center`가 화면에 보이는지로 리스트를 거른다. 단면(clip plane)은 플러그인이 만들지 않고 Navisworks 기본 Sectioning으로 자른 것을 읽기만 한다. 판정 = **비숨김(`SectionService.IsEffectivelyHidden`, 조상까지 검사) AND 활성 단면 평면 내부**. 노드에 박스 여러 개면 하나라도 보이면 visible.
 
 - 단면 평면은 관리형 API에 노출되지 않아 `SectionService`가 COM(`ComApiBridge.State` → `CurrentView.ClippingPlanes()`)을 late-binding으로 읽는다. `UserDataService`와 동일 패턴이라 빌드는 안전하나 **런타임 멤버명/부호는 Windows 실측 필요**:
   - `InwLPlane3f`를 `data1..data4`(A,B,C,D)로 가정 → 안 맞으면 `normal`+`distance` fallback. Tools 탭 **`Clip Plane 덤프`**로 실제 구조 확인.
   - keep 반공간 부호가 반대로 보이면 `SectionService.KeepPositiveSide` 뒤집기.
   - COM 평면 좌표계와 `ModelItem.BoundingBox()` 단위 불일치 가능성도 덤프로 확인.
-- 단면 변경 자동 감지 이벤트는 안 걸어둠 → 토글/검색 시점에 재평가.
+- 단면 변경 자동 감지 이벤트는 안 걸어둠 → 체크박스 토글/검색 시점에 재평가.
 
 ### 5. Cable Node Box 중복 검사 (Tools 탭)
 

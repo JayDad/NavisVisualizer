@@ -41,8 +41,9 @@ namespace NavisVisualizer.UI
         private TextBox _txtSearch;
         private Button _btnFocusToggle;
         private bool _focusOn;
-        private Button _btnVisibleToggle;
+        private CheckBox _chkVisibleOnly;
         private bool _visibleOnly;
+        private bool _suppressVisibleCheck;
         private TabControl _tabFilter;
         private ListView _nodeList;
         private ListView _cableList;
@@ -88,16 +89,16 @@ namespace NavisVisualizer.UI
             _btnApply        = new Button { Text = "적용",           Width = 80  };
             _btnReset        = new Button { Text = "전체 초기화",    Width = 90  };
             _btnFocusToggle  = new Button { Text = "필터 포커스 ON", Width = 110 };
-            _btnVisibleToggle = new Button { Text = "보이는 것만 OFF", Width = 110 };
+            _chkVisibleOnly  = new CheckBox { Text = "보이는 것만", AutoSize = true, Padding = new Padding(6, 5, 6, 0) };
             _btnViewpoint    = new Button { Text = "Viewpoint 저장", Width = 120 };
             _btnNwd          = new Button { Text = "NWD Export",     Width = 110 };
-            _btnApply.Click         += BtnApply_Click;
-            _btnReset.Click         += BtnReset_Click;
-            _btnFocusToggle.Click   += BtnFocusToggle_Click;
-            _btnVisibleToggle.Click += BtnVisibleToggle_Click;
-            _btnViewpoint.Click     += BtnViewpoint_Click;
-            _btnNwd.Click           += BtnNwd_Click;
-            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnReset, _btnFocusToggle, _btnVisibleToggle, _btnViewpoint, _btnNwd });
+            _btnApply.Click             += BtnApply_Click;
+            _btnReset.Click             += BtnReset_Click;
+            _btnFocusToggle.Click       += BtnFocusToggle_Click;
+            _chkVisibleOnly.CheckedChanged += ChkVisibleOnly_CheckedChanged;
+            _btnViewpoint.Click         += BtnViewpoint_Click;
+            _btnNwd.Click               += BtnNwd_Click;
+            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnReset, _btnFocusToggle, _chkVisibleOnly, _btnViewpoint, _btnNwd });
 
             _progressBar = new ProgressBar { Dock = DockStyle.Fill, Height = 12, Visible = false };
             _lblStats = new Label { Dock = DockStyle.Fill, Text = "로드된 데이터 없음", AutoSize = false, Height = 36 };
@@ -365,8 +366,7 @@ namespace NavisVisualizer.UI
             _main.OverrideEngine.Reset(doc);
             _focusOn = false;
             _btnFocusToggle.Text = "필터 포커스 ON";
-            _visibleOnly = false;
-            _btnVisibleToggle.Text = "보이는 것만 OFF";
+            SetVisibleOnlyChecked(false);
             _lblStats.Text = "전체 초기화 완료";
         }
 
@@ -398,20 +398,31 @@ namespace NavisVisualizer.UI
             }
         }
 
-        private void BtnVisibleToggle_Click(object sender, EventArgs e)
+        private void ChkVisibleOnly_CheckedChanged(object sender, EventArgs e)
         {
-            var doc = _main.GetDocument();
-            if (!_visibleOnly)
+            if (_suppressVisibleCheck) return;
+
+            if (_chkVisibleOnly.Checked)
             {
+                var doc = _main.GetDocument();
                 if (doc == null || !_main.CableBoxSearcher.IsIndexBuilt)
                 {
                     MessageBox.Show("먼저 적용을 실행해 박스 인덱스를 빌드하세요.");
+                    SetVisibleOnlyChecked(false); // revert without re-entering
                     return;
                 }
             }
-            _visibleOnly = !_visibleOnly;
-            _btnVisibleToggle.Text = _visibleOnly ? "보이는 것만 ON" : "보이는 것만 OFF";
+            _visibleOnly = _chkVisibleOnly.Checked;
             FilterList();
+        }
+
+        /// <summary>Set the checkbox state without firing the CheckedChanged side effects.</summary>
+        private void SetVisibleOnlyChecked(bool value)
+        {
+            _suppressVisibleCheck = true;
+            _chkVisibleOnly.Checked = value;
+            _suppressVisibleCheck = false;
+            _visibleOnly = value;
         }
 
         /// <summary>
