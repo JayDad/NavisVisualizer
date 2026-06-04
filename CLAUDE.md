@@ -46,6 +46,31 @@ Document
 
 현재 `EitTrayData.GetStageAtDate`는 Tray install date만 날짜로 쓰고 Cable Pulling / Completed는 *현재 상태*로 판정한다. 입력 데이터에 `Cable Pull date` / `Cable Complete date` 컬럼이 추가되면 `Dictionary<EitStage, DateTime?> StageDates` 패턴으로 교체 (Spool/Hydrotest와 동일 구조).
 
+### 4. Cable "보이는 것만" 필터 — 단면(Clip Plane) 보정 (Windows 검증 필요)
+
+`CableTab`의 `보이는 것만` 체크박스는 노드별 박스(점 마커)의 `BoundingBox().Center`가 화면에 보이는지로 리스트를 거른다. 단면(clip plane)은 플러그인이 만들지 않고 Navisworks 기본 Sectioning으로 자른 것을 읽기만 한다. 판정 = **비숨김(`SectionService.IsEffectivelyHidden`, 조상까지 검사) AND 활성 단면 평면 내부**. 노드에 박스 여러 개면 하나라도 보이면 visible.
+
+- 단면 평면은 관리형 API에 노출되지 않아 `SectionService`가 COM을 late-binding(IDispatch)으로 읽는다. `UserDataService`와 동일 패턴.
+
+**Navisworks 2022 실측으로 확정된 COM 경로 (중요 — 다시 헤매지 말 것):**
+```
+ComApiBridge.State (InwOpState10)
+  .CurrentView                       → InwOpView
+  .ClippingPlanes()                  → InwOpClipPlaneColl   (.Count, .Item(i) 1-based)
+  Item(i)                            → InwOaClipPlane
+       .Enabled (bool)
+       .Plane                        → InwLPlane3f
+```
+- **`InwLPlane3f` 멤버 (메서드, params=0)**: `GetNormal()` → 단위 법선벡터(InwLUnitVec3f, 성분 `data1/data2/data3`), `distance()` → 평면의 원점기준 부호거리. (그 외 `DistanceEx`, `SetValue(2)`, `Copy`.)
+- **주의**: COM 객체는 `GetTypeInfo`로 베이스(`InwBase`: nwReadOnly/nwHandle/nwID/Xtension/ObjectName…)만 노출되고, geometry 멤버(`distance`,`GetNormal`)는 **이름 late-binding(GetIDsOfNames)으로만** 잡힌다. `distance`는 PROPERTYGET이 아니라 **INVOKE_FUNC**이므로 메서드 호출로 읽어야 함(`Invoke`가 property→method 순으로 시도하므로 OK).
+- 평면식: `Eval(p) = n·p - distance`(점의 평면기준 부호거리). keep쪽은 `SectionService.KeepPositiveSide`로 보정. 단면 안/밖이 반대면 이 플래그만 뒤집기.
+- 부호/단위 의심 시 Tools 탭 **`Clip Plane 덤프`** (단계 추적 + `GetNormal`/`distance` 값 + IDispatch 멤버 열거).
+- 단면 변경 자동 감지 이벤트는 안 걸어둠 → 체크박스 토글/검색/`새로고침` 버튼 시점에 재평가.
+
+### 5. Cable Node Box 중복 검사 (Tools 탭)
+
+노드당 `-BOX`가 2개 이상이면 박스 생성 매크로 오류 의심. `ModelItemSearcher.GetEntriesWithMultipleItems`로 box 인덱스에서 key당 item>1을 뽑아 CSV 출력.
+
 ## 개발 규칙
 
 - Navisworks Simulate 2022 / .NET Framework 4.8 타겟. `Autodesk.Navisworks.*` DLL은 Windows 설치 경로 참조.

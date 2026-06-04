@@ -7,6 +7,7 @@ using System.Windows.Forms;
 using Autodesk.Navisworks.Api;
 using NavisVisualizer.Loaders;
 using NavisVisualizer.Models;
+using NavisVisualizer.Services;
 using NavisVisualizer.Visualizers;
 using Color = System.Drawing.Color;
 using View = System.Windows.Forms.View;
@@ -38,8 +39,17 @@ namespace NavisVisualizer.UI
         private Button _btnLoad;
         private Label _lblFile;
         private TextBox _txtSearch;
-        private Button _btnFocusToggle;
+        private CheckBox _chkFocus;
         private bool _focusOn;
+        private bool _suppressFocusCheck;
+        private CheckBox _chkVisibleOnly;
+        private bool _visibleOnly;
+        private bool _suppressVisibleCheck;
+        private Button _btnRefreshVisible;
+        private Button _btnSelCables;
+
+        private string _statsBase = "로드된 데이터 없음";
+        private string _visDiag = "";
         private TabControl _tabFilter;
         private ListView _nodeList;
         private ListView _cableList;
@@ -84,25 +94,33 @@ namespace NavisVisualizer.UI
             var btnPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 65, AutoSize = true };
             _btnApply        = new Button { Text = "적용",           Width = 80  };
             _btnReset        = new Button { Text = "전체 초기화",    Width = 90  };
-            _btnFocusToggle  = new Button { Text = "필터 포커스 ON", Width = 110 };
             _btnViewpoint    = new Button { Text = "Viewpoint 저장", Width = 120 };
             _btnNwd          = new Button { Text = "NWD Export",     Width = 110 };
-            _btnApply.Click       += BtnApply_Click;
-            _btnReset.Click       += BtnReset_Click;
-            _btnFocusToggle.Click += BtnFocusToggle_Click;
-            _btnViewpoint.Click   += BtnViewpoint_Click;
-            _btnNwd.Click         += BtnNwd_Click;
-            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnReset, _btnFocusToggle, _btnViewpoint, _btnNwd });
+            _chkFocus          = new CheckBox { Text = "필터 포커스", AutoSize = true, Padding = new Padding(6, 5, 6, 0) };
+            _chkVisibleOnly    = new CheckBox { Text = "보이는 것만", AutoSize = true, Padding = new Padding(6, 5, 6, 0) };
+            _btnRefreshVisible = new Button { Text = "새로고침", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(6, 0, 6, 0) };
+            _btnSelCables      = new Button { Text = "선택(3D/목록) Cable ↑", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(6, 0, 6, 0) };
+            _btnApply.Click                += BtnApply_Click;
+            _btnReset.Click                += BtnReset_Click;
+            _btnViewpoint.Click            += BtnViewpoint_Click;
+            _btnNwd.Click                  += BtnNwd_Click;
+            _chkFocus.CheckedChanged       += ChkFocus_CheckedChanged;
+            _chkVisibleOnly.CheckedChanged += ChkVisibleOnly_CheckedChanged;
+            _btnRefreshVisible.Click       += BtnRefreshVisible_Click;
+            _btnSelCables.Click            += (s, e) => ShowCablesForSelectedNodes();
+            // Top row: action buttons. Bottom row: filter checkboxes + 새로고침 + 선택Cable (flow break).
+            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnReset, _btnViewpoint, _btnNwd, _chkFocus, _chkVisibleOnly, _btnRefreshVisible, _btnSelCables });
+            btnPanel.SetFlowBreak(_btnNwd, true);
 
             _progressBar = new ProgressBar { Dock = DockStyle.Fill, Height = 12, Visible = false };
-            _lblStats = new Label { Dock = DockStyle.Fill, Text = "로드된 데이터 없음", AutoSize = false, Height = 36 };
+            _lblStats = new Label { Dock = DockStyle.Fill, Text = "로드된 데이터 없음", AutoSize = false, Height = 54 };
 
             var searchPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 28, AutoSize = false };
             searchPanel.Controls.Add(new Label { Text = "검색(Node/Cable No/Equip No):", AutoSize = true, Padding = new Padding(0, 4, 0, 0) });
             _txtSearch = new TextBox { Width = 180, Text = "" };
             _txtSearch.TextChanged += (s, e) => { FilterList(); RefreshFocusIfActive(); };
             searchPanel.Controls.Add(_txtSearch);
-            var btnExport = new Button { Text = "매칭 Status 출력", Width = 120, Height = 23 };
+            var btnExport = new Button { Text = "매칭 Status 출력", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(6, 0, 6, 0) };
             btnExport.Click += BtnExport_Click;
             searchPanel.Controls.Add(btnExport);
 
@@ -121,6 +139,7 @@ namespace NavisVisualizer.UI
                 HideSelection = false,
                 Height = 220,
             };
+            _nodeList.Columns.Add("No.", 34);
             _nodeList.Columns.Add("Node ID", 220);
             _nodeList.Columns.Add("케이블", 50);
             _nodeList.Columns.Add("Design", 65);
@@ -139,6 +158,7 @@ namespace NavisVisualizer.UI
                 View = View.Details,
                 Height = 180,
             };
+            _cableList.Columns.Add("No.",        34);
             _cableList.Columns.Add("Cable No",   170);
             _cableList.Columns.Add("Equip No",   140);
             _cableList.Columns.Add("Route",      40);
@@ -157,6 +177,7 @@ namespace NavisVisualizer.UI
                 HideSelection = false,
                 Height = 180,
             };
+            _routeList.Columns.Add("No.",       34);
             _routeList.Columns.Add("Cable No",  170);
             _routeList.Columns.Add("Equip No",  140);
             _routeList.Columns.Add("노드수",    50);
@@ -175,12 +196,17 @@ namespace NavisVisualizer.UI
             layout.Controls.Add(_lblStats);
             layout.Controls.Add(searchPanel);
             layout.Controls.Add(_tabFilter);
+            var routeHeader = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 26, AutoSize = false };
+            routeHeader.Controls.Add(new Label { Text = "Cable 목록 (행 클릭 → Route 하이라이트)", Font = new Font(Font, FontStyle.Bold), AutoSize = true, Padding = new Padding(0, 5, 0, 0) });
+            var btnRouteExcel = new Button { Text = "Cable 목록 Excel 출력", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(6, 0, 6, 0) };
+            btnRouteExcel.Click += BtnRouteExcel_Click;
+            routeHeader.Controls.Add(btnRouteExcel);
+            layout.Controls.Add(routeHeader);
+            layout.Controls.Add(_routeList);
             layout.Controls.Add(new Label { Text = "Node 목록", Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 16 });
             layout.Controls.Add(_nodeList);
             layout.Controls.Add(new Label { Text = "선택된 Node의 Cable 상세", Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 16 });
             layout.Controls.Add(_cableList);
-            layout.Controls.Add(new Label { Text = "Cable 목록 (행 클릭 → 해당 Cable 전체 Route 하이라이트)", Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 16 });
-            layout.Controls.Add(_routeList);
 
             Controls.Add(layout);
         }
@@ -303,6 +329,25 @@ namespace NavisVisualizer.UI
             MessageBox.Show($"저장 완료: {path}");
         }
 
+        /// <summary>Export the (currently filtered) Cable 목록 to a CSV that Excel opens directly.</summary>
+        private void BtnRouteExcel_Click(object sender, EventArgs e)
+        {
+            if (_routeList.Items.Count == 0) { MessageBox.Show("내보낼 Cable 목록이 없습니다."); return; }
+            var lines = new List<string>();
+            lines.Add("No.,Cable No,Equip No,노드수,Design,Pulled,%,Route");
+            foreach (ListViewItem item in _routeList.Items)
+            {
+                var s = item.SubItems;
+                string Cell(int i) => i < s.Count ? s[i].Text.Replace("\"", "'") : "";
+                lines.Add($"\"{Cell(0)}\",\"{Cell(1)}\",\"{Cell(2)}\",\"{Cell(3)}\",\"{Cell(4)}\",\"{Cell(5)}\",\"{Cell(6)}\",\"{Cell(7)}\"");
+            }
+            string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
+                $"CableList_{DateTime.Now:yyyyMMdd_HHmmss}.csv");
+            // UTF-8 BOM so Excel renders Korean correctly.
+            File.WriteAllText(path, string.Join("\r\n", lines), new System.Text.UTF8Encoding(true));
+            MessageBox.Show($"저장 완료: {path}");
+        }
+
         private void BuildIndex()
         {
             var doc = _main.GetDocument();
@@ -345,8 +390,7 @@ namespace NavisVisualizer.UI
             _tabFilter.TabPages[1].Text = $"매칭 ({_matchedNodeIds.Count})";
             _tabFilter.TabPages[2].Text = $"미매칭 ({_unmatchedNodeIds.Count})";
 
-            _focusOn = false;
-            _btnFocusToggle.Text = "필터 포커스 ON";
+            SetFocusChecked(false);
 
             UpdateStats(result, hiddenCount);
             FilterList();
@@ -358,37 +402,146 @@ namespace NavisVisualizer.UI
             var doc = _main.GetDocument();
             if (doc == null) return;
             _main.OverrideEngine.Reset(doc);
-            _focusOn = false;
-            _btnFocusToggle.Text = "필터 포커스 ON";
-            _lblStats.Text = "전체 초기화 완료";
+            SetFocusChecked(false);
+            SetVisibleOnlyChecked(false);
+            _statsBase = "전체 초기화 완료";
+            _visDiag = "";
+            RefreshStatsLabel();
         }
 
-        private void BtnFocusToggle_Click(object sender, EventArgs e)
+        private void ChkFocus_CheckedChanged(object sender, EventArgs e)
         {
+            if (_suppressFocusCheck) return;
+
             var doc = _main.GetDocument();
-            if (doc == null || _matchedNodeIds.Count == 0)
+            if (_chkFocus.Checked)
             {
-                MessageBox.Show("먼저 적용을 실행하세요.");
-                return;
-            }
-            if (_focusOn)
-            {
-                _main.OverrideEngine.ClearCableFilterFocus(doc);
-                _focusOn = false;
-                _btnFocusToggle.Text = "필터 포커스 ON";
-            }
-            else
-            {
+                if (doc == null || _matchedNodeIds.Count == 0)
+                {
+                    MessageBox.Show("먼저 적용을 실행하세요.");
+                    SetFocusChecked(false);
+                    return;
+                }
                 var hits = GetCurrentFilterHitNodeIds();
                 if (hits.Count == 0)
                 {
                     MessageBox.Show("현재 필터에 일치하는 Node가 없습니다.");
+                    SetFocusChecked(false);
                     return;
                 }
                 _main.OverrideEngine.SetCableFilterFocus(doc, hits);
                 _focusOn = true;
-                _btnFocusToggle.Text = "필터 포커스 OFF";
             }
+            else
+            {
+                if (doc != null) _main.OverrideEngine.ClearCableFilterFocus(doc);
+                _focusOn = false;
+            }
+        }
+
+        /// <summary>Set the focus checkbox state without firing the CheckedChanged side effects.</summary>
+        private void SetFocusChecked(bool value)
+        {
+            _suppressFocusCheck = true;
+            _chkFocus.Checked = value;
+            _suppressFocusCheck = false;
+            _focusOn = value;
+        }
+
+        private void ChkVisibleOnly_CheckedChanged(object sender, EventArgs e)
+        {
+            if (_suppressVisibleCheck) return;
+
+            if (_chkVisibleOnly.Checked)
+            {
+                var doc = _main.GetDocument();
+                if (doc == null || !_main.CableBoxSearcher.IsIndexBuilt)
+                {
+                    MessageBox.Show("먼저 적용을 실행해 박스 인덱스를 빌드하세요.");
+                    SetVisibleOnlyChecked(false); // revert without re-entering
+                    return;
+                }
+            }
+            _visibleOnly = _chkVisibleOnly.Checked;
+            FilterList();
+        }
+
+        /// <summary>
+        /// Re-evaluate the lists against the *current* section/hide state. There is no
+        /// auto event for section or visibility changes, so after sectioning or hiding
+        /// in Navisworks the user clicks this to refresh.
+        /// </summary>
+        private void BtnRefreshVisible_Click(object sender, EventArgs e)
+        {
+            FilterList();
+            RefreshFocusIfActive();
+        }
+
+        /// <summary>Set the checkbox state without firing the CheckedChanged side effects.</summary>
+        private void SetVisibleOnlyChecked(bool value)
+        {
+            _suppressVisibleCheck = true;
+            _chkVisibleOnly.Checked = value;
+            _suppressVisibleCheck = false;
+            _visibleOnly = value;
+        }
+
+        /// <summary>
+        /// Node IDs whose box (a point marker; we test its bounding-box center) is
+        /// currently on screen: not hidden AND inside every active section plane.
+        /// A node with multiple boxes counts as visible if ANY box center is visible.
+        /// Returns null when the filter is off or cannot be evaluated (→ no filtering).
+        /// </summary>
+        private HashSet<string> ComputeVisibleNodeIds()
+        {
+            _visDiag = "";
+            if (!_visibleOnly) return null;
+
+            var doc = _main.GetDocument();
+            if (doc == null || !_main.CableBoxSearcher.IsIndexBuilt)
+            {
+                _visDiag = "보이는것만: 모델/인덱스 없음 → 필터 미적용";
+                return null;
+            }
+
+            var planes = _main.SectionSvc.GetActiveClipPlanes(doc);
+
+            var search = _main.CableBoxSearcher.FindBySpoolIds(
+                _nodes.Select(n => CableNodeData.NormalizeId(n.NodeId)).Distinct());
+
+            int nodesWithBox = 0, hiddenAll = 0, clippedAll = 0;
+            var visible = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var node in _nodes)
+            {
+                string key = CableNodeData.NormalizeId(node.NodeId);
+                if (!search.TryGetValue(key, out var items) || items.Count == 0)
+                    continue; // no box in model → not on screen
+
+                nodesWithBox++;
+                bool anyVisible = false, anyNotHidden = false;
+                foreach (var item in items)
+                {
+                    if (SectionService.IsEffectivelyHidden(item)) continue;
+                    anyNotHidden = true;
+                    BoundingBox3D bbox;
+                    try { bbox = item.BoundingBox(); }
+                    catch { continue; }
+                    if (bbox == null) continue;
+                    if (_main.SectionSvc.IsPointVisible(bbox.Center, planes))
+                    {
+                        anyVisible = true;
+                        break;
+                    }
+                }
+
+                if (anyVisible) visible.Add(node.NodeId);
+                else if (!anyNotHidden) hiddenAll++;   // every box hidden
+                else clippedAll++;                      // not hidden but outside section
+            }
+
+            _visDiag = $"보이는것만 진단: 박스노드 {nodesWithBox}, 활성평면 {planes.Count}, "
+                     + $"숨김제외 {hiddenAll}, 단면제외 {clippedAll}, 표시 {visible.Count}";
+            return visible;
         }
 
         private void RefreshFocusIfActive()
@@ -473,6 +626,9 @@ namespace NavisVisualizer.UI
             else { _sortColumn = e.Column; _sortAscending = true; }
             _nodeList.ListViewItemSorter = new ListViewItemComparer(_sortColumn, _sortAscending);
             _nodeList.Sort();
+            // Keep the No. column sequential top-to-bottom after re-sorting.
+            for (int i = 0; i < _nodeList.Items.Count; i++)
+                _nodeList.Items[i].SubItems[0].Text = (i + 1).ToString();
         }
 
         private class ListViewItemComparer : System.Collections.IComparer
@@ -487,6 +643,7 @@ namespace NavisVisualizer.UI
         {
             _cableList.Items.Clear();
             if (node == null) return;
+            int seq = 1;
             foreach (var c in node.Cables)
             {
                 string design = c.DesignLth.HasValue ? c.DesignLth.Value.ToString("0.##") : "-";
@@ -494,7 +651,8 @@ namespace NavisVisualizer.UI
                 string pct = c.PullingProgress.HasValue ? $"{c.PullingProgress.Value * 100:0}%" : "-";
                 string from = string.IsNullOrEmpty(c.FromModule) ? c.FromEquip : $"{c.FromModule}/{c.FromEquip}";
                 string to = string.IsNullOrEmpty(c.ToModule) ? c.ToEquip : $"{c.ToModule}/{c.ToEquip}";
-                var item = new ListViewItem(c.CableNo ?? "");
+                var item = new ListViewItem((seq++).ToString());
+                item.SubItems.Add(c.CableNo ?? "");
                 item.SubItems.Add(c.EquipNo ?? "");
                 item.SubItems.Add(c.RouteSys ?? "");
                 item.SubItems.Add(design);
@@ -506,10 +664,44 @@ namespace NavisVisualizer.UI
             }
         }
 
+        /// <summary>
+        /// Refresh the 전체/매칭/미매칭 tab labels. With "보이는 것만" on, counts become
+        /// "화면표시/전체" so the user sees the numbers shrink as the section clips nodes.
+        /// </summary>
+        private void UpdateTabCounts(HashSet<string> visibleNodeIds)
+        {
+            bool applied = _matchedNodeIds.Count > 0 || _unmatchedNodeIds.Count > 0;
+            if (!applied)
+            {
+                _tabFilter.TabPages[0].Text = $"전체 ({_nodes.Count})";
+                _tabFilter.TabPages[1].Text = "매칭";
+                _tabFilter.TabPages[2].Text = "미매칭";
+                return;
+            }
+
+            if (visibleNodeIds == null)
+            {
+                _tabFilter.TabPages[0].Text = $"전체 ({_nodes.Count})";
+                _tabFilter.TabPages[1].Text = $"매칭 ({_matchedNodeIds.Count})";
+                _tabFilter.TabPages[2].Text = $"미매칭 ({_unmatchedNodeIds.Count})";
+                return;
+            }
+
+            int vTotal = _nodes.Count(n => visibleNodeIds.Contains(n.NodeId));
+            int vMatched = _nodes.Count(n => visibleNodeIds.Contains(n.NodeId) && _matchedNodeIds.Contains(n.NodeId));
+            int vUnmatched = _nodes.Count(n => visibleNodeIds.Contains(n.NodeId) && _unmatchedNodeIds.Contains(n.NodeId));
+            _tabFilter.TabPages[0].Text = $"전체 ({vTotal}/{_nodes.Count})";
+            _tabFilter.TabPages[1].Text = $"매칭 ({vMatched}/{_matchedNodeIds.Count})";
+            _tabFilter.TabPages[2].Text = $"미매칭 ({vUnmatched}/{_unmatchedNodeIds.Count})";
+        }
+
         private void FilterList()
         {
             string keyword = _txtSearch?.Text?.Trim().ToUpperInvariant() ?? "";
             int tabIndex = _tabFilter.SelectedIndex;
+
+            var visibleNodeIds = ComputeVisibleNodeIds();
+            UpdateTabCounts(visibleNodeIds);
 
             var filtered = _nodes.AsEnumerable();
 
@@ -521,35 +713,20 @@ namespace NavisVisualizer.UI
             if (!string.IsNullOrEmpty(keyword))
                 filtered = filtered.Where(n => NodeMatchesKeyword(n, keyword));
 
+            if (visibleNodeIds != null)
+                filtered = filtered.Where(n => visibleNodeIds.Contains(n.NodeId));
+
             _nodeList.BeginUpdate();
             _nodeList.Items.Clear();
 
+            int seq = 1;
             foreach (var node in filtered)
-            {
-                var stage = node.GetStage();
-                string stageLabel = CableStageInfo.Labels.TryGetValue(stage, out var lbl) ? lbl : stage.ToString();
-                bool hasApplied = _matchedNodeIds.Count > 0 || _unmatchedNodeIds.Count > 0;
-                string matchLabel = !hasApplied ? "-" : (_matchedNodeIds.Contains(node.NodeId) ? "O" : "X");
-                string pct = node.OverallProgress.HasValue ? $"{node.OverallProgress.Value * 100:0}%" : "-";
-
-                var item = new ListViewItem(node.NodeId);
-                item.UseItemStyleForSubItems = false;
-                item.SubItems.Add(node.Cables.Count.ToString());
-                item.SubItems.Add(node.TotalDesignLth.ToString("0.##"));
-                item.SubItems.Add(node.TotalPulledLth.ToString("0.##"));
-                item.SubItems.Add(pct);
-                var stageSub = item.SubItems.Add(stageLabel);
-                if (_colorSettings.TryGetValue(stage, out var setting))
-                    stageSub.ForeColor = setting.DisplayColor;
-                var matchSub = item.SubItems.Add(matchLabel);
-                if (matchLabel == "X") matchSub.ForeColor = Color.Red;
-                item.Tag = node;
-                _nodeList.Items.Add(item);
-            }
+                AddNodeRow(seq++, node);
             _nodeList.EndUpdate();
             _cableList.Items.Clear();
 
-            PopulateRouteList(keyword, tabIndex);
+            PopulateRouteList(keyword, tabIndex, visibleNodeIds);
+            RefreshStatsLabel();
         }
 
         /// <summary>
@@ -580,11 +757,12 @@ namespace NavisVisualizer.UI
             }
         }
 
-        private void PopulateRouteList(string keywordUpper, int tabIndex)
+        private void PopulateRouteList(string keywordUpper, int tabIndex, HashSet<string> visibleNodeIds)
         {
             _routeList.BeginUpdate();
             _routeList.Items.Clear();
 
+            int seq = 1;
             foreach (var kv in _cableRoutes)
             {
                 string cableNo = kv.Key;
@@ -595,6 +773,10 @@ namespace NavisVisualizer.UI
                     !nodes.Any(n => _matchedNodeIds.Contains(n))) continue;
                 if (tabIndex == 2 && _unmatchedNodeIds.Count > 0 &&
                     nodes.Any(n => _matchedNodeIds.Contains(n))) continue;
+
+                // 보이는 것만: keep a cable if any node on its route is currently visible.
+                if (visibleNodeIds != null && !nodes.Any(n => visibleNodeIds.Contains(n)))
+                    continue;
 
                 // Keyword filter: Cable No / Equip No / any Node ID
                 if (!string.IsNullOrEmpty(keywordUpper))
@@ -607,24 +789,159 @@ namespace NavisVisualizer.UI
                     if (!hit) continue;
                 }
 
-                var meta2 = _cableMeta.TryGetValue(cableNo, out var mm) ? mm : null;
-                string equip = meta2?.EquipNo ?? "";
-                string design = meta2?.DesignLth.HasValue == true ? meta2.DesignLth.Value.ToString("0.##") : "-";
-                string pulled = meta2?.PulledLth.HasValue == true ? meta2.PulledLth.Value.ToString("0.##") : "-";
-                string pct    = meta2?.PullingProgress.HasValue == true ? $"{meta2.PullingProgress.Value * 100:0}%" : "-";
-                string route  = string.Join(", ", nodes);
-
-                var item = new ListViewItem(cableNo);
-                item.SubItems.Add(equip);
-                item.SubItems.Add(nodes.Count.ToString());
-                item.SubItems.Add(design);
-                item.SubItems.Add(pulled);
-                item.SubItems.Add(pct);
-                item.SubItems.Add(route);
-                item.Tag = nodes;
-                _routeList.Items.Add(item);
+                AddRouteRow(seq++, cableNo, nodes);
             }
             _routeList.EndUpdate();
+        }
+
+        /// <summary>Add one Node 목록 row (No., Node ID, 케이블, Design, Pulled, %, 단계, 매칭).</summary>
+        private void AddNodeRow(int seq, CableNodeData node)
+        {
+            var stage = node.GetStage();
+            string stageLabel = CableStageInfo.Labels.TryGetValue(stage, out var lbl) ? lbl : stage.ToString();
+            bool hasApplied = _matchedNodeIds.Count > 0 || _unmatchedNodeIds.Count > 0;
+            string matchLabel = !hasApplied ? "-" : (_matchedNodeIds.Contains(node.NodeId) ? "O" : "X");
+            string pct = node.OverallProgress.HasValue ? $"{node.OverallProgress.Value * 100:0}%" : "-";
+
+            var item = new ListViewItem(seq.ToString());
+            item.UseItemStyleForSubItems = false;
+            item.SubItems.Add(node.NodeId);
+            item.SubItems.Add(node.Cables.Count.ToString());
+            item.SubItems.Add(node.TotalDesignLth.ToString("0.##"));
+            item.SubItems.Add(node.TotalPulledLth.ToString("0.##"));
+            item.SubItems.Add(pct);
+            var stageSub = item.SubItems.Add(stageLabel);
+            if (_colorSettings.TryGetValue(stage, out var setting))
+                stageSub.ForeColor = setting.DisplayColor;
+            var matchSub = item.SubItems.Add(matchLabel);
+            if (matchLabel == "X") matchSub.ForeColor = Color.Red;
+            item.Tag = node;
+            _nodeList.Items.Add(item);
+        }
+
+        /// <summary>Add one Cable 목록 row (No., Cable No, Equip, 노드수, Design, Pulled, %, Route).</summary>
+        private void AddRouteRow(int seq, string cableNo, List<string> nodes)
+        {
+            var meta2 = _cableMeta.TryGetValue(cableNo, out var mm) ? mm : null;
+            string equip = meta2?.EquipNo ?? "";
+            string design = meta2?.DesignLth.HasValue == true ? meta2.DesignLth.Value.ToString("0.##") : "-";
+            string pulled = meta2?.PulledLth.HasValue == true ? meta2.PulledLth.Value.ToString("0.##") : "-";
+            string pct    = meta2?.PullingProgress.HasValue == true ? $"{meta2.PullingProgress.Value * 100:0}%" : "-";
+            string route  = string.Join(", ", nodes);
+
+            var item = new ListViewItem(seq.ToString());
+            item.SubItems.Add(cableNo);
+            item.SubItems.Add(equip);
+            item.SubItems.Add(nodes.Count.ToString());
+            item.SubItems.Add(design);
+            item.SubItems.Add(pulled);
+            item.SubItems.Add(pct);
+            item.SubItems.Add(route);
+            item.Tag = nodes;
+            _routeList.Items.Add(item);
+        }
+
+        /// <summary>
+        /// Show, in the top Cable 목록, every cable whose route passes through any of the
+        /// currently selected nodes. Source priority: the 3D view's current multi-selection
+        /// (resolve each selected box → its Node), else the Node 목록 selection.
+        /// </summary>
+        private void ShowCablesForSelectedNodes()
+        {
+            var doc = _main.GetDocument();
+
+            // 1) Prefer the 3D view's multi-selection.
+            HashSet<string> sel = doc != null ? ResolveSelectedCableNodeIds(doc)
+                                              : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            bool from3D = sel.Count > 0;
+
+            // 2) Fall back to the Node 목록 selection.
+            if (!from3D)
+                foreach (ListViewItem it in _nodeList.SelectedItems)
+                    if (it.Tag is CableNodeData n) sel.Add(n.NodeId);
+
+            if (sel.Count == 0)
+            {
+                MessageBox.Show("3D 뷰에서 노드 박스를 선택하거나, Node 목록에서 노드를 선택하세요. (여러 개 가능)");
+                return;
+            }
+
+            // Top Cable 목록: cables touching any selected node.
+            _routeList.BeginUpdate();
+            _routeList.Items.Clear();
+            int seq = 1;
+            foreach (var kv in _cableRoutes)
+                if (kv.Value.Any(n => sel.Contains(n)))
+                    AddRouteRow(seq++, kv.Key, kv.Value);
+            _routeList.EndUpdate();
+
+            // Node 목록 (그 아래): narrow to just the selected nodes.
+            _nodeList.BeginUpdate();
+            _nodeList.Items.Clear();
+            int nseq = 1;
+            foreach (var node in _nodes)
+                if (sel.Contains(node.NodeId))
+                    AddNodeRow(nseq++, node);
+            _nodeList.EndUpdate();
+            _cableList.Items.Clear();
+
+            // Only re-select in 3D when the source was the node list (3D already selected).
+            if (!from3D) SelectNodeBoxesInView(sel);
+        }
+
+        /// <summary>
+        /// Resolve every cable Node from the current 3D selection: for each selected item,
+        /// walk it + ancestors for a "-BOX" DisplayName and map the prefix to a known NodeId.
+        /// </summary>
+        private HashSet<string> ResolveSelectedCableNodeIds(Document doc)
+        {
+            var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            // normalized box key → canonical Excel NodeId
+            var keyToNode = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var n in _nodes)
+                keyToNode[CableNodeData.NormalizeId(n.NodeId)] = n.NodeId;
+
+            foreach (ModelItem selected in doc.CurrentSelection.SelectedItems)
+            {
+                var item = selected;
+                while (item != null)
+                {
+                    string name = item.DisplayName?.Trim() ?? "";
+                    int idx = name.IndexOf("-BOX", StringComparison.OrdinalIgnoreCase);
+                    if (idx > 0)
+                    {
+                        string key = name.Substring(0, idx).TrimStart('/').Trim();
+                        if (keyToNode.TryGetValue(key, out var nodeId))
+                            result.Add(nodeId);
+                        break; // this selected item resolved; move to the next
+                    }
+                    item = item.Parent;
+                }
+            }
+            return result;
+        }
+
+        /// <summary>Select every box of the given nodes in the 3D view (multi-node).</summary>
+        private void SelectNodeBoxesInView(IEnumerable<string> nodeIds)
+        {
+            var doc = _main.GetDocument();
+            if (doc == null) return;
+            var combined = new ModelItemCollection();
+            foreach (var id in nodeIds)
+            {
+                var col = _main.OverrideEngine.GetCableNodeItems(id);
+                if (col == null) continue;
+                foreach (ModelItem mi in col) combined.Add(mi);
+            }
+            if (combined.Count == 0) return;
+            _suppressSelectionSync = true;
+            try
+            {
+                doc.CurrentSelection.CopyFrom(combined);
+                doc.ActiveView.FocusOnCurrentSelection();
+            }
+            finally { _suppressSelectionSync = false; }
         }
 
         private void RouteList_SelectedIndexChanged(object sender, EventArgs e)
@@ -675,8 +992,16 @@ namespace NavisVisualizer.UI
             string line2 = "";
             if (result != null)
                 line2 = $"매칭 {result.MatchedCount} / 미매칭 {result.UnmatchedCount} / 숨김 박스 {hiddenCount}";
-            _lblStats.Text = string.Join("  ", parts)
+            _statsBase = string.Join("  ", parts)
                            + (!string.IsNullOrEmpty(line2) ? $"\n{line2}" : "");
+            RefreshStatsLabel();
+        }
+
+        /// <summary>Compose the stats label = base apply stats + (보이는것만 진단 when active).</summary>
+        private void RefreshStatsLabel()
+        {
+            _lblStats.Text = _statsBase
+                + (_visibleOnly && !string.IsNullOrEmpty(_visDiag) ? $"\n{_visDiag}" : "");
         }
 
         // ----- Bidirectional selection sync -----

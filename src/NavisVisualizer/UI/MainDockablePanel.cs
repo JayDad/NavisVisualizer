@@ -24,6 +24,9 @@ namespace NavisVisualizer.UI
         public ExportService ExportSvc { get; } = new ExportService();
         public UserDataService UserDataSvc { get; } = new UserDataService();
 
+        /// <summary>Reads active section/clip planes for the "보이는 것만" visibility filter.</summary>
+        public SectionService SectionSvc { get; } = new SectionService();
+
         private TabControl _tabControl;
         private HydrotestTab _hydrotestTab;
         private SpoolTab _spoolTab;
