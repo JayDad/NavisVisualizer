@@ -156,18 +156,25 @@ namespace NavisVisualizer.Searchers
                         AddToIndex(key.Substring(0, slash), item);
                 }
 
-                bool hasTagChild = false;
+                // Decide whether to keep descending. Stopping as soon as no immediate
+                // child has a digit breaks federated trees where a digit-bearing file
+                // node (e.g. "MEBTray1.nwc") sits above non-digit category nodes
+                // ("/SM/MEB/ELEC" -> "/.../PCVTRAY") that still contain deeper tags.
+                // So also descend into structural containers (a child with no geometry
+                // of its own but with children); only stop once children are geometry.
+                bool descend = false;
                 foreach (var child in item.Children)
                 {
                     string childName = child.DisplayName?.Trim();
-                    if (!string.IsNullOrEmpty(childName) && ContainsDigit(childName))
+                    bool childTagLike = !string.IsNullOrEmpty(childName) && ContainsDigit(childName);
+                    if (childTagLike || (!child.HasGeometry && child.Children.Any()))
                     {
-                        hasTagChild = true;
+                        descend = true;
                         break;
                     }
                 }
 
-                if (!hasTagChild)
+                if (!descend)
                     return;
             }
 

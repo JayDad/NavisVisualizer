@@ -73,15 +73,19 @@ GetStageAtDate(referenceDate):
 
 **두 가지 인덱싱 전략:**
 
-#### A. 재귀 탐색 (`WalkAndIndex`) — Spool/Hydrotest용
+#### A. 재귀 탐색 (`WalkAndIndex`) — Spool/Hydrotest/EIT Tray용
 
 ```
 WalkAndIndex(item):
   DisplayName에 숫자 포함? → 인덱싱
-    자식에도 숫자 포함 노드 있음? → 계속 재귀 (더 깊은 태그 존재)
-    자식에 숫자 없음? → STOP (하위는 geometry)
+    자식에 숫자 포함 노드 OR 구조 컨테이너(geometry 없고 자식 있음) 존재? → 계속 재귀
+    자식이 전부 geometry leaf? → STOP (하위는 geometry)
   숫자 없음? → 계속 재귀 (태그 레벨 아직 안 도달)
 ```
+
+> federated NWD에서 파일 노드(`MEBTray1.nwc`)가 파일명 숫자 때문에 tag-like로 잡히고
+> 그 아래가 `/SM/MEB/ELEC` 같은 digit 없는 범주 노드면, "자식에 숫자 없음 → STOP"이
+> 너무 일찍 발동해 하위 트레이가 통째로 미인덱싱됐다. 구조 컨테이너로 내려가도록 보완.
 
 #### B. 레벨 타겟 (`BuildIndexForTags`) — Equipment용
 

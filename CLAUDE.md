@@ -36,11 +36,13 @@ Document
 **결정 보류 이유**
 사용자 측 파일명·모델 구조 규약이 확정되지 않아, 현 시점에서 키워드를 하드코딩하기보다 규약 확정 후 적용하기로 함.
 
-### 2. WalkAndIndex 조기 정지 한계 (우선순위: 낮음)
+### 2. WalkAndIndex 조기 정지 (우선순위: 낮음)
 
-`WalkAndIndex`는 tag-like 노드가 "tag-like 자식이 없을 때" 정지한다. 하지만 `/CM/PDA/ELEC/PCVTRAY-STW`처럼 **digit 없는 범주 노드 바로 아래에 geometry가 직접 붙은 경우**엔 조기 정지가 발동하지 않아 geometry까지 전부 방문.
+**[해결됨] digit 보유 파일 노드로 인한 조기 정지**
+federated 구조에서 `MEBTray1.nwc`(파일명에 digit)가 `/SM/MEB/ELEC` → `/.../PCVTRAY`(digit 없는 범주) 위에 있으면, "tag-like인데 자식에 digit 없음 → STOP"이 depth 1에서 발동해 하위 ELEC 트레이가 통째로 미인덱싱 → 매칭 0건이 되던 문제. 현재 `WalkAndIndex`는 tag-like 노드라도 **구조 컨테이너(geometry 없고 자식 있는 자식)**가 있으면 계속 내려가고, 자식이 전부 geometry leaf일 때만 정지하도록 수정됨.
 
-항목 1 적용 시 자연스럽게 완화되지만, 단일 NWD 시나리오에서도 최적화가 필요하면 `BuildIndexForTrayIds`(Equipment의 `BuildIndexForTags`와 동일 방식)를 추가하는 방안 검토.
+**[잔여] 과다 방문**
+`/CM/PDA/ELEC/PCVTRAY-STW`처럼 digit 없는 범주 노드 바로 아래에 geometry가 직접 붙으면, 그 노드는 애초에 tag-like가 아니라 정지 로직을 안 타고 geometry까지 방문. 단일 NWD에서 최적화가 필요하면 `BuildIndexForTrayIds`(Equipment의 `BuildIndexForTags`와 동일 방식)를 추가하는 방안 검토.
 
 ### 3. Cable Stage 날짜화 (EIT Tray)
 
