@@ -92,9 +92,12 @@ SQL Server ──SqlDataAdapter──▶ DataTable ─┘
 - 다운스트림(Stage 계산 → Searcher → ColorOverrideEngine)은 `List<XxxData>`만 받으므로 **전혀 수정 없음**
 - 드라이버는 .NET Framework 4.8 내장 `System.Data.SqlClient` 사용 (신규 NuGet 없음 → Navisworks 플러그인 어셈블리 바인딩 리스크 회피)
 
+**명칭: 서버 소스의 사용자 표기는 "OASIS"**
+OASIS가 기간계 시스템이고, 실적이 OASIS → SQL Server view table로 적재되는 구조. 사용자는 "서버"보다 OASIS를 인지하므로 UI 표기는 전부 OASIS로: 라디오 `OASIS`, 버튼 `[Load OASIS Data]`, 미구성 라벨 `— (OASIS 구성 대기)`. 내부 코드 식별자도 `Oasis`로 통일 (연결 대상이 SQL Server라는 사실은 구현 세부 — `SqlServerLoader` 클래스명은 유지).
+
 **데이터 보관: 탭별 소스 슬롯 2개**
 ```csharp
-enum ProgressSource { Excel, Server }
+enum ProgressSource { Excel, Oasis }
 
 class DataSourceSlot<T>
 {
@@ -117,7 +120,7 @@ class DataSourceSlot<T>
 ```
 ┌ 실적 데이터 (Progress Input) ─────────────────────────────────┐
 │ ◉ Excel    [Excel Import]       ● Spool.xlsx · 1,234건 · 14:02 │
-│ ○ Server   [Load Server Data]   ○ (미로드)                     │
+│ ○ OASIS    [Load OASIS Data]    ○ (미로드)                     │
 └────────────────────────────────────────────────────────────────┘
 ```
 
@@ -132,10 +135,10 @@ class DataSourceSlot<T>
 - `%APPDATA%\NavisVisualizer\server.json` + Tools 탭에 "서버 설정" 버튼(연결 테스트 포함)
 - 공종별 구성이 뷰가 아니라 조인/파라미터(프로젝트 코드 등)로 오면 모듈별 쿼리 빌더로 확장 — `SqlServerLoader.LoadXxx(ServerConfig)` 시그니처는 동일 유지
 
-**공종별 Server 버튼 활성화 게이팅**
-구성은 공종별로 순차 확정되므로 활성화도 **탭(공종) 단위**로 게이팅한다. 전역 on/off 아님 — Spool 구성만 확정된 시점엔 Spool 탭 Server 버튼만 살아있어야 함.
-- `server.json`의 `modules` 섹션에 해당 공종 엔트리(뷰/쿼리)가 존재할 때만 그 탭의 `[Load Server Data]` 버튼 + Server 라디오 활성화
-- 미구성 탭은 버튼 비활성 + 상태 라벨 `— (서버 구성 대기)` 회색 표시. 버튼을 숨기지 않고 비활성으로 두는 이유: 기능이 존재한다는 것을 사용자가 인지하도록
+**공종별 OASIS 버튼 활성화 게이팅**
+구성은 공종별로 순차 확정되므로 활성화도 **탭(공종) 단위**로 게이팅한다. 전역 on/off 아님 — Spool 구성만 확정된 시점엔 Spool 탭 OASIS 버튼만 살아있어야 함.
+- `server.json`의 `modules` 섹션에 해당 공종 엔트리(뷰/쿼리)가 존재할 때만 그 탭의 `[Load OASIS Data]` 버튼 + OASIS 라디오 활성화
+- 미구성 탭은 버튼 비활성 + 상태 라벨 `— (OASIS 구성 대기)` 회색 표시. 버튼을 숨기지 않고 비활성으로 두는 이유: 기능이 존재한다는 것을 사용자가 인지하도록
 - `ProgressInputPanel`에 `ServerConfigured` bool 프로퍼티 하나로 노출 — 각 탭이 config 로드 후 세팅
 - Phase 1에서는 `modules` 섹션이 비어 있으므로 전 탭 자동 비활성 (별도 코드 불필요, 게이팅 로직 자체가 Phase 1 범위)
 
@@ -161,7 +164,7 @@ class DataSourceSlot<T>
 - Cable Pull 탭은 행→노드/케이블 다대다 재구성 로직이 로더에 얽혀 있어 RowMapper 추출 난도가 높음 → Phase 1은 Spool/Hydrotest/Equipment/EIT 4개 먼저, Cable은 구성 수령 후 판단
 - 서버 인증 방식(Windows 통합 vs SQL 계정)과 접속 정보 배포 방식은 현장 IT 정책 확인 필요
 
-### 7. 매칭 현황 집계 범위(Scope) 필터 — 전 공종 확장 (검토 단계, 미확정)
+### 7. 매칭 현황 집계 범위(Scope) 필터 — 전 공종 확장 (채택)
 
 **배경**
 현재 clipping/가시성 기준 필터는 Cable Pull 탭의 `보이는 것만` 체크박스에만 존재 (비숨김 + 활성 clip plane 내부 판정, `SectionService` 재사용 — 4번 항목). 다른 공종의 매칭 리스트/현황도 clipping area 등 범위 기준으로 좁혀 보고 싶다는 요구. 단, 기준이 여러 개(숨김/clipping/선택)라 사용자가 헷갈리지 않도록 명시적 선택 UI가 필요.
@@ -174,9 +177,40 @@ class DataSourceSlot<T>
 
 **설계 주의**
 - 범위는 **리스트/통계 집계에만** 우선 적용, 색칠(가시화) 범위 연동은 별도 검토 — "집계는 좁혔는데 색은 전체에 칠해짐" 혼동 방지를 위해 현황 라벨에 `(Clipping 영역 기준)` 등 범위 병기
-- 판정 위치: Cable은 box 마커 중심점이었고, Spool/Equipment 등은 매칭 노드의 `BoundingBox().Center`로 동일 판정 가능. 매칭된 노드에만 판정하므로 수천 건 수준 → 비용 무난 예상, Windows 실측 필요
+- 판정 위치: Cable은 box 마커 중심점이었고, Spool/Equipment 등은 매칭 노드의 `BoundingBox().Center`로 동일 판정 가능
 - Cable 탭 기존 `보이는 것만` 체크박스와의 관계 정리 필요 — 라디오 그룹으로 흡수(체크박스 제거)가 일관적
-- `매칭 Status 엑셀 출력`도 선택된 범위를 따르는지 여부 명시 필요 (따르는 게 자연스러움 + CSV 헤더에 범위 표기)
+- `매칭 Status 엑셀 출력`도 선택된 범위를 따름 + CSV 헤더에 범위 표기
+
+**성능 설계 (라디오 전환마다 status 재계산)**
+비용의 본질: 판정 대상이 전체 모델 geometry(수백만)가 아니라 **매칭된 노드(리스트 행 수 = 수천 건)뿐**이라 전환당 작업량 자체가 작다. 범위별 비용:
+- `전체 모델`: 판정 없음 (즉시). `선택 항목`: CurrentSelection 조회 1회 (즉시)
+- `숨김 제외`: 노드당 조상 체인 `IsHidden` 검사 — Cable `보이는 것만`에서 이미 수천 건 실사용 중, 문제 없음
+- `Clipping 영역`: clip plane COM 읽기는 **전환당 1회**(노드당 아님), 노드당은 `BoundingBox().Center`(Navisworks가 미리 계산해 둔 값 조회) + 평면식 산술 → 수천 건이면 밀리초~수백 ms 예상
+
+안전장치:
+- **범위별 판정 결과 캐시** (`Dictionary<scope, HashSet<nodeKey>>`) — 같은 범위로 되돌아오는 전환은 0 비용. 캐시 무효화는 `가시화 적용`/`새로고침`/모델 변경 시에만 (단면·숨김 변경 자동 감지 이벤트는 안 걸므로 — 4번 항목과 동일 정책)
+- 첫 판정이 오래 걸리는 대형 케이스 대비: 기존 marquee `_progressBar` 재사용 (UI freeze 인상 방지)
+- Windows 실측으로 확정 필요 (특히 만 건 이상 매칭 시 BoundingBox 일괄 조회)
+
+### 8. 매칭 Status 엑셀 출력 — 리포트화 (검토 단계)
+
+**배경**
+현재 출력은 행 단위 CSV 리스트(항목·Stage·매칭 O/X)뿐. 생산관리자들은 리스트에 더해 **통계치가 리포트 형태로 정리된 출력물**을 원함. Excel 출력 전반의 개선 검토 필요.
+
+**리포트에 담을 후보 (요구사항 수집 후 확정)**
+- 헤더 블록: 공종 / 기준일 / 데이터 소스(Excel 파일명 or OASIS 쿼리시각) / 집계 범위(7번) / 출력 시각
+- Stage별 건수·비율 (+ 누적 %), 매칭/미매칭 건수·매칭률
+- 구역·시스템 단위 소계 (Spool: ISO 그룹별, Equipment: Sub System별 등 — 공종별 그룹 축 상이)
+- 주간 증감(전주 대비)은 스냅샷 보관이 필요해서 범위가 큼 — 별도 판단
+
+**구현 옵션**
+| 방식 | 장점 | 단점 |
+|------|------|------|
+| CSV 상단에 요약 블록 추가 | 의존성 제로, 즉시 가능 | 서식 없음, 시트 분리 불가 |
+| `.xlsx` 생성 (ClosedXML/EPPlus 등) | 다중 시트(요약+리스트)·서식·차트 | NuGet 추가 — Navisworks 플러그인 어셈블리 바인딩 검증 필요 |
+| Excel 템플릿(.xltx)에 값만 채움 | 서식은 템플릿이 담당, 코드 단순 | 템플릿 파일 배포 관리 필요 |
+
+**방향 제안**: 단기는 CSV 요약 블록(리스트 위에 통계 섹션), 본격 리포트는 `.xlsx` 라이브러리 검증 후 "요약 시트 + 상세 리스트 시트" 2시트 구성. 생산관리자 요구 항목(어떤 통계·어떤 그룹핑)을 먼저 수집해서 확정할 것.
 
 ## 개발 규칙
 
