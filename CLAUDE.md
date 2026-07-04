@@ -132,6 +132,13 @@ class DataSourceSlot<T>
 - `%APPDATA%\NavisVisualizer\server.json` + Tools 탭에 "서버 설정" 버튼(연결 테스트 포함)
 - 공종별 구성이 뷰가 아니라 조인/파라미터(프로젝트 코드 등)로 오면 모듈별 쿼리 빌더로 확장 — `SqlServerLoader.LoadXxx(ServerConfig)` 시그니처는 동일 유지
 
+**공종별 Server 버튼 활성화 게이팅**
+구성은 공종별로 순차 확정되므로 활성화도 **탭(공종) 단위**로 게이팅한다. 전역 on/off 아님 — Spool 구성만 확정된 시점엔 Spool 탭 Server 버튼만 살아있어야 함.
+- `server.json`의 `modules` 섹션에 해당 공종 엔트리(뷰/쿼리)가 존재할 때만 그 탭의 `[Load Server Data]` 버튼 + Server 라디오 활성화
+- 미구성 탭은 버튼 비활성 + 상태 라벨 `— (서버 구성 대기)` 회색 표시. 버튼을 숨기지 않고 비활성으로 두는 이유: 기능이 존재한다는 것을 사용자가 인지하도록
+- `ProgressInputPanel`에 `ServerConfigured` bool 프로퍼티 하나로 노출 — 각 탭이 config 로드 후 세팅
+- Phase 1에서는 `modules` 섹션이 비어 있으므로 전 탭 자동 비활성 (별도 코드 불필요, 게이팅 로직 자체가 Phase 1 범위)
+
 **가시화 버튼 명칭 변경 (전 탭 공통)**
 | 현재 | 변경안 | 이유 |
 |------|--------|------|
