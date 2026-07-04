@@ -149,6 +149,10 @@ class DataSourceSlot<T>
 - 보조 기능(`속성 쓰기` / `Viewpoint 저장` / `NWD Export`)은 기존 하단 행 유지 — 출력/배포용이라 사용 빈도 낮음
 - 전 공종 동일 배치 (`ProgressInputPanel` + 가시화 버튼 행을 한 세트로 두는 것도 고려 — 탭별 배치 편차 원천 차단)
 
+**리스트 영역 UI 카피 (전 탭 공통)**
+- 매칭/미매칭 필터 탭 옆에 회색 remark 추가: `※ 실적 데이터와 매칭 여부를 뜻함`
+- `매칭 Status 출력` → `매칭 Status 엑셀 출력` (실제 출력물은 Excel에서 바로 열리는 CSV — 사용자 관점 명칭)
+
 **단계 나누기**
 - **Phase 1 (SQL 구성 확정 전 착수 가능)**: RowMapper 추출 리팩터링 + `DataSourceSlot` 도입 + `ProgressInputPanel` UI (Server 버튼은 "구성 대기" 비활성) + 버튼 명칭 변경
 - **Phase 2 (공종별 구성 수령 후)**: `SqlServerLoader` 구현 + 서버 설정 UI + 모듈별 쿼리/컬럼 매핑
@@ -156,6 +160,23 @@ class DataSourceSlot<T>
 **트레이드오프 / 결정 보류**
 - Cable Pull 탭은 행→노드/케이블 다대다 재구성 로직이 로더에 얽혀 있어 RowMapper 추출 난도가 높음 → Phase 1은 Spool/Hydrotest/Equipment/EIT 4개 먼저, Cable은 구성 수령 후 판단
 - 서버 인증 방식(Windows 통합 vs SQL 계정)과 접속 정보 배포 방식은 현장 IT 정책 확인 필요
+
+### 7. 매칭 현황 집계 범위(Scope) 필터 — 전 공종 확장 (검토 단계, 미확정)
+
+**배경**
+현재 clipping/가시성 기준 필터는 Cable Pull 탭의 `보이는 것만` 체크박스에만 존재 (비숨김 + 활성 clip plane 내부 판정, `SectionService` 재사용 — 4번 항목). 다른 공종의 매칭 리스트/현황도 clipping area 등 범위 기준으로 좁혀 보고 싶다는 요구. 단, 기준이 여러 개(숨김/clipping/선택)라 사용자가 헷갈리지 않도록 명시적 선택 UI가 필요.
+
+**검토안: "매칭 집계 범위" 라디오 그룹 (상호배타)**
+- ◉ **전체 모델** (default — 현행 NWD 파일 기준 그대로, 기존 사용에 영향 없음)
+- ○ **숨김 제외** — hidden 처리 항목 제외 (`SectionService.IsEffectivelyHidden`, 조상까지)
+- ○ **Clipping 영역** — 활성 단면 평면 내부만 (clip plane COM 판정 재사용)
+- ○ **선택 항목** — 현재 3D 선택 기준
+
+**설계 주의**
+- 범위는 **리스트/통계 집계에만** 우선 적용, 색칠(가시화) 범위 연동은 별도 검토 — "집계는 좁혔는데 색은 전체에 칠해짐" 혼동 방지를 위해 현황 라벨에 `(Clipping 영역 기준)` 등 범위 병기
+- 판정 위치: Cable은 box 마커 중심점이었고, Spool/Equipment 등은 매칭 노드의 `BoundingBox().Center`로 동일 판정 가능. 매칭된 노드에만 판정하므로 수천 건 수준 → 비용 무난 예상, Windows 실측 필요
+- Cable 탭 기존 `보이는 것만` 체크박스와의 관계 정리 필요 — 라디오 그룹으로 흡수(체크박스 제거)가 일관적
+- `매칭 Status 엑셀 출력`도 선택된 범위를 따르는지 여부 명시 필요 (따르는 게 자연스러움 + CSV 헤더에 범위 표기)
 
 ## 개발 규칙
 
