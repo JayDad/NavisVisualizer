@@ -73,6 +73,75 @@ ComApiBridge.State (InwOpState10)
 
 노드당 `-BOX`가 2개 이상이면 박스 생성 매크로 오류 의심. `ModelItemSearcher.GetEntriesWithMultipleItems`로 box 인덱스에서 key당 item>1을 뽑아 CSV 출력.
 
+### 6. SQL Server 실적 데이터 소스 — Progress Input 이원화 (우선순위: 높음, 확장설계안)
+
+**배경**
+현재 실적 입력은 Excel 단일 소스. SQL Server에서 직접 실적을 읽는 옵션을 추가하되 Excel import와 **공존**해야 한다 — 평소엔 서버 데이터로 보다가 필요할 때 Excel import본으로 전환하는 시나리오. 공종(모듈)별 SQL 데이터 구성(테이블/뷰/컬럼)은 추후 별도 확정 예정이므로, 지금은 구성이 어떻게 오든 수용 가능한 구조만 잡아둔다.
+
+**핵심 설계 원칙: 두 소스가 같은 데이터 모델로 수렴**
+`ExcelLoader`는 ExcelDataReader로 `DataSet`을 만든 뒤 행→모델 매핑을 한다. SQL도 `SqlDataAdapter.Fill` → `DataTable`이므로 **두 경로가 DataTable에서 합류**한다:
+
+```
+Excel 파일 ──ExcelDataReader──▶ DataTable ─┐
+                                           ├─▶ RowMapper (헤더 키워드 매핑, 기존 로직 추출) ─▶ List<SpoolData> 등
+SQL Server ──SqlDataAdapter──▶ DataTable ─┘
+```
+
+- `ExcelLoader.LoadXxx`의 "헤더 탐지 + 행→모델 변환" 부분을 모듈별 `RowMapper`로 추출, `ExcelLoader`와 신규 `SqlServerLoader`가 공유
+- SQL 뷰 컬럼명을 Excel 헤더 키워드와 동일하게 맞추도록 요청하면 매핑 코드 제로 — 다르면 모듈별 컬럼 매핑만 `SqlServerLoader`에 추가
+- 다운스트림(Stage 계산 → Searcher → ColorOverrideEngine)은 `List<XxxData>`만 받으므로 **전혀 수정 없음**
+- 드라이버는 .NET Framework 4.8 내장 `System.Data.SqlClient` 사용 (신규 NuGet 없음 → Navisworks 플러그인 어셈블리 바인딩 리스크 회피)
+
+**데이터 보관: 탭별 소스 슬롯 2개**
+```csharp
+enum ProgressSource { Excel, Server }
+
+class DataSourceSlot<T>
+{
+    public List<T> Data;        // null = 미로드
+    public string Label;        // 파일명 또는 "서버명.DB (쿼리시각)"
+    public DateTime? LoadedAt;
+}
+// 탭 필드: _excelSlot, _serverSlot, _activeSource
+// 기존 _spools 등은 "활성 슬롯의 Data"를 반환하는 프로퍼티로 치환
+```
+두 슬롯 모두 메모리에 유지 → 라디오 전환 시 재로드 없이 즉시 스위칭.
+
+**UI: Progress Input 그룹 (탭 공통 → `ProgressInputPanel` UserControl로 추출)**
+현재 `_btnLoad` + `_lblFile` 자리를 GroupBox로 교체. 5개 탭이 중복 구현하지 말고 공용 컨트롤 1개(`SourceChanged` / `ExcelLoadRequested` / `ServerLoadRequested` 이벤트)로:
+
+```
+┌ 실적 데이터 (Progress Input) ─────────────────────────────────┐
+│ ◉ Excel    [Excel Import]       ● Spool.xlsx · 1,234건 · 14:02 │
+│ ○ Server   [Load Server Data]   ○ (미로드)                     │
+└────────────────────────────────────────────────────────────────┘
+```
+
+- **라디오버튼** (체크박스 아님 — 가시화 기준 소스는 한 번에 하나이므로 상호배타)
+- 상태 표시: `○ (미로드)` 회색 / `● 라벨·건수·시각` 검정 / `✕ 로드 실패` 빨강
+- 라디오는 해당 슬롯이 로드된 경우에만 활성화. 로드 성공 시 그 소스를 자동으로 활성 소스로 전환
+- 소스 전환 시: 리스트/통계/매칭 추적 즉시 갱신. 색상이 이미 적용된 상태면 "⚠ 화면 색상은 {이전 소스} 기준 — 가시화 적용 필요" 표시 (자동 재적용은 안 함 — 대형 모델에서 의도치 않은 수 초 블로킹 방지)
+- 서버 로드는 네트워크 대기가 있으므로 기존 `_progressBar`(marquee) 재사용 + 버튼 비활성화, `SqlCommand.CommandTimeout` 명시
+
+**서버 연결 구성 (공종별 구성 확정 전까지 열어둘 부분)**
+- 연결 정보(서버/DB/인증)는 전 모듈 공유, 모듈별로는 쿼리(뷰 이름)만 다르다고 가정
+- `%APPDATA%\NavisVisualizer\server.json` + Tools 탭에 "서버 설정" 버튼(연결 테스트 포함)
+- 공종별 구성이 뷰가 아니라 조인/파라미터(프로젝트 코드 등)로 오면 모듈별 쿼리 빌더로 확장 — `SqlServerLoader.LoadXxx(ServerConfig)` 시그니처는 동일 유지
+
+**가시화 버튼 명칭 변경 (전 탭 공통)**
+| 현재 | 변경안 | 이유 |
+|------|--------|------|
+| `적용` | `가시화 적용` | 무엇을 적용하는지 명시 |
+| `전체 초기화` | `가시화 해제` | "초기화"가 데이터/설정 리셋으로 오독됨. 실제 동작은 색상 override 제거 = 모델 원상복구 |
+
+**단계 나누기**
+- **Phase 1 (SQL 구성 확정 전 착수 가능)**: RowMapper 추출 리팩터링 + `DataSourceSlot` 도입 + `ProgressInputPanel` UI (Server 버튼은 "구성 대기" 비활성) + 버튼 명칭 변경
+- **Phase 2 (공종별 구성 수령 후)**: `SqlServerLoader` 구현 + 서버 설정 UI + 모듈별 쿼리/컬럼 매핑
+
+**트레이드오프 / 결정 보류**
+- Cable Pull 탭은 행→노드/케이블 다대다 재구성 로직이 로더에 얽혀 있어 RowMapper 추출 난도가 높음 → Phase 1은 Spool/Hydrotest/Equipment/EIT 4개 먼저, Cable은 구성 수령 후 판단
+- 서버 인증 방식(Windows 통합 vs SQL 계정)과 접속 정보 배포 방식은 현장 IT 정책 확인 필요
+
 ## 개발 규칙
 
 - Navisworks Simulate 2022 / .NET Framework 4.8 타겟. `Autodesk.Navisworks.*` DLL은 Windows 설치 경로 참조.
