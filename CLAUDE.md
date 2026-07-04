@@ -105,7 +105,11 @@ class DataSourceSlot<T>
 // 탭 필드: _excelSlot, _serverSlot, _activeSource
 // 기존 _spools 등은 "활성 슬롯의 Data"를 반환하는 프로퍼티로 치환
 ```
-두 슬롯 모두 메모리에 유지 → 라디오 전환 시 재로드 없이 즉시 스위칭.
+두 슬롯 모두 메모리에 유지 → 라디오 전환 시 재로드/재파싱 없이 즉시 스위칭. 한 소스의 로드는 다른 슬롯을 절대 건드리지 않는다 (같은 소스 재로드 시에만 해당 슬롯 갱신).
+
+- **매칭 추적(`_matchedIds`/`_unmatchedIds`)도 슬롯별 보관** — 소스 전환 시 그 소스로 마지막 적용했을 때의 매칭 O/X가 그대로 복원되어야 함 (전환으로 매칭 표시가 사라지거나 타 소스 결과와 섞이면 안 됨)
+- **`가시화 적용` = 사실상 그래픽 변경만**: 모델 인덱스는 모델 트리에서 만들므로 소스와 무관 — `NeedsRebuild`(모델 변경) 시에만 재빌드, 소스 전환은 재빌드 사유 아님. Stage 계산·매칭 조회는 메모리 연산이라 즉시 수준, 시간은 색상 override 배치가 씀
+- **Equipment 예외**: `BuildIndexForTags`가 *데이터의 태그 목록*으로 인덱스를 만들므로, 활성 소스의 태그 중 인덱스에 없는 태그가 있으면 재빌드 필요. 적용 시 "활성 데이터 태그 ⊄ 인덱스 키" 체크 추가 (같은 공종 데이터라 태그 대부분 겹침 → 실제 재빌드는 드묾)
 
 **UI: Progress Input 그룹 (탭 공통 → `ProgressInputPanel` UserControl로 추출)**
 현재 `_btnLoad` + `_lblFile` 자리를 GroupBox로 교체. 5개 탭이 중복 구현하지 말고 공용 컨트롤 1개(`SourceChanged` / `ExcelLoadRequested` / `ServerLoadRequested` 이벤트)로:
