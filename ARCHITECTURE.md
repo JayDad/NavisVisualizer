@@ -142,12 +142,20 @@ Apply:
   2. Stage별로 ModelItem 그룹핑
   3. Stage당 1회 API 호출 (OverridePermanentColor)
   4. 투명도 0%인 Stage는 OverridePermanentTransparency 생략
-  5. 결과를 캐시에 저장 (Stage → ModelItemCollection)
+  5. 결과를 캐시에 저장 (VisualModule → Stage → ModelItemCollection)
 ```
 
 **증분 업데이트:**
 - 색상/투명도 변경 시 캐시된 Collection 재사용
 - Reset 없이 해당 Stage만 즉시 반영
+
+**Stage 캐시는 공종(VisualModule)별로 격리:**
+- 키가 enum 이름 문자열이라 단일 캐시로는 "NotStarted"(전 모듈), "Setting"(Spool/Equipment)이
+  충돌 — 한 탭의 증분 색 변경이 다른 탭이 칠한 컬렉션을 덧칠하는 간섭이 있었음
+- 각 `Apply*`는 자기 모듈 캐시만 Clear/채움 → 다른 공종 적용 후에도 자기 색 미세조정 가능
+- `Apply*`는 전체 Reset 없이 자기 매칭 아이템만 칠하므로 공종 간 색은 뷰에서 공존
+  (Tray 노드와 Cable `-BOX`는 물리적으로 다른 객체)
+- "전체 초기화"만 문서 전체 리셋 (공종별 초기화는 CLAUDE.md 향후 고려사항 7 참조)
 
 **성능 최적화 이력:**
 

@@ -316,10 +316,10 @@ namespace NavisVisualizer.UI
         private void IncrementalUpdate(string stageKey)
         {
             var doc = _main.GetDocument();
-            if (doc == null || !_main.OverrideEngine.HasCachedData) return;
+            if (doc == null || !_main.OverrideEngine.HasCachedData(VisualModule.Hydrotest)) return;
 
             if (Enum.TryParse<HydrotestStage>(stageKey, out var stage) && _colorSettings.TryGetValue(stage, out var setting))
-                _main.OverrideEngine.UpdateStageColor(doc, stageKey, setting);
+                _main.OverrideEngine.UpdateStageColor(doc, VisualModule.Hydrotest, stageKey, setting);
         }
 
         private void BtnExport_Click(object sender, EventArgs e)

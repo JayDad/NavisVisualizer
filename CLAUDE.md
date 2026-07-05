@@ -88,6 +88,22 @@ Spool / Hydrotest / Equipment 탭은 OASIS 로드 구현 완료 (`SqlLoader`, �
 - **Equipment 병합 정책**: 현재 Mech_EQ 우선 + All_EQ 보충(dedupe). 정책 바뀌면
   `SqlLoader.LoadEquipment`의 테이블 순회 순서만 조정.
 
+### 7. 공종(모듈)별 초기화 — 아이디어 기록 (미구현)
+
+현재 "전체 초기화"는 어느 탭에서 눌러도 `ResetAllPermanentMaterials()` — 모든 공종 색이
+같이 사라진다. 공종별 초기화(`ResetModule`)를 넣으려면:
+
+- API는 지원됨: `DocumentModels.ResetPermanentMaterials(ModelItemCollection)` (아이템 단위 리셋)
+- **최신 캐시가 아니라 "누적 painted 셋"을 리셋해야 함** — 같은 탭에서 적용을 여러 번 하면
+  (기준일 변경, 단계 체크 해제) 이전 적용에서 칠했지만 최신 캐시에 없는 아이템이 생김.
+  모듈별로 `ApplyOverride`에 넘긴 컬렉션을 합집합으로 누적했다가 그걸 리셋.
+- Cable 모듈 리셋은 색 + `RestoreHiddenCableBoxes` + 필터 포커스 상태 + cable 전용 캐시 정리까지.
+- Spool↔Hydrotest 겹침은 유리하게 동작: Spool(하위 노드)만 리셋하면 상위 PKG 오버라이드가
+  다시 드러남 (레이어 벗기기).
+- UI: 각 탭 `[적용] [공종 초기화] [전체 초기화]` 3버튼.
+- 기반은 이미 있음: stage 캐시가 `VisualModule`별로 분리되어 있어 (ColorOverrideEngine)
+  누적 painted 셋만 추가하면 됨.
+
 ## 개발 규칙
 
 - Navisworks Simulate 2022 / .NET Framework 4.8 타겟. `Autodesk.Navisworks.*` DLL은 Windows 설치 경로 참조.
