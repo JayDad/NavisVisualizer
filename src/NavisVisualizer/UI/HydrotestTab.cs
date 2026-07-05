@@ -6,6 +6,7 @@ using System.Linq;
 using System.Windows.Forms;
 using NavisVisualizer.Loaders;
 using NavisVisualizer.Models;
+using NavisVisualizer.Services;
 using NavisVisualizer.Visualizers;
 
 namespace NavisVisualizer.UI
@@ -19,6 +20,11 @@ namespace NavisVisualizer.UI
 
         private HashSet<string> _matchedPkgIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private List<string> _unmatchedPkgIds = new List<string>();
+
+        // Aggregation scope (매칭 집계 범위) — null = 전체 모델 (no filtering)
+        private ScopePanel _scopePanel;
+        private readonly ScopeFilter _scopeFilter;
+        private HashSet<string> _scopeKeys;
 
         private Button _btnLoad;
         private Label _lblFile;
@@ -43,6 +49,7 @@ namespace NavisVisualizer.UI
         {
             _main = main;
             _colorSettings = CloneDefaults(ColorSetting.HydrotestDefaults);
+            _scopeFilter = new ScopeFilter(main.SectionSvc);
             InitializeComponent();
         }
 
@@ -87,6 +94,10 @@ namespace NavisVisualizer.UI
             searchPanel.Controls.Add(btnExport);
 
             _lblStats = new Label { Dock = DockStyle.Fill, Text = "로드된 데이터 없음", AutoSize = false, Height = 36 };
+
+            // Aggregation scope group (radios select only; [적용] runs the judgement)
+            _scopePanel = new ScopePanel { Dock = DockStyle.Fill };
+            _scopePanel.ApplyRequested += (s, e) => ApplyScope();
 
             _tabFilter = new TabControl { Dock = DockStyle.Fill, Height = 230 };
             var tabAll = new TabPage("전체");
@@ -141,6 +152,7 @@ namespace NavisVisualizer.UI
             layout.Controls.Add(_progressBar);
             layout.Controls.Add(_lblStats);
             layout.Controls.Add(searchPanel);
+            layout.Controls.Add(_scopePanel);
             layout.Controls.Add(_tabFilter);
 
             Controls.Add(layout);
@@ -226,6 +238,9 @@ namespace NavisVisualizer.UI
                     _lblFile.Text = Path.GetFileName(dlg.FileName);
                     _matchedPkgIds.Clear();
                     _unmatchedPkgIds.Clear();
+                    _scopeFilter.Reset();
+                    _scopeKeys = null;
+                    _scopePanel.ResetToFullModel();
                     FilterList();
                     UpdateStats();
                 }
@@ -250,9 +265,11 @@ namespace NavisVisualizer.UI
             if (_packages.Count == 0) { MessageBox.Show("Excel을 먼저 로드하세요."); return; }
             var referenceDate = _dtpReference.Value;
             var lines = new List<string>();
+            lines.Add($"집계 범위,{MatchScopeInfo.Label(_scopePanel.CurrentScope)}");
             lines.Add("Test Pkg No.,System No.,Line Service,Stage,Matched");
             foreach (var pkg in _packages)
             {
+                if (!InScope(pkg.TestPkgId)) continue;
                 var stage = pkg.GetStageAtDate(referenceDate);
                 string stageLabel = HydrotestStageInfo.Labels.TryGetValue(stage, out var lbl) ? lbl : stage.ToString();
                 bool matched = _matchedPkgIds.Count == 0 || _matchedPkgIds.Contains(pkg.TestPkgId);
@@ -301,12 +318,89 @@ namespace NavisVisualizer.UI
                 _packages.Select(p => p.TestPkgId).Where(id => !unmatchedSet.Contains(id)),
                 StringComparer.OrdinalIgnoreCase);
 
-            _tabFilter.TabPages[0].Text = $"전체 ({_packages.Count})";
-            _tabFilter.TabPages[1].Text = $"매칭 ({_matchedPkgIds.Count})";
-            _tabFilter.TabPages[2].Text = $"미매칭 ({_unmatchedPkgIds.Count})";
+            // Matched set changed → scope verdicts are stale
+            _scopeFilter.Invalidate();
+            ReapplyCurrentScope(doc);
 
+            UpdateTabCounts();
             UpdateStats(result);
             FilterList();
+        }
+
+        // ----- 매칭 집계 범위 (aggregation scope) -----
+
+        /// <summary>
+        /// A row passes the scope when no scope is active, when it is unmatched
+        /// (no model position — spatially unjudgeable, always shown), or when its
+        /// matched node was judged inside the scope.
+        /// </summary>
+        private bool InScope(string id) =>
+            _scopeKeys == null || !_matchedPkgIds.Contains(id) || _scopeKeys.Contains(id);
+
+        /// <summary>Scope [적용]: run the judgement for the selected radio, then re-aggregate.</summary>
+        private void ApplyScope()
+        {
+            var scope = _scopePanel.SelectedScope;
+            if (scope == MatchScope.FullModel)
+            {
+                _scopeKeys = null;
+                _scopeFilter.SetFullModel();
+            }
+            else
+            {
+                var doc = _main.GetDocument();
+                if (doc == null || _matchedPkgIds.Count == 0)
+                {
+                    MessageBox.Show("먼저 적용(가시화)을 실행하세요. 집계 범위는 매칭된 항목에 적용됩니다.");
+                    return;
+                }
+                if (_main.TagSearcher.NeedsRebuild(doc))
+                {
+                    MessageBox.Show("모델이 변경되었습니다. 적용(가시화)을 다시 실행한 뒤 범위를 선택하세요.");
+                    return;
+                }
+
+                _progressBar.Style = ProgressBarStyle.Marquee;
+                _progressBar.Visible = true;
+                Application.DoEvents();
+                try
+                {
+                    var itemsByKey = _main.TagSearcher.FindBySpoolIds(_matchedPkgIds);
+                    _scopeKeys = _scopeFilter.Apply(doc, scope, itemsByKey);
+                }
+                finally
+                {
+                    _progressBar.Visible = false;
+                    _progressBar.Style = ProgressBarStyle.Blocks;
+                }
+            }
+
+            _scopePanel.SetCurrentScope(scope);
+            UpdateTabCounts();
+            FilterList();
+            UpdateStats();
+        }
+
+        /// <summary>After 가시화 적용 the matched set is fresh — silently recompute the applied scope.</summary>
+        private void ReapplyCurrentScope(Autodesk.Navisworks.Api.Document doc)
+        {
+            var scope = _scopePanel.CurrentScope;
+            if (scope == MatchScope.FullModel) { _scopeKeys = null; return; }
+            var itemsByKey = _main.TagSearcher.FindBySpoolIds(_matchedPkgIds);
+            _scopeKeys = _scopeFilter.Apply(doc, scope, itemsByKey);
+        }
+
+        private void UpdateTabCounts()
+        {
+            bool hasApplied = _matchedPkgIds.Count > 0 || _unmatchedPkgIds.Count > 0;
+            if (!hasApplied) return;
+            int matchedInScope = _scopeKeys == null
+                ? _matchedPkgIds.Count
+                : _matchedPkgIds.Count(id => _scopeKeys.Contains(id));
+            int total = _scopeKeys == null ? _packages.Count : _packages.Count(p => InScope(p.TestPkgId));
+            _tabFilter.TabPages[0].Text = $"전체 ({total})";
+            _tabFilter.TabPages[1].Text = $"매칭 ({matchedInScope})";
+            _tabFilter.TabPages[2].Text = $"미매칭 ({_unmatchedPkgIds.Count})";
         }
 
         private void BtnReset_Click(object sender, EventArgs e)
@@ -401,6 +495,10 @@ namespace NavisVisualizer.UI
             else if (tabIndex == 2 && _unmatchedPkgIds.Count > 0)
                 filtered = filtered.Where(p => _unmatchedPkgIds.Contains(p.TestPkgId));
 
+            // Aggregation scope (matched rows only; unmatched rows are unjudgeable)
+            if (_scopeKeys != null)
+                filtered = filtered.Where(p => InScope(p.TestPkgId));
+
             if (!string.IsNullOrEmpty(keyword))
                 filtered = filtered.Where(p => p.TestPkgId.ToUpperInvariant().Contains(keyword)
                     || (p.SystemNo ?? "").ToUpperInvariant().Contains(keyword));
@@ -433,6 +531,7 @@ namespace NavisVisualizer.UI
         {
             var referenceDate = _dtpReference.Value;
             var counts = _packages
+                .Where(p => InScope(p.TestPkgId))
                 .GroupBy(p => p.GetStageAtDate(referenceDate))
                 .ToDictionary(g => g.Key, g => g.Count());
 
@@ -445,8 +544,16 @@ namespace NavisVisualizer.UI
             }
 
             string line2 = "";
-            if (result != null && result.MatchedCount > 0)
-                line2 = $"매칭 {result.MatchedCount} / 미매칭 {result.UnmatchedCount}";
+            bool hasApplied = _matchedPkgIds.Count > 0 || _unmatchedPkgIds.Count > 0;
+            if (hasApplied)
+            {
+                int matchedInScope = _scopeKeys == null
+                    ? _matchedPkgIds.Count
+                    : _matchedPkgIds.Count(id => _scopeKeys.Contains(id));
+                line2 = $"매칭 {matchedInScope} / 미매칭 {_unmatchedPkgIds.Count}";
+                if (_scopeKeys != null)
+                    line2 += $" ({MatchScopeInfo.Label(_scopePanel.CurrentScope)} 기준, 미매칭은 전체)";
+            }
             _lblStats.Text = string.Join("  ", parts)
                            + (!string.IsNullOrEmpty(line2) ? $"\n{line2}" : "");
         }

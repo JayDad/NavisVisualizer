@@ -42,11 +42,13 @@ namespace NavisVisualizer.UI
         private CheckBox _chkFocus;
         private bool _focusOn;
         private bool _suppressFocusCheck;
-        private CheckBox _chkVisibleOnly;
-        private bool _visibleOnly;
-        private bool _suppressVisibleCheck;
-        private Button _btnRefreshVisible;
         private Button _btnSelCables;
+
+        // Aggregation scope (매칭 집계 범위) — replaces the old "보이는 것만" checkbox.
+        // null = 전체 모델 (no filtering). Judged per node via its box marker(s).
+        private ScopePanel _scopePanel;
+        private readonly ScopeFilter _scopeFilter;
+        private HashSet<string> _scopeNodeIds;
 
         private string _statsBase = "로드된 데이터 없음";
         private string _visDiag = "";
@@ -71,6 +73,7 @@ namespace NavisVisualizer.UI
         {
             _main = main;
             _colorSettings = CloneDefaults(ColorSetting.CableDefaults);
+            _scopeFilter = new ScopeFilter(main.SectionSvc);
             InitializeComponent();
             this.HandleDestroyed += (s, e) => UnsubscribeSelection();
         }
@@ -97,20 +100,21 @@ namespace NavisVisualizer.UI
             _btnViewpoint    = new Button { Text = "Viewpoint 저장", Width = 120 };
             _btnNwd          = new Button { Text = "NWD Export",     Width = 110 };
             _chkFocus          = new CheckBox { Text = "필터 포커스", AutoSize = true, Padding = new Padding(6, 5, 6, 0) };
-            _chkVisibleOnly    = new CheckBox { Text = "보이는 것만", AutoSize = true, Padding = new Padding(6, 5, 6, 0) };
-            _btnRefreshVisible = new Button { Text = "새로고침", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(6, 0, 6, 0) };
             _btnSelCables      = new Button { Text = "선택(3D/목록) Cable ↑", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(6, 0, 6, 0) };
             _btnApply.Click                += BtnApply_Click;
             _btnReset.Click                += BtnReset_Click;
             _btnViewpoint.Click            += BtnViewpoint_Click;
             _btnNwd.Click                  += BtnNwd_Click;
             _chkFocus.CheckedChanged       += ChkFocus_CheckedChanged;
-            _chkVisibleOnly.CheckedChanged += ChkVisibleOnly_CheckedChanged;
-            _btnRefreshVisible.Click       += BtnRefreshVisible_Click;
             _btnSelCables.Click            += (s, e) => ShowCablesForSelectedNodes();
-            // Top row: action buttons. Bottom row: filter checkboxes + 새로고침 + 선택Cable (flow break).
-            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnReset, _btnViewpoint, _btnNwd, _chkFocus, _chkVisibleOnly, _btnRefreshVisible, _btnSelCables });
+            // Top row: action buttons. Bottom row: 필터 포커스 + 선택Cable (flow break).
+            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnReset, _btnViewpoint, _btnNwd, _chkFocus, _btnSelCables });
             btnPanel.SetFlowBreak(_btnNwd, true);
+
+            // Aggregation scope group — absorbs the old "보이는 것만" checkbox + 새로고침
+            // ([적용] with the same scope re-reads the current section/hide/selection state).
+            _scopePanel = new ScopePanel { Dock = DockStyle.Fill };
+            _scopePanel.ApplyRequested += (s, e) => ApplyScope();
 
             _progressBar = new ProgressBar { Dock = DockStyle.Fill, Height = 12, Visible = false };
             _lblStats = new Label { Dock = DockStyle.Fill, Text = "로드된 데이터 없음", AutoSize = false, Height = 54 };
@@ -195,6 +199,7 @@ namespace NavisVisualizer.UI
             layout.Controls.Add(_progressBar);
             layout.Controls.Add(_lblStats);
             layout.Controls.Add(searchPanel);
+            layout.Controls.Add(_scopePanel);
             layout.Controls.Add(_tabFilter);
             var routeHeader = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 26, AutoSize = false };
             routeHeader.Controls.Add(new Label { Text = "Cable 목록 (행 클릭 → Route 하이라이트)", Font = new Font(Font, FontStyle.Bold), AutoSize = true, Padding = new Padding(0, 5, 0, 0) });
@@ -299,6 +304,10 @@ namespace NavisVisualizer.UI
                     _lblFile.Text = Path.GetFileName(dlg.FileName);
                     _matchedNodeIds.Clear();
                     _unmatchedNodeIds.Clear();
+                    _scopeFilter.Reset();
+                    _scopeNodeIds = null;
+                    _visDiag = "";
+                    _scopePanel.ResetToFullModel();
                     BuildCableRoutes();
                     FilterList();
                     UpdateStats();
@@ -314,9 +323,11 @@ namespace NavisVisualizer.UI
         {
             if (_nodes.Count == 0) { MessageBox.Show("Excel을 먼저 로드하세요."); return; }
             var lines = new List<string>();
+            lines.Add($"집계 범위,{MatchScopeInfo.Label(_scopePanel.CurrentScope)}");
             lines.Add("Node ID,Cable Count,Total Design,Total Pulled,Overall %,Stage,Matched");
             foreach (var n in _nodes)
             {
+                if (_scopeNodeIds != null && !_scopeNodeIds.Contains(n.NodeId)) continue;
                 var stage = n.GetStage();
                 string stageLabel = CableStageInfo.Labels.TryGetValue(stage, out var lbl) ? lbl : stage.ToString();
                 bool matched = _matchedNodeIds.Count == 0 || _matchedNodeIds.Contains(n.NodeId);
@@ -386,9 +397,9 @@ namespace NavisVisualizer.UI
 
             int hiddenCount = _main.OverrideEngine.HideUnmatchedCableBoxes(doc, _matchedNodeIds);
 
-            _tabFilter.TabPages[0].Text = $"전체 ({_nodes.Count})";
-            _tabFilter.TabPages[1].Text = $"매칭 ({_matchedNodeIds.Count})";
-            _tabFilter.TabPages[2].Text = $"미매칭 ({_unmatchedNodeIds.Count})";
+            // Hidden/matched state changed → scope verdicts are stale
+            _scopeFilter.Invalidate();
+            ReapplyCurrentScope(doc);
 
             SetFocusChecked(false);
 
@@ -403,7 +414,9 @@ namespace NavisVisualizer.UI
             if (doc == null) return;
             _main.OverrideEngine.Reset(doc);
             SetFocusChecked(false);
-            SetVisibleOnlyChecked(false);
+            _scopeFilter.Reset();
+            _scopeNodeIds = null;
+            _scopePanel.ResetToFullModel();
             _statsBase = "전체 초기화 완료";
             _visDiag = "";
             RefreshStatsLabel();
@@ -448,100 +461,80 @@ namespace NavisVisualizer.UI
             _focusOn = value;
         }
 
-        private void ChkVisibleOnly_CheckedChanged(object sender, EventArgs e)
-        {
-            if (_suppressVisibleCheck) return;
+        // ----- 매칭 집계 범위 (aggregation scope) -----
 
-            if (_chkVisibleOnly.Checked)
+        /// <summary>
+        /// Node ID → its box marker ModelItems (empty list when the box is missing in
+        /// the model — such nodes are never in a non-FullModel scope, same as the old
+        /// "보이는 것만" behaviour). Unlike the tag tabs, the judgement covers ALL nodes,
+        /// matched or not, because the box existence itself decides visibility.
+        /// </summary>
+        private Dictionary<string, List<ModelItem>> BuildScopeItemsByKey()
+        {
+            var search = _main.CableBoxSearcher.FindBySpoolIds(
+                _nodes.Select(n => CableNodeData.NormalizeId(n.NodeId)).Distinct());
+
+            var itemsByKey = new Dictionary<string, List<ModelItem>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var node in _nodes)
+            {
+                if (itemsByKey.ContainsKey(node.NodeId)) continue;
+                itemsByKey[node.NodeId] = search.TryGetValue(CableNodeData.NormalizeId(node.NodeId), out var items)
+                    ? items
+                    : new List<ModelItem>();
+            }
+            return itemsByKey;
+        }
+
+        /// <summary>
+        /// Scope [적용]: run the judgement for the selected radio, then re-aggregate.
+        /// Re-applying the same scope re-reads the current section/hide/selection state
+        /// (this replaces the old 새로고침 button — no auto change events are hooked).
+        /// </summary>
+        private void ApplyScope()
+        {
+            var scope = _scopePanel.SelectedScope;
+            if (scope == MatchScope.FullModel)
+            {
+                _scopeNodeIds = null;
+                _visDiag = "";
+                _scopeFilter.SetFullModel();
+            }
+            else
             {
                 var doc = _main.GetDocument();
                 if (doc == null || !_main.CableBoxSearcher.IsIndexBuilt)
                 {
                     MessageBox.Show("먼저 적용을 실행해 박스 인덱스를 빌드하세요.");
-                    SetVisibleOnlyChecked(false); // revert without re-entering
                     return;
                 }
-            }
-            _visibleOnly = _chkVisibleOnly.Checked;
-            FilterList();
-        }
 
-        /// <summary>
-        /// Re-evaluate the lists against the *current* section/hide state. There is no
-        /// auto event for section or visibility changes, so after sectioning or hiding
-        /// in Navisworks the user clicks this to refresh.
-        /// </summary>
-        private void BtnRefreshVisible_Click(object sender, EventArgs e)
-        {
+                _progressBar.Style = ProgressBarStyle.Marquee;
+                _progressBar.Visible = true;
+                Application.DoEvents();
+                try
+                {
+                    _scopeNodeIds = _scopeFilter.Apply(doc, scope, BuildScopeItemsByKey());
+                    _visDiag = _scopeFilter.Diagnostics;
+                }
+                finally
+                {
+                    _progressBar.Visible = false;
+                    _progressBar.Style = ProgressBarStyle.Blocks;
+                }
+            }
+
+            _scopePanel.SetCurrentScope(scope);
             FilterList();
             RefreshFocusIfActive();
         }
 
-        /// <summary>Set the checkbox state without firing the CheckedChanged side effects.</summary>
-        private void SetVisibleOnlyChecked(bool value)
+        /// <summary>After 적용 the matched/hidden state is fresh — silently recompute the applied scope.</summary>
+        private void ReapplyCurrentScope(Document doc)
         {
-            _suppressVisibleCheck = true;
-            _chkVisibleOnly.Checked = value;
-            _suppressVisibleCheck = false;
-            _visibleOnly = value;
-        }
-
-        /// <summary>
-        /// Node IDs whose box (a point marker; we test its bounding-box center) is
-        /// currently on screen: not hidden AND inside every active section plane.
-        /// A node with multiple boxes counts as visible if ANY box center is visible.
-        /// Returns null when the filter is off or cannot be evaluated (→ no filtering).
-        /// </summary>
-        private HashSet<string> ComputeVisibleNodeIds()
-        {
-            _visDiag = "";
-            if (!_visibleOnly) return null;
-
-            var doc = _main.GetDocument();
-            if (doc == null || !_main.CableBoxSearcher.IsIndexBuilt)
-            {
-                _visDiag = "보이는것만: 모델/인덱스 없음 → 필터 미적용";
-                return null;
-            }
-
-            var planes = _main.SectionSvc.GetActiveClipPlanes(doc);
-
-            var search = _main.CableBoxSearcher.FindBySpoolIds(
-                _nodes.Select(n => CableNodeData.NormalizeId(n.NodeId)).Distinct());
-
-            int nodesWithBox = 0, hiddenAll = 0, clippedAll = 0;
-            var visible = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var node in _nodes)
-            {
-                string key = CableNodeData.NormalizeId(node.NodeId);
-                if (!search.TryGetValue(key, out var items) || items.Count == 0)
-                    continue; // no box in model → not on screen
-
-                nodesWithBox++;
-                bool anyVisible = false, anyNotHidden = false;
-                foreach (var item in items)
-                {
-                    if (SectionService.IsEffectivelyHidden(item)) continue;
-                    anyNotHidden = true;
-                    BoundingBox3D bbox;
-                    try { bbox = item.BoundingBox(); }
-                    catch { continue; }
-                    if (bbox == null) continue;
-                    if (_main.SectionSvc.IsPointVisible(bbox.Center, planes))
-                    {
-                        anyVisible = true;
-                        break;
-                    }
-                }
-
-                if (anyVisible) visible.Add(node.NodeId);
-                else if (!anyNotHidden) hiddenAll++;   // every box hidden
-                else clippedAll++;                      // not hidden but outside section
-            }
-
-            _visDiag = $"보이는것만 진단: 박스노드 {nodesWithBox}, 활성평면 {planes.Count}, "
-                     + $"숨김제외 {hiddenAll}, 단면제외 {clippedAll}, 표시 {visible.Count}";
-            return visible;
+            var scope = _scopePanel.CurrentScope;
+            if (scope == MatchScope.FullModel) { _scopeNodeIds = null; return; }
+            _scopeNodeIds = _scopeFilter.Apply(doc, scope, BuildScopeItemsByKey());
+            _visDiag = _scopeFilter.Diagnostics;
         }
 
         private void RefreshFocusIfActive()
@@ -665,8 +658,9 @@ namespace NavisVisualizer.UI
         }
 
         /// <summary>
-        /// Refresh the 전체/매칭/미매칭 tab labels. With "보이는 것만" on, counts become
-        /// "화면표시/전체" so the user sees the numbers shrink as the section clips nodes.
+        /// Refresh the 전체/매칭/미매칭 tab labels. With a non-FullModel scope applied,
+        /// counts become "범위내/전체" so the user sees the numbers shrink as the scope
+        /// (section, hide, selection) excludes nodes.
         /// </summary>
         private void UpdateTabCounts(HashSet<string> visibleNodeIds)
         {
@@ -700,7 +694,7 @@ namespace NavisVisualizer.UI
             string keyword = _txtSearch?.Text?.Trim().ToUpperInvariant() ?? "";
             int tabIndex = _tabFilter.SelectedIndex;
 
-            var visibleNodeIds = ComputeVisibleNodeIds();
+            var visibleNodeIds = _scopeNodeIds;
             UpdateTabCounts(visibleNodeIds);
 
             var filtered = _nodes.AsEnumerable();
@@ -774,7 +768,7 @@ namespace NavisVisualizer.UI
                 if (tabIndex == 2 && _unmatchedNodeIds.Count > 0 &&
                     nodes.Any(n => _matchedNodeIds.Contains(n))) continue;
 
-                // 보이는 것만: keep a cable if any node on its route is currently visible.
+                // Aggregation scope: keep a cable if any node on its route is in scope.
                 if (visibleNodeIds != null && !nodes.Any(n => visibleNodeIds.Contains(n)))
                     continue;
 
@@ -997,11 +991,12 @@ namespace NavisVisualizer.UI
             RefreshStatsLabel();
         }
 
-        /// <summary>Compose the stats label = base apply stats + (보이는것만 진단 when active).</summary>
+        /// <summary>Compose the stats label = base apply stats + (범위 진단 when a scope is active).</summary>
         private void RefreshStatsLabel()
         {
+            bool scopeActive = _scopePanel != null && _scopePanel.CurrentScope != MatchScope.FullModel;
             _lblStats.Text = _statsBase
-                + (_visibleOnly && !string.IsNullOrEmpty(_visDiag) ? $"\n{_visDiag}" : "");
+                + (scopeActive && !string.IsNullOrEmpty(_visDiag) ? $"\n{_visDiag}" : "");
         }
 
         // ----- Bidirectional selection sync -----
