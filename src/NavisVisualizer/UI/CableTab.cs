@@ -284,9 +284,9 @@ namespace NavisVisualizer.UI
         private void IncrementalUpdate(string stageKey)
         {
             var doc = _main.GetDocument();
-            if (doc == null || !_main.OverrideEngine.HasCachedData) return;
+            if (doc == null || !_main.OverrideEngine.HasCachedData(VisualModule.Cable)) return;
             if (Enum.TryParse<CableStage>(stageKey, out var stage) && _colorSettings.TryGetValue(stage, out var setting))
-                _main.OverrideEngine.UpdateStageColor(doc, stageKey, setting);
+                _main.OverrideEngine.UpdateStageColor(doc, VisualModule.Cable, stageKey, setting);
         }
 
         private void BtnLoad_Click(object sender, EventArgs e)

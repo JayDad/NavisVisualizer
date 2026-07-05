@@ -73,7 +73,9 @@ ComApiBridge.State (InwOpState10)
 
 노드당 `-BOX`가 2개 이상이면 박스 생성 매크로 오류 의심. `ModelItemSearcher.GetEntriesWithMultipleItems`로 box 인덱스에서 key당 item>1을 뽑아 CSV 출력.
 
-### 6. SQL Server 실적 데이터 소스 — Progress Input 이원화 (우선순위: 높음, 확장설계안)
+### 6. SQL Server 실적 데이터 소스 — Progress Input 이원화 (일부 구현됨 — 잔여는 9번 참조)
+
+> **구현 현황**: OASIS(SQL) 로드는 `SqlLoader` + `DataSourcePanel`(Excel/OASIS 이중 소스 + 적용 기준 라디오 + 비교 출력)로 Spool/Hydrotest/Equipment 3개 탭에 구현·머지됨. 아래 설계안 중 **가시화 버튼 명칭·위치 변경**과 **공종별 게이팅(server.json modules)**, EIT/Cable 이원화는 미적용 — 잔여 항목은 9번에 정리.
 
 **배경**
 현재 실적 입력은 Excel 단일 소스. SQL Server에서 직접 실적을 읽는 옵션을 추가하되 Excel import와 **공존**해야 한다 — 평소엔 서버 데이터로 보다가 필요할 때 Excel import본으로 전환하는 시나리오. 공종(모듈)별 SQL 데이터 구성(테이블/뷰/컬럼)은 추후 별도 확정 예정이므로, 지금은 구성이 어떻게 오든 수용 가능한 구조만 잡아둔다.
@@ -221,10 +223,44 @@ class DataSourceSlot<T>
 
 **방향 제안**: 단기는 CSV 요약 블록(리스트 위에 통계 섹션), 본격 리포트는 `.xlsx` 라이브러리 검증 후 "요약 시트 + 상세 리스트 시트" 2시트 구성. 생산관리자 요구 항목(어떤 통계·어떤 그룹핑)을 먼저 수집해서 확정할 것.
 
+### 9. OASIS(SQL) 연동 잔여 항목
+
+Spool / Hydrotest / Equipment 탭은 OASIS 로드 구현 완료 (`SqlLoader`, 테이블 6개 분석은
+`docs/SQL_DB_CONNECTION_ANALYSIS.md`). 남은 것:
+
+- **EIT Tray**: 트레이 진척 테이블(`Tray Number`/`Install %` 형태)이 DB에 없음 — 확인 대기.
+- **Cable**: `EIT_Cable`에 Node 컬럼 부재. 케이블↔노드 매핑(route detail + 홉 순서 SEQ)
+  테이블이 생겨야 연동 가능. `PULLING LTH` 의미(실적 vs 발주 길이)도 확인 필요
+  (샘플에서 design < pulling인데 Pulling % = 0.0%).
+- **EIT_EQ**: 소비 탭 미정. WRKDTE 단일 단계 + TagSearcher 재사용이 유력.
+- **Spool `FIT-UP`**: 설치 fit-up 단계(Setting↔Welding 사이). SpoolStage 추가 여부 결정 대기 —
+  추가 시 enum/OrderedStages/Labels/ColumnMap/InstallStages/SpoolDefaults 6곳.
+- **Equipment 병합 정책**: 현재 Mech_EQ 우선 + All_EQ 보충(dedupe). 정책 바뀌면
+  `SqlLoader.LoadEquipment`의 테이블 순회 순서만 조정.
+
+### 10. 공종(모듈)별 초기화 — 아이디어 기록 (미구현)
+
+현재 "전체 초기화"는 어느 탭에서 눌러도 `ResetAllPermanentMaterials()` — 모든 공종 색이
+같이 사라진다. 공종별 초기화(`ResetModule`)를 넣으려면:
+
+- API는 지원됨: `DocumentModels.ResetPermanentMaterials(ModelItemCollection)` (아이템 단위 리셋)
+- **최신 캐시가 아니라 "누적 painted 셋"을 리셋해야 함** — 같은 탭에서 적용을 여러 번 하면
+  (기준일 변경, 단계 체크 해제) 이전 적용에서 칠했지만 최신 캐시에 없는 아이템이 생김.
+  모듈별로 `ApplyOverride`에 넘긴 컬렉션을 합집합으로 누적했다가 그걸 리셋.
+- Cable 모듈 리셋은 색 + `RestoreHiddenCableBoxes` + 필터 포커스 상태 + cable 전용 캐시 정리까지.
+- Spool↔Hydrotest 겹침은 유리하게 동작: Spool(하위 노드)만 리셋하면 상위 PKG 오버라이드가
+  다시 드러남 (레이어 벗기기).
+- UI: 각 탭 `[적용] [공종 초기화] [전체 초기화]` 3버튼.
+- 기반은 이미 있음: stage 캐시가 `VisualModule`별로 분리되어 있어 (ColorOverrideEngine)
+  누적 painted 셋만 추가하면 됨.
+
 ## 개발 규칙
 
 - Navisworks Simulate 2022 / .NET Framework 4.8 타겟. `Autodesk.Navisworks.*` DLL은 Windows 설치 경로 참조.
 - 리눅스/맥에서는 `dotnet` 빌드 불가 (COM interop + Windows-only DLL). Windows에서만 컴파일 검증.
+  단, Autodesk 비의존 파일(DataModels/SqlLoader/SqlConnectionSettings/SourceComparer/DataSourcePanel)은
+  `Microsoft.NETFramework.ReferenceAssemblies` 패키지로 리눅스에서도 net48 컴파일 검증 가능.
+- `oasis.config`(DB 암호 포함)는 커밋 금지(.gitignore 등록) — `oasis.config.sample`만 커밋.
 - 새 탭 추가 시 그룹 결정:
   - "digit 포함 DisplayName" 매칭 → `TagSearcher` 재사용
   - 그 외 매칭 전략 → 새 `ModelItemSearcher` 인스턴스 + `ColorOverrideEngine` 생성자에 추가
