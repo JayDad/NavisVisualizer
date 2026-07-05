@@ -262,11 +262,13 @@ namespace NavisVisualizer.Services
 
             foreach (var s in EquipmentStageInfo.OrderedStages)
             {
-                if (s == EquipmentStage.Delivery) continue;
-                string label = EquipmentStageInfo.Labels[s];
+                // "Delivery" 표시명은 위의 DeliveryStatus가 이미 사용 — 날짜는 별도 이름으로.
+                // (OASIS 경로는 Delivered 날짜를 StageDates[Delivery]에 직접 담는다.)
+                string name  = s == EquipmentStage.Delivery ? "DeliveryDate" : s.ToString();
+                string label = s == EquipmentStage.Delivery ? "Delivery 일자" : EquipmentStageInfo.Labels[s];
                 string dateStr = equip.StageDates.TryGetValue(s, out var date) && date.HasValue
                     ? date.Value.ToString("yyyy-MM-dd") : "";
-                AddProp(comState, propVec, bf, s.ToString(), label, dateStr);
+                AddProp(comState, propVec, bf, name, label, dateStr);
             }
 
             return propVec;

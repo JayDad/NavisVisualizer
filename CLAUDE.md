@@ -73,10 +73,28 @@ ComApiBridge.State (InwOpState10)
 
 노드당 `-BOX`가 2개 이상이면 박스 생성 매크로 오류 의심. `ModelItemSearcher.GetEntriesWithMultipleItems`로 box 인덱스에서 key당 item>1을 뽑아 CSV 출력.
 
+### 6. OASIS(SQL) 연동 잔여 항목
+
+Spool / Hydrotest / Equipment 탭은 OASIS 로드 구현 완료 (`SqlLoader`, 테이블 6개 분석은
+`docs/SQL_DB_CONNECTION_ANALYSIS.md`). 남은 것:
+
+- **EIT Tray**: 트레이 진척 테이블(`Tray Number`/`Install %` 형태)이 DB에 없음 — 확인 대기.
+- **Cable**: `EIT_Cable`에 Node 컬럼 부재. 케이블↔노드 매핑(route detail + 홉 순서 SEQ)
+  테이블이 생겨야 연동 가능. `PULLING LTH` 의미(실적 vs 발주 길이)도 확인 필요
+  (샘플에서 design < pulling인데 Pulling % = 0.0%).
+- **EIT_EQ**: 소비 탭 미정. WRKDTE 단일 단계 + TagSearcher 재사용이 유력.
+- **Spool `FIT-UP`**: 설치 fit-up 단계(Setting↔Welding 사이). SpoolStage 추가 여부 결정 대기 —
+  추가 시 enum/OrderedStages/Labels/ColumnMap/InstallStages/SpoolDefaults 6곳.
+- **Equipment 병합 정책**: 현재 Mech_EQ 우선 + All_EQ 보충(dedupe). 정책 바뀌면
+  `SqlLoader.LoadEquipment`의 테이블 순회 순서만 조정.
+
 ## 개발 규칙
 
 - Navisworks Simulate 2022 / .NET Framework 4.8 타겟. `Autodesk.Navisworks.*` DLL은 Windows 설치 경로 참조.
 - 리눅스/맥에서는 `dotnet` 빌드 불가 (COM interop + Windows-only DLL). Windows에서만 컴파일 검증.
+  단, Autodesk 비의존 파일(DataModels/SqlLoader/SqlConnectionSettings/SourceComparer/DataSourcePanel)은
+  `Microsoft.NETFramework.ReferenceAssemblies` 패키지로 리눅스에서도 net48 컴파일 검증 가능.
+- `oasis.config`(DB 암호 포함)는 커밋 금지(.gitignore 등록) — `oasis.config.sample`만 커밋.
 - 새 탭 추가 시 그룹 결정:
   - "digit 포함 DisplayName" 매칭 → `TagSearcher` 재사용
   - 그 외 매칭 전략 → 새 `ModelItemSearcher` 인스턴스 + `ColorOverrideEngine` 생성자에 추가

@@ -15,13 +15,17 @@ namespace NavisVisualizer.UI
         private readonly MainDockablePanel _main;
 
         private List<EquipmentData> _equipments = new List<EquipmentData>();
+        private readonly Dictionary<TabDataSource, List<EquipmentData>> _equipmentsBySource
+            = new Dictionary<TabDataSource, List<EquipmentData>>();
+        private bool _appliedOnce;
+        // 레벨 타겟 인덱스는 태그 셋 기반이라 소스 전환 시 재빌드 필요 (NeedsRebuild는 모델 변경만 감지)
+        private bool _needsIndexRebuild;
         private Dictionary<EquipmentStage, ColorSetting> _colorSettings;
 
         private HashSet<string> _matchedTagNos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private List<string> _unmatchedTagNos = new List<string>();
 
-        private Button _btnLoad;
-        private Label _lblFile;
+        private DataSourcePanel _srcPanel;
         private DateTimePicker _dtpReference;
         private TextBox _txtSearch;
         private TabControl _tabFilter;
@@ -57,9 +61,11 @@ namespace NavisVisualizer.UI
                 Padding = new Padding(4)
             };
 
-            _btnLoad = new Button { Text = "Equipment Excel", Dock = DockStyle.Fill, Height = 30 };
-            _btnLoad.Click += BtnLoad_Click;
-            _lblFile = new Label { Text = "(파일 없음)", Dock = DockStyle.Fill, ForeColor = Color.Gray, AutoSize = false, Height = 18 };
+            _srcPanel = new DataSourcePanel("Equipment Excel 로드");
+            _srcPanel.ExcelLoadClicked    += (s, e) => LoadExcel();
+            _srcPanel.OasisLoadClicked    += (s, e) => LoadOasis();
+            _srcPanel.ActiveSourceChanged += (s, e) => ApplyActiveSourceData(reapply: _appliedOnce);
+            _srcPanel.CompareClicked      += (s, e) => ExportComparison();
 
             var datePanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 28, AutoSize = false };
             var dateLabel = new Label { Text = "기준일:", AutoSize = true, Padding = new Padding(0, 4, 0, 0) };
@@ -134,8 +140,7 @@ namespace NavisVisualizer.UI
 
             _progressBar = new ProgressBar { Dock = DockStyle.Fill, Height = 12, Visible = false };
 
-            layout.Controls.Add(_btnLoad);
-            layout.Controls.Add(_lblFile);
+            layout.Controls.Add(_srcPanel);
             layout.Controls.Add(datePanel);
             layout.Controls.Add(new Label { Text = "단계 & 색상", Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 18 });
             layout.Controls.Add(colorPanel);
@@ -221,7 +226,7 @@ namespace NavisVisualizer.UI
                 _main.OverrideEngine.UpdateStageColor(doc, stageKey, setting);
         }
 
-        private void BtnLoad_Click(object sender, EventArgs e)
+        private void LoadExcel()
         {
             using (var dlg = new OpenFileDialog
             {
@@ -232,23 +237,103 @@ namespace NavisVisualizer.UI
                 if (dlg.ShowDialog() != DialogResult.OK) return;
                 try
                 {
-                    _equipments = ExcelLoader.LoadEquipment(dlg.FileName);
-                    _lblFile.Text = Path.GetFileName(dlg.FileName);
-                    _matchedTagNos.Clear();
-                    _unmatchedTagNos.Clear();
-                    FilterList();
-                    UpdateStats();
+                    var list = ExcelLoader.LoadEquipment(dlg.FileName);
+                    _equipmentsBySource[TabDataSource.Excel] = list;
+                    _srcPanel.SetLoaded(TabDataSource.Excel, list.Count, Path.GetFileName(dlg.FileName));
+                    if (_srcPanel.ActiveSource == TabDataSource.Excel)
+                        ApplyActiveSourceData(reapply: false);
                 }
                 catch (Exception ex)
                 {
+                    _srcPanel.SetFailed(TabDataSource.Excel, "로드 실패");
                     MessageBox.Show($"Excel 로드 실패:\n{ex.Message}", "오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
         }
 
+        private void LoadOasis()
+        {
+            try
+            {
+                var settings = SqlConnectionSettings.Load();
+                var list = SqlLoader.LoadEquipment(settings);
+                _equipmentsBySource[TabDataSource.Oasis] = list;
+                string prj = string.IsNullOrEmpty(settings.ProjectNo) ? "전체" : settings.ProjectNo;
+                _srcPanel.SetLoaded(TabDataSource.Oasis, list.Count,
+                    $"{settings.Database}/{prj} · {DateTime.Now:HH:mm}");
+                if (_srcPanel.ActiveSource == TabDataSource.Oasis)
+                    ApplyActiveSourceData(reapply: false);
+            }
+            catch (Exception ex)
+            {
+                _srcPanel.SetFailed(TabDataSource.Oasis, "로드 실패");
+                MessageBox.Show($"OASIS 로드 실패:\n{ex.Message}", "오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        /// <summary>
+        /// 적용 기준 소스의 리스트로 화면을 전환한다. 매칭 결과는 소스별로 다르므로
+        /// 초기화하고, 적용 이력이 있으면 새 소스 기준으로 색상을 재적용한다.
+        /// 소스가 바뀌면 태그 셋도 달라지므로 레벨 타겟 인덱스는 다음 적용 때
+        /// NeedsRebuild와 무관하게 새 태그로 재빌드한다.
+        /// </summary>
+        private void ApplyActiveSourceData(bool reapply)
+        {
+            _equipments = _equipmentsBySource.TryGetValue(_srcPanel.ActiveSource, out var list)
+                ? list : new List<EquipmentData>();
+            _matchedTagNos.Clear();
+            _unmatchedTagNos.Clear();
+            _tabFilter.TabPages[0].Text = $"전체 ({_equipments.Count})";
+            _tabFilter.TabPages[1].Text = "매칭";
+            _tabFilter.TabPages[2].Text = "미매칭";
+            _needsIndexRebuild = true;
+            FilterList();
+            UpdateStats();
+
+            if (reapply && _equipments.Count > 0 && _main.GetDocument() != null)
+                BtnApply_Click(null, EventArgs.Empty);
+        }
+
+        private void ExportComparison()
+        {
+            if (!_equipmentsBySource.TryGetValue(TabDataSource.Excel, out var excelList) ||
+                !_equipmentsBySource.TryGetValue(TabDataSource.Oasis, out var oasisList))
+            {
+                MessageBox.Show("Excel과 OASIS를 모두 로드해야 비교할 수 있습니다.");
+                return;
+            }
+
+            var referenceDate = _dtpReference.Value;
+            var fields = new List<SourceComparer.Field<EquipmentData>>
+            {
+                new SourceComparer.Field<EquipmentData>("Description", eq => eq.Description ?? ""),
+                new SourceComparer.Field<EquipmentData>("Sub System", eq => eq.SubSystem ?? ""),
+                new SourceComparer.Field<EquipmentData>("RFQ No", eq => eq.RfqNo ?? ""),
+                new SourceComparer.Field<EquipmentData>("Confirmed ETA",
+                    eq => SourceComparer.FormatDate(eq.ConfirmedEta)),
+            };
+            foreach (var stage in EquipmentStageInfo.OrderedStages)
+            {
+                var captured = stage;
+                fields.Add(new SourceComparer.Field<EquipmentData>(EquipmentStageInfo.Labels[captured], eq =>
+                {
+                    eq.StageDates.TryGetValue(captured, out var d);
+                    return SourceComparer.FormatDate(d);
+                }));
+            }
+            fields.Add(new SourceComparer.Field<EquipmentData>($"현재 단계({referenceDate:yyyy-MM-dd})",
+                eq => EquipmentStageInfo.Labels[eq.GetStageAtDate(referenceDate)]));
+
+            var lines = SourceComparer.BuildCsv("Tag No", excelList, oasisList, eq => eq.TagNo, fields);
+            string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
+                $"Equipment_Compare_{DateTime.Now:yyyyMMdd_HHmmss}.csv");
+            File.WriteAllLines(path, lines, new System.Text.UTF8Encoding(true));
+            MessageBox.Show($"비교 결과 저장 완료: {path}");
+        }
+
         private void BtnExport_Click(object sender, EventArgs e)
         {
-            if (_equipments.Count == 0) { MessageBox.Show("Excel을 먼저 로드하세요."); return; }
+            if (_equipments.Count == 0) { MessageBox.Show("데이터를 먼저 로드하세요."); return; }
             var doc = _main.GetDocument();
             var referenceDate = _dtpReference.Value;
 
@@ -300,9 +385,10 @@ namespace NavisVisualizer.UI
             _progressBar.Visible = true;
             Application.DoEvents();
 
-            // Use level-targeted indexing with known tags from Excel
+            // Use level-targeted indexing with known tags from the active source
             var tagSet = new HashSet<string>(_equipments.Select(eq => eq.TagNo));
             _main.EquipmentSearcher.BuildIndexForTags(doc, tagSet);
+            _needsIndexRebuild = false;
 
             _progressBar.Visible = false;
             _progressBar.Style = ProgressBarStyle.Blocks;
@@ -313,10 +399,10 @@ namespace NavisVisualizer.UI
             var doc = _main.GetDocument();
             if (doc == null || _equipments.Count == 0)
             {
-                MessageBox.Show("Excel을 먼저 로드하고 모델을 열어주세요.");
+                MessageBox.Show("데이터를 먼저 로드하고 모델을 열어주세요.");
                 return;
             }
-            if (_main.EquipmentSearcher.NeedsRebuild(doc))
+            if (_needsIndexRebuild || _main.EquipmentSearcher.NeedsRebuild(doc))
                 BuildIndex();
 
             var activeSettings = new Dictionary<EquipmentStage, ColorSetting>();
@@ -337,6 +423,7 @@ namespace NavisVisualizer.UI
             _tabFilter.TabPages[1].Text = $"매칭 ({_matchedTagNos.Count})";
             _tabFilter.TabPages[2].Text = $"미매칭 ({_unmatchedTagNos.Count})";
 
+            _appliedOnce = true;
             UpdateStats(result);
             FilterList();
         }
@@ -346,10 +433,10 @@ namespace NavisVisualizer.UI
             var doc = _main.GetDocument();
             if (doc == null || _equipments.Count == 0)
             {
-                MessageBox.Show("Excel을 먼저 로드하고 모델을 열어주세요.");
+                MessageBox.Show("데이터를 먼저 로드하고 모델을 열어주세요.");
                 return;
             }
-            if (_main.EquipmentSearcher.NeedsRebuild(doc))
+            if (_needsIndexRebuild || _main.EquipmentSearcher.NeedsRebuild(doc))
                 BuildIndex();
 
             try

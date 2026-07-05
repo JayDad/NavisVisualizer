@@ -1,5 +1,9 @@
 # SQL DB 연결 분석 — [Navis] 스키마 6개 테이블 vs 현재 플러그인
 
+> **구현 현황**: 이 분석에 따라 Spool/Hydrotest/Equipment 탭의 OASIS 로더(`SqlLoader`) +
+> 이중 소스 UI(`DataSourcePanel`) + Excel↔OASIS 비교 출력(`SourceComparer`)이 구현됨.
+> 아래 본문은 구현 전 분석 기록. 잔여 항목은 `CLAUDE.md` §6 참조.
+
 > 분석 기준: gist(db3b4194f980b52b03424df3534cdca6)의 테이블 6개 구조/샘플 데이터 ↔ 현재 코드베이스.
 > 모든 판정은 코드 근거(파일:라인)로 검증함. 컬럼명 비교 규칙: `StringComparer.OrdinalIgnoreCase`
 > (대소문자만 무시 — 공백/하이픈/언더스코어는 구분됨).

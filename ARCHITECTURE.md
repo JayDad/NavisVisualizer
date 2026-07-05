@@ -2,12 +2,14 @@
 
 ## Overview
 
-Navisworks Simulate 2022 플러그인. Excel 실적 데이터를 3D 모델에 색상으로 시각화.
+Navisworks Simulate 2022 플러그인. Excel/OASIS(사내 SQL Server) 실적 데이터를 3D 모델에 색상으로 시각화.
 
 ```
-Excel (.xlsx/.xls/.xlsb)
-  → ExcelLoader (ExcelDataReader, 헤더 자동 탐지)
-  → Data Models (날짜 기반 Stage 계산)
+Excel (.xlsx/.xls/.xlsb)          OASIS SQL Server ([Navis] 스키마)
+  → ExcelLoader                     → SqlLoader
+    (ExcelDataReader, 헤더 자동 탐지)   (테이블별 명시 SELECT + 명시 컬럼 매핑)
+              └──────────┬──────────────┘
+  → Data Models (날짜 기반 Stage 계산)   ← 두 로더가 동일 List<T> 반환
   → ModelItemSearcher (DisplayName 인덱싱)
   → ColorOverrideEngine (Stage별 배치 색상 적용)
   → Navisworks 3D View
@@ -40,6 +42,33 @@ Excel (.xlsx/.xls/.xlsb)
 - Spool: "Spool Number", "SpoolId", "Spool No"
 - Hydrotest: "Test Package No.", "TestPkgId"
 - Equipment: "Tag No.", "Tag No"
+
+### 1b. OASIS SQL Loading (`Loaders/SqlLoader.cs`)
+
+- **System.Data.SqlClient** (net48 내장, 추가 패키지·배포 파일 없음)
+- Excel과 달리 헤더 추측 없음 — 테이블별 명시 SELECT + 명시 컬럼→프로퍼티 매핑.
+  컬럼명이 틀리면 SQL Server가 즉시 오류 (조용한 빈 값 문제 원천 차단)
+- 연결 설정: 플러그인 DLL 옆 `oasis.config` (key=value, `oasis.config.sample` 참조).
+  `%APPDATA%\NavisVisualizer\oasis.config` 존재 시 그 파일 우선. 사내망 전용 전제 —
+  **DB 계정은 SELECT 전용 필수**
+- 프로젝트 필터: `project=` 설정 시 WHERE 적용 (EQ 계열 `PJTNO` / Piping 계열 `PRJTNO`)
+- 키 dedupe (첫 행 우선), 날짜는 typed DateTime 그대로 + varchar는 InvariantCulture 우선 파싱
+
+| 탭 | 테이블 | 특이 매핑 |
+|---|---|---|
+| Spool | `[Navis].[Piping_Spool]` | 14 stage 전부. `FIT-UP`(설치 fit-up)은 stage 미정의로 미사용 |
+| Hydrotest | `[Navis].[Piping_HydrotestPKG]` | `PKGNO`→TestPkgId, `Sub-System`→SystemNo, `LINESVC`→LineService |
+| Equipment | `[Navis].[Mech_EQ]` + `[All_EQ]` 병합 (Mech 우선) | TAG NO 선행 `/` 정규화, `Delivered` **날짜**→StageDates[Delivery] 직접 매핑 |
+
+- EIT Tray / Cable 탭은 OASIS 미지원 — 트레이 진척 테이블 부재, EIT_Cable에 Node 매핑 부재
+  (상세: `docs/SQL_DB_CONNECTION_ANALYSIS.md`)
+
+**이중 소스 UI (`UI/DataSourcePanel.cs`)** — Spool/Hydrotest/Equipment 탭 상단 공용 블록:
+- [Excel 로드] [OASIS 로드] + 소스별 ● 상태(건수·출처·시각)
+- "적용 기준" 라디오: 로드된 소스만 활성, 첫 로드 자동 선택. 전환 시 매칭 셋 초기화 +
+  적용 이력이 있으면 자동 재적용 (Equipment는 태그 셋 기반 레벨 타겟 인덱스도 재빌드)
+- [비교 출력]: 둘 다 로드 시 활성. 키 조인 후 Excel에만/OASIS에만/필드 불일치를
+  CSV(UTF-8 BOM)로 바탕화면에 출력 (`Loaders/SourceComparer.cs`) — OASIS 이행 검증용
 
 ### 2. Stage Computation (`Models/DataModels.cs`)
 
