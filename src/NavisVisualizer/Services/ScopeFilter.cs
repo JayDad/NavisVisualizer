@@ -24,8 +24,8 @@ namespace NavisVisualizer.Services
     {
         public static readonly MatchScope[] Ordered =
         {
-            MatchScope.FullModel, MatchScope.ExcludeHidden,
-            MatchScope.ClippingVolume, MatchScope.SelectedItems,
+            MatchScope.FullModel, MatchScope.SelectedItems,
+            MatchScope.ExcludeHidden, MatchScope.ClippingVolume,
         };
 
         public static string Label(MatchScope scope)
@@ -38,23 +38,34 @@ namespace NavisVisualizer.Services
                 default:                        return "전체 모델";
             }
         }
+
+        /// <summary>
+        /// Whether a scope drops rows that have no matched model node.
+        /// Positive-membership scopes (선택 항목, Clipping 영역) require a model
+        /// position — an unmatched row (no node) definitionally cannot be inside the
+        /// selection or clip volume, so it is out of scope. 숨김 제외 is a negative
+        /// filter (only removes hidden items); an unmatched row is not hidden, so it
+        /// stays. 전체 모델 keeps everything. This is why the 미매칭 count shrinks to 0
+        /// under 선택 항목/Clipping but is unaffected by 숨김 제외.
+        /// </summary>
+        public static bool ExcludesUnmatched(MatchScope scope) =>
+            scope == MatchScope.SelectedItems || scope == MatchScope.ClippingVolume;
     }
 
     /// <summary>
     /// Judges which keys of a matched-key → ModelItems map fall inside a scope.
     /// One instance per tab (each tab owns its matched set).
     ///
-    /// Recompute policy: no section/hide/selection change events are hooked, so state
-    /// is re-read only when the user presses the scope [적용] button. Re-applying the
-    /// SAME scope recomputes (that press IS the explicit refresh), while switching to a
-    /// previously computed scope returns the cached set for free. Callers must
-    /// Invalidate() whenever the matched set changes (가시화 적용, data reload).
+    /// Recompute policy: every [적용] recomputes against the CURRENT section/hide/
+    /// selection state. Those states are live and change with no notification to us, so
+    /// verdicts are deliberately NOT cached — a cached result from an earlier press would
+    /// silently go stale (e.g. the clip is released but the old count comes back when the
+    /// user returns to Clipping 영역). The judgement is cheap (matched-node count, not
+    /// geometry), so re-reading on every press is affordable.
     /// </summary>
     public class ScopeFilter
     {
         private readonly SectionService _sectionSvc;
-        private readonly Dictionary<MatchScope, HashSet<string>> _cache
-            = new Dictionary<MatchScope, HashSet<string>>();
 
         public MatchScope CurrentScope { get; private set; } = MatchScope.FullModel;
         public string Diagnostics { get; private set; } = "";
@@ -68,6 +79,7 @@ namespace NavisVisualizer.Services
         /// Returns the keys of <paramref name="itemsByKey"/> that are inside
         /// <paramref name="scope"/>, or null for FullModel (= no filtering).
         /// A key with no items (not found in the model) is never in scope.
+        /// Always recomputes — see the class-level recompute policy.
         /// </summary>
         public HashSet<string> Apply(Document doc, MatchScope scope,
             Dictionary<string, List<ModelItem>> itemsByKey)
@@ -79,36 +91,26 @@ namespace NavisVisualizer.Services
                 return null;
             }
 
-            // Switching to a previously computed scope → cached. Same-scope re-apply
-            // → recompute against the current section/hide/selection state.
-            if (scope != CurrentScope && _cache.TryGetValue(scope, out var cached))
-            {
-                CurrentScope = scope;
-                return cached;
-            }
-
             var result = Compute(doc, scope, itemsByKey);
-            _cache[scope] = result;
             CurrentScope = scope;
             return result;
         }
 
-        /// <summary>Drop all cached verdicts. Call when the matched set changes.</summary>
-        public void Invalidate() => _cache.Clear();
+        /// <summary>
+        /// Retained for callers that signal "the matched set changed". Verdicts are no
+        /// longer cached (each Apply recomputes), so this only clears diagnostics.
+        /// </summary>
+        public void Invalidate() => Diagnostics = "";
 
-        /// <summary>Back to FullModel without recomputing; cached scopes stay usable.</summary>
+        /// <summary>Back to FullModel without judging anything.</summary>
         public void SetFullModel()
         {
             CurrentScope = MatchScope.FullModel;
             Diagnostics = "";
         }
 
-        /// <summary>Full reset (cache + scope). Call on data reload.</summary>
-        public void Reset()
-        {
-            _cache.Clear();
-            SetFullModel();
-        }
+        /// <summary>Full reset (scope back to FullModel). Call on data reload.</summary>
+        public void Reset() => SetFullModel();
 
         private HashSet<string> Compute(Document doc, MatchScope scope,
             Dictionary<string, List<ModelItem>> itemsByKey)

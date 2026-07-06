@@ -6,7 +6,7 @@ using NavisVisualizer.Services;
 namespace NavisVisualizer.UI
 {
     /// <summary>
-    /// "매칭 집계 범위" group: mutually exclusive scope radios + an [적용] button.
+    /// "현황 집계 범위" group: mutually exclusive scope radios + an [적용] button.
     /// Radios only select — nothing is recomputed until [적용] raises
     /// <see cref="ApplyRequested"/> (deliberate: scope judgement cost is paid only on
     /// an explicit user action). The scope actually reflected on screen is shown in
@@ -95,6 +95,6 @@ namespace NavisVisualizer.UI
         }
 
         private static string Title(MatchScope scope) =>
-            $"매칭 집계 범위 (현재: {MatchScopeInfo.Label(scope)})";
+            $"현황 집계 범위 (현재: {MatchScopeInfo.Label(scope)})";
     }
 }

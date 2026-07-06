@@ -24,7 +24,7 @@ namespace NavisVisualizer.UI
         private HashSet<string> _matchedPkgIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private List<string> _unmatchedPkgIds = new List<string>();
 
-        // Aggregation scope (매칭 집계 범위) — null = 전체 모델 (no filtering)
+        // Aggregation scope (현황 집계 범위) — null = 전체 모델 (no filtering)
         private ScopePanel _scopePanel;
         private readonly ScopeFilter _scopeFilter;
         private HashSet<string> _scopeKeys;
@@ -426,15 +426,26 @@ namespace NavisVisualizer.UI
             FilterList();
         }
 
-        // ----- 매칭 집계 범위 (aggregation scope) -----
+        // ----- 현황 집계 범위 (aggregation scope) -----
 
         /// <summary>
-        /// A row passes the scope when no scope is active, when it is unmatched
-        /// (no model position — spatially unjudgeable, always shown), or when its
-        /// matched node was judged inside the scope.
+        /// A row passes the active scope. No scope → all pass. A matched row passes
+        /// when its node was judged inside the scope. An unmatched row (no model node)
+        /// passes only for scopes that keep unmatched rows (전체 모델, 숨김 제외); under
+        /// a positive-membership scope (선택 항목, Clipping 영역) it has no position to
+        /// be inside, so it is dropped — this is why 미매칭 goes to 0 there.
         /// </summary>
-        private bool InScope(string id) =>
-            _scopeKeys == null || !_matchedPkgIds.Contains(id) || _scopeKeys.Contains(id);
+        private bool InScope(string id)
+        {
+            if (_scopeKeys == null) return true;
+            if (_matchedPkgIds.Contains(id)) return _scopeKeys.Contains(id);
+            return !MatchScopeInfo.ExcludesUnmatched(_scopePanel.CurrentScope);
+        }
+
+        /// <summary>Unmatched rows that survive the active scope (all or none for these tabs).</summary>
+        private int UnmatchedInScope() =>
+            _scopeKeys != null && MatchScopeInfo.ExcludesUnmatched(_scopePanel.CurrentScope)
+                ? 0 : _unmatchedPkgIds.Count;
 
         /// <summary>Scope [적용]: run the judgement for the selected radio, then re-aggregate.</summary>
         private void ApplyScope()
@@ -499,7 +510,7 @@ namespace NavisVisualizer.UI
             int total = _scopeKeys == null ? _packages.Count : _packages.Count(p => InScope(p.TestPkgId));
             _tabFilter.TabPages[0].Text = $"전체 ({total})";
             _tabFilter.TabPages[1].Text = $"매칭 ({matchedInScope})";
-            _tabFilter.TabPages[2].Text = $"미매칭 ({_unmatchedPkgIds.Count})";
+            _tabFilter.TabPages[2].Text = $"미매칭 ({UnmatchedInScope()})";
         }
 
         private void BtnReset_Click(object sender, EventArgs e)
@@ -649,9 +660,13 @@ namespace NavisVisualizer.UI
                 int matchedInScope = _scopeKeys == null
                     ? _matchedPkgIds.Count
                     : _matchedPkgIds.Count(id => _scopeKeys.Contains(id));
-                line2 = $"매칭 {matchedInScope} / 미매칭 {_unmatchedPkgIds.Count}";
+                line2 = $"매칭 {matchedInScope} / 미매칭 {UnmatchedInScope()}";
                 if (_scopeKeys != null)
-                    line2 += $" ({MatchScopeInfo.Label(_scopePanel.CurrentScope)} 기준, 미매칭은 전체)";
+                {
+                    string note = MatchScopeInfo.ExcludesUnmatched(_scopePanel.CurrentScope)
+                        ? "" : ", 미매칭은 전체";
+                    line2 += $" ({MatchScopeInfo.Label(_scopePanel.CurrentScope)} 기준{note})";
+                }
             }
             _lblStats.Text = string.Join("  ", parts)
                            + (!string.IsNullOrEmpty(line2) ? $"\n{line2}" : "");
