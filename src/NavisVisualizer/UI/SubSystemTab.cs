@@ -59,6 +59,7 @@ namespace NavisVisualizer.UI
         private Panel _stagePanel;
         private Panel _progressPanel;
         private TextBox _txtFilter;
+        private Button _btnDelayed;
         private ListView _lvAll;
         private ListView _lvSelected;
         private Label _lblSelCount;
@@ -252,12 +253,24 @@ namespace NavisVisualizer.UI
             grid.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));
 
-            // 좌측 상단: 검색 (코드 + 설명 매칭)
+            // 좌측 상단: 검색 (코드 + 설명 매칭) + MCC 지연 일괄 선택
             var leftTop = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = Padding.Empty };
             leftTop.Controls.Add(new Label { Text = "검색:", AutoSize = true, Padding = new Padding(0, 6, 0, 0) });
-            _txtFilter = new TextBox { Width = 130, Margin = new Padding(0, 3, 3, 0) };
+            _txtFilter = new TextBox { Width = 88, Margin = new Padding(0, 3, 3, 0) };
             _txtFilter.TextChanged += (s, e) => RefreshLeftList();
             leftTop.Controls.Add(_txtFilter);
+            _btnDelayed = new Button
+            {
+                Text = "MCC 지연 담기",
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Padding = new Padding(6, 0, 6, 0),
+                Margin = new Padding(0, 2, 0, 0),
+                BackColor = Color.FromArgb(250, 224, 224),
+                Enabled = false, // 마스터 로드 후에만 활성 (지연 판정에 계획일 필요)
+            };
+            _btnDelayed.Click += (s, e) => AddDelayedToSelection();
+            leftTop.Controls.Add(_btnDelayed);
 
             var rightTopLbl = new Label
             {
@@ -392,8 +405,9 @@ namespace NavisVisualizer.UI
                 _appliedOnce = false;
                 _appliedMode = null;
 
-                // 단계 모드는 마스터가 있을 때만
+                // 단계 모드·MCC 지연 담기는 마스터가 있을 때만
                 _rdoByStage.Enabled = _master != null;
+                _btnDelayed.Enabled = _master != null;
                 if (_master == null && _rdoByStage.Checked)
                     _rdoByProgress.Checked = true;
 
@@ -529,6 +543,32 @@ namespace NavisVisualizer.UI
             RefreshRightList();
             UpdateSelCount();
             UpdateStats();
+        }
+
+        /// <summary>MCC 지연 담기 — 기준일 기준 지연 sub-system을 우측 선택 박스에 일괄 추가.</summary>
+        private void AddDelayedToSelection()
+        {
+            if (_master == null)
+            {
+                MessageBox.Show("Sub-system 마스터가 없어 MCC 지연을 판정할 수 없습니다.");
+                return;
+            }
+            var referenceDate = _dtpReference.Value;
+            var delayed = _subSystemNames
+                .Where(n => { var m = GetMaster(n); return m != null && m.IsDelayed(referenceDate); })
+                .ToList();
+            if (delayed.Count == 0)
+            {
+                MessageBox.Show($"기준일({referenceDate:yyyy-MM-dd}) 기준 MCC 지연 Sub-system이 없습니다.");
+                return;
+            }
+            int added = delayed.Count(n => !_selected.Contains(n));
+            foreach (var n in delayed) AddSelection(n);
+            RefreshLeftList();
+            RefreshRightList();
+            UpdateSelCount();
+            UpdateStats();
+            _lblStats.Text += $"\nMCC 지연 {delayed.Count}개 선택에 추가 (신규 {added}개)";
         }
 
         /// <summary>▶▶ — 현재 표시(필터 통과)된 항목 전부 추가.</summary>
