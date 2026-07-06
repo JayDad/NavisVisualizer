@@ -92,7 +92,7 @@ namespace NavisVisualizer.UI
             var loadPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 32, AutoSize = false };
             _btnLoad = new Button { Text = "Excel Import", Width = 130, Height = 28 };
             _btnLoad.Click += BtnLoad_Click;
-            var btnTemplate = new Button { Text = "Input Template 출력", Width = 140, Height = 28 };
+            var btnTemplate = new Button { Text = "Template 출력", Width = 110, Height = 28 };
             btnTemplate.Click += (s, e) => ExportInputTemplate();
             loadPanel.Controls.Add(_btnLoad);
             loadPanel.Controls.Add(btnTemplate);
@@ -127,7 +127,7 @@ namespace NavisVisualizer.UI
 
             var searchPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 28, AutoSize = false };
             searchPanel.Controls.Add(new Label { Text = "검색(Node/Cable No/Equip No):", AutoSize = true, Padding = new Padding(0, 4, 0, 0) });
-            _txtSearch = new TextBox { Width = 180, Text = "" };
+            _txtSearch = new TextBox { Width = 210, Text = "" };
             _txtSearch.TextChanged += (s, e) => { FilterList(); RefreshFocusIfActive(); };
             searchPanel.Controls.Add(_txtSearch);
             var btnExport = new Button { Text = "매칭 Status 출력", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(6, 0, 6, 0) };

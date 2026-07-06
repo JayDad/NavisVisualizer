@@ -99,10 +99,10 @@ namespace NavisVisualizer.UI
             // Search box
             var searchPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 28, AutoSize = false };
             searchPanel.Controls.Add(new Label { Text = "검색:", AutoSize = true, Padding = new Padding(0, 4, 0, 0) });
-            _txtSearch = new TextBox { Width = 160, Text = "" };
+            _txtSearch = new TextBox { Width = 210, Text = "" };
             _txtSearch.TextChanged += (s, e) => FilterList();
             searchPanel.Controls.Add(_txtSearch);
-            var btnExport = new Button { Text = "매칭 Status 출력", Width = 110, Height = 23 };
+            var btnExport = new Button { Text = "매칭 Status 출력", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(8, 1, 8, 1) };
             btnExport.Click += BtnExport_Click;
             searchPanel.Controls.Add(btnExport);
 

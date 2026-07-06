@@ -12,8 +12,8 @@ namespace NavisVisualizer.UI
 
     /// <summary>
     /// 탭 상단의 데이터 소스 블록:
-    ///   [Excel Import] [Input Template 출력]  ● 파일명 · N건
-    ///   [OASIS 로드]                          ○ (미로드)
+    ///   [Excel Import] [Template 출력]  ● 파일명 · N건
+    ///   [OASIS 로드]                    ○ (미로드)
     ///   적용 기준: (•)Excel ( )OASIS   [비교 출력]
     ///
     /// Excel 버튼 문구는 전 탭 "Excel Import"로 통일 (탭 이름이 공종을 이미 말해줌).
@@ -68,7 +68,7 @@ namespace NavisVisualizer.UI
                 RowCount = 3,
             };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100));
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 105));
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 18));
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
@@ -77,7 +77,7 @@ namespace NavisVisualizer.UI
 
             _btnExcel = new Button { Text = "Excel Import", Dock = DockStyle.Fill, Height = 24 };
             _btnExcel.Click += (s, e) => ExcelLoadClicked?.Invoke(this, EventArgs.Empty);
-            _btnTemplate = new Button { Text = "Input Template 출력", Dock = DockStyle.Fill, Height = 24 };
+            _btnTemplate = new Button { Text = "Template 출력", Dock = DockStyle.Fill, Height = 24 };
             _btnTemplate.Click += (s, e) => TemplateClicked?.Invoke(this, EventArgs.Empty);
             _dotExcel = MakeDot();
             _lblExcel = MakeStatusLabel();
