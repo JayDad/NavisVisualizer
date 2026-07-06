@@ -8,6 +8,16 @@ using NwColor = Autodesk.Navisworks.Api.Color;
 
 namespace NavisVisualizer.Visualizers
 {
+    /// <summary>색상 오버라이드를 소유하는 공종(탭) 식별자 — stage 캐시의 1차 키.</summary>
+    public enum VisualModule
+    {
+        Hydrotest,
+        Spool,
+        Equipment,
+        EitTray,
+        Cable,
+    }
+
     public class ColorOverrideEngine
     {
         // Spool / Hydrotest / EIT Tray share the same full-walk index.
@@ -17,8 +27,11 @@ namespace NavisVisualizer.Visualizers
         private readonly ModelItemSearcher _equipmentSearcher;
         private readonly ModelItemSearcher _cableBoxSearcher;
 
-        private Dictionary<string, ModelItemCollection> _cachedStageCollections
-            = new Dictionary<string, ModelItemCollection>();
+        // Stage 컬렉션 캐시를 모듈별로 격리한다. 단일 캐시에 enum.ToString() 키로
+        // 넣으면 "NotStarted"(전 모듈), "Setting"(Spool/Equipment) 등이 충돌해
+        // 한 탭의 증분 색 변경이 다른 탭이 칠한 컬렉션을 덧칠하는 간섭이 생긴다.
+        private readonly Dictionary<VisualModule, Dictionary<string, ModelItemCollection>> _stageCollectionsByModule
+            = new Dictionary<VisualModule, Dictionary<string, ModelItemCollection>>();
 
         // Cable-specific caches (per-node items, per-node stage, hidden, last settings)
         private Dictionary<string, ModelItemCollection> _cableNodeItems
@@ -34,6 +47,16 @@ namespace NavisVisualizer.Visualizers
             _tagSearcher = tagSearcher;
             _equipmentSearcher = equipmentSearcher;
             _cableBoxSearcher = cableBoxSearcher;
+        }
+
+        private Dictionary<string, ModelItemCollection> ModuleCache(VisualModule module)
+        {
+            if (!_stageCollectionsByModule.TryGetValue(module, out var cache))
+            {
+                cache = new Dictionary<string, ModelItemCollection>();
+                _stageCollectionsByModule[module] = cache;
+            }
+            return cache;
         }
 
         public OverrideResult ApplyHydrotest(
@@ -68,13 +91,14 @@ namespace NavisVisualizer.Visualizers
                 list.AddRange(items);
             }
 
-            _cachedStageCollections.Clear();
+            var cache = ModuleCache(VisualModule.Hydrotest);
+            cache.Clear();
 
             foreach (var kv in stageItems)
             {
                 string key = kv.Key.ToString();
                 var collection = ToCollection(kv.Value);
-                _cachedStageCollections[key] = collection;
+                cache[key] = collection;
 
                 if (colorSettings.TryGetValue(kv.Key, out var setting))
                     ApplyOverride(doc, collection, setting);
@@ -115,13 +139,14 @@ namespace NavisVisualizer.Visualizers
                 list.AddRange(items);
             }
 
-            _cachedStageCollections.Clear();
+            var cache = ModuleCache(VisualModule.Spool);
+            cache.Clear();
 
             foreach (var kv in stageItems)
             {
                 string key = kv.Key.ToString();
                 var collection = ToCollection(kv.Value);
-                _cachedStageCollections[key] = collection;
+                cache[key] = collection;
 
                 if (colorSettings.TryGetValue(kv.Key, out var setting))
                     ApplyOverride(doc, collection, setting);
@@ -163,11 +188,14 @@ namespace NavisVisualizer.Visualizers
             }
 
             // Equipment: matched nodes only (same as Spool/Hydrotest)
+            var cache = ModuleCache(VisualModule.Equipment);
+            cache.Clear();
+
             foreach (var kv in stageItems)
             {
                 string key = kv.Key.ToString();
                 var collection = ToCollection(kv.Value);
-                _cachedStageCollections[key] = collection;
+                cache[key] = collection;
 
                 if (colorSettings.TryGetValue(kv.Key, out var setting))
                     ApplyOverride(doc, collection, setting);
@@ -209,13 +237,14 @@ namespace NavisVisualizer.Visualizers
                 list.AddRange(items);
             }
 
-            _cachedStageCollections.Clear();
+            var cache = ModuleCache(VisualModule.EitTray);
+            cache.Clear();
 
             foreach (var kv in stageItems)
             {
                 string key = kv.Key.ToString();
                 var collection = ToCollection(kv.Value);
-                _cachedStageCollections[key] = collection;
+                cache[key] = collection;
 
                 if (colorSettings.TryGetValue(kv.Key, out var setting))
                     ApplyOverride(doc, collection, setting);
@@ -271,12 +300,13 @@ namespace NavisVisualizer.Visualizers
                 list.AddRange(items);
             }
 
-            _cachedStageCollections.Clear();
+            var cache = ModuleCache(VisualModule.Cable);
+            cache.Clear();
             foreach (var kv in stageItems)
             {
                 string key = kv.Key.ToString();
                 var collection = ToCollection(kv.Value);
-                _cachedStageCollections[key] = collection;
+                cache[key] = collection;
 
                 if (colorSettings.TryGetValue(kv.Key, out var setting))
                     ApplyOverride(doc, collection, setting);
@@ -370,9 +400,10 @@ namespace NavisVisualizer.Visualizers
             if (!_cableFilterFocusActive || _cableLastSettings == null) return;
             // Re-apply each stage's setting to its cached collection — this resets
             // transparency back to stage defaults across all matched boxes.
+            var cache = ModuleCache(VisualModule.Cable);
             foreach (var kv in _cableLastSettings)
             {
-                if (_cachedStageCollections.TryGetValue(kv.Key.ToString(), out var collection))
+                if (cache.TryGetValue(kv.Key.ToString(), out var collection))
                     ApplyOverride(doc, collection, kv.Value);
             }
             _cableFilterFocusActive = false;
@@ -383,21 +414,25 @@ namespace NavisVisualizer.Visualizers
 
         public IEnumerable<string> GetMatchedCableNodeIds() => _cableNodeItems.Keys;
 
-        public bool UpdateStageColor(Document doc, string stageKey, ColorSetting setting)
+        /// <summary>모듈 자기 캐시의 stage 컬렉션에만 색/투명도를 재적용한다.</summary>
+        public bool UpdateStageColor(Document doc, VisualModule module, string stageKey, ColorSetting setting)
         {
-            if (!_cachedStageCollections.TryGetValue(stageKey, out var collection))
+            if (!_stageCollectionsByModule.TryGetValue(module, out var cache))
+                return false;
+            if (!cache.TryGetValue(stageKey, out var collection))
                 return false;
             ApplyOverride(doc, collection, setting);
             return true;
         }
 
-        public bool HasCachedData => _cachedStageCollections.Count > 0;
+        public bool HasCachedData(VisualModule module) =>
+            _stageCollectionsByModule.TryGetValue(module, out var cache) && cache.Count > 0;
 
         public void Reset(Document doc)
         {
             doc.Models.ResetAllPermanentMaterials();
             RestoreHiddenCableBoxes(doc);
-            _cachedStageCollections.Clear();
+            _stageCollectionsByModule.Clear();
             _cableNodeItems.Clear();
             _cableNodeStages.Clear();
             _cableLastSettings = null;

@@ -1,0 +1,21 @@
+# OASIS(사내 SQL Server) 연결 설정
+# 이 파일을 "oasis.config"로 복사해 플러그인 DLL과 같은 폴더에 배포한다.
+# 개인 PC별 예외: %APPDATA%\NavisVisualizer\oasis.config 가 있으면 그 파일이 우선.
+#
+# 보안: 사내망 전용 전제로 암호를 평문 보관한다.
+#       DB 계정은 반드시 SELECT 전용(읽기 전용)으로 발급할 것.
+#       예: GRANT SELECT ON SCHEMA::Navis TO navis_ro;
+
+server=192.168.0.0
+database=TEST_NAVIS
+user=navis_ro
+password=CHANGE_ME
+
+# PJTNO/PRJTNO 필터. 비우면 전체 프로젝트 로드.
+project=Q557
+
+# Windows 인증을 쓰려면 아래 주석 해제 (user/password 무시됨)
+#integrated=true
+
+# 접속 타임아웃(초). 서버 무응답 시 Navisworks가 이 시간만큼 멈추므로 짧게 유지.
+#timeout=5

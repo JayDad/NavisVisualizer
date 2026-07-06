@@ -73,10 +73,200 @@ ComApiBridge.State (InwOpState10)
 
 노드당 `-BOX`가 2개 이상이면 박스 생성 매크로 오류 의심. `ModelItemSearcher.GetEntriesWithMultipleItems`로 box 인덱스에서 key당 item>1을 뽑아 CSV 출력.
 
+### 6. SQL Server 실적 데이터 소스 — Progress Input 이원화 (일부 구현됨 — 잔여는 9번 참조)
+
+> **구현 현황**: OASIS(SQL) 로드는 `SqlLoader` + `DataSourcePanel`(Excel/OASIS 이중 소스 + 적용 기준 라디오 + 비교 출력)로 Spool/Hydrotest/Equipment 3개 탭에 구현·머지됨. 아래 설계안 중 **가시화 버튼 명칭·위치 변경**과 **공종별 게이팅(server.json modules)**, EIT/Cable 이원화는 미적용 — 잔여 항목은 9번에 정리.
+
+**배경**
+현재 실적 입력은 Excel 단일 소스. SQL Server에서 직접 실적을 읽는 옵션을 추가하되 Excel import와 **공존**해야 한다 — 평소엔 서버 데이터로 보다가 필요할 때 Excel import본으로 전환하는 시나리오. 공종(모듈)별 SQL 데이터 구성(테이블/뷰/컬럼)은 추후 별도 확정 예정이므로, 지금은 구성이 어떻게 오든 수용 가능한 구조만 잡아둔다.
+
+**핵심 설계 원칙: 두 소스가 같은 데이터 모델로 수렴**
+`ExcelLoader`는 ExcelDataReader로 `DataSet`을 만든 뒤 행→모델 매핑을 한다. SQL도 `SqlDataAdapter.Fill` → `DataTable`이므로 **두 경로가 DataTable에서 합류**한다:
+
+```
+Excel 파일 ──ExcelDataReader──▶ DataTable ─┐
+                                           ├─▶ RowMapper (헤더 키워드 매핑, 기존 로직 추출) ─▶ List<SpoolData> 등
+SQL Server ──SqlDataAdapter──▶ DataTable ─┘
+```
+
+- `ExcelLoader.LoadXxx`의 "헤더 탐지 + 행→모델 변환" 부분을 모듈별 `RowMapper`로 추출, `ExcelLoader`와 신규 `SqlServerLoader`가 공유
+- SQL 뷰 컬럼명을 Excel 헤더 키워드와 동일하게 맞추도록 요청하면 매핑 코드 제로 — 다르면 모듈별 컬럼 매핑만 `SqlServerLoader`에 추가
+- 다운스트림(Stage 계산 → Searcher → ColorOverrideEngine)은 `List<XxxData>`만 받으므로 **전혀 수정 없음**
+- 드라이버는 .NET Framework 4.8 내장 `System.Data.SqlClient` 사용 (신규 NuGet 없음 → Navisworks 플러그인 어셈블리 바인딩 리스크 회피)
+
+**명칭: 서버 소스의 사용자 표기는 "OASIS"**
+OASIS가 기간계 시스템이고, 실적이 OASIS → SQL Server view table로 적재되는 구조. 사용자는 "서버"보다 OASIS를 인지하므로 UI 표기는 전부 OASIS로: 라디오 `OASIS`, 버튼 `[Load OASIS Data]`, 미구성 라벨 `— (OASIS 구성 대기)`. 내부 코드 식별자도 `Oasis`로 통일 (연결 대상이 SQL Server라는 사실은 구현 세부 — `SqlServerLoader` 클래스명은 유지).
+
+**데이터 보관: 탭별 소스 슬롯 2개**
+```csharp
+enum ProgressSource { Excel, Oasis }
+
+class DataSourceSlot<T>
+{
+    public List<T> Data;        // null = 미로드
+    public string Label;        // 파일명 또는 "서버명.DB (쿼리시각)"
+    public DateTime? LoadedAt;
+}
+// 탭 필드: _excelSlot, _serverSlot, _activeSource
+// 기존 _spools 등은 "활성 슬롯의 Data"를 반환하는 프로퍼티로 치환
+```
+두 슬롯 모두 메모리에 유지 → 라디오 전환 시 재로드/재파싱 없이 즉시 스위칭. 한 소스의 로드는 다른 슬롯을 절대 건드리지 않는다 (같은 소스 재로드 시에만 해당 슬롯 갱신).
+
+- **매칭 추적(`_matchedIds`/`_unmatchedIds`)도 슬롯별 보관** — 소스 전환 시 그 소스로 마지막 적용했을 때의 매칭 O/X가 그대로 복원되어야 함 (전환으로 매칭 표시가 사라지거나 타 소스 결과와 섞이면 안 됨)
+- **`가시화 적용` = 사실상 그래픽 변경만**: 모델 인덱스는 모델 트리에서 만들므로 소스와 무관 — `NeedsRebuild`(모델 변경) 시에만 재빌드, 소스 전환은 재빌드 사유 아님. Stage 계산·매칭 조회는 메모리 연산이라 즉시 수준, 시간은 색상 override 배치가 씀
+- **Equipment 예외**: `BuildIndexForTags`가 *데이터의 태그 목록*으로 인덱스를 만들므로, 활성 소스의 태그 중 인덱스에 없는 태그가 있으면 재빌드 필요. 적용 시 "활성 데이터 태그 ⊄ 인덱스 키" 체크 추가 (같은 공종 데이터라 태그 대부분 겹침 → 실제 재빌드는 드묾)
+
+**UI: Progress Input 그룹 (탭 공통 → `ProgressInputPanel` UserControl로 추출)**
+현재 `_btnLoad` + `_lblFile` 자리를 GroupBox로 교체. 5개 탭이 중복 구현하지 말고 공용 컨트롤 1개(`SourceChanged` / `ExcelLoadRequested` / `ServerLoadRequested` 이벤트)로:
+
+```
+┌ 실적 데이터 (Progress Input) ─────────────────────────────────┐
+│ ◉ Excel    [Excel Import]       ● Spool.xlsx · 1,234건 · 14:02 │
+│ ○ OASIS    [Load OASIS Data]    ○ (미로드)                     │
+└────────────────────────────────────────────────────────────────┘
+```
+
+- **라디오버튼** (체크박스 아님 — 가시화 기준 소스는 한 번에 하나이므로 상호배타)
+- 상태 표시: `○ (미로드)` 회색 / `● 라벨·건수·시각` 검정 / `✕ 로드 실패` 빨강
+- 라디오는 해당 슬롯이 로드된 경우에만 활성화. 로드 성공 시 그 소스를 자동으로 활성 소스로 전환
+- 소스 전환 시: 리스트/통계/매칭 추적 즉시 갱신. 색상이 이미 적용된 상태면 "⚠ 화면 색상은 {이전 소스} 기준 — 가시화 적용 필요" 표시 (자동 재적용은 안 함 — 대형 모델에서 의도치 않은 수 초 블로킹 방지)
+- 서버 로드는 네트워크 대기가 있으므로 기존 `_progressBar`(marquee) 재사용 + 버튼 비활성화, `SqlCommand.CommandTimeout` 명시
+
+**서버 연결 구성 (공종별 구성 확정 전까지 열어둘 부분)**
+- 연결 정보(서버/DB/인증)는 전 모듈 공유, 모듈별로는 쿼리(뷰 이름)만 다르다고 가정
+- `%APPDATA%\NavisVisualizer\server.json` + Tools 탭에 "서버 설정" 버튼(연결 테스트 포함)
+- 공종별 구성이 뷰가 아니라 조인/파라미터(프로젝트 코드 등)로 오면 모듈별 쿼리 빌더로 확장 — `SqlServerLoader.LoadXxx(ServerConfig)` 시그니처는 동일 유지
+
+**공종별 OASIS 버튼 활성화 게이팅**
+구성은 공종별로 순차 확정되므로 활성화도 **탭(공종) 단위**로 게이팅한다. 전역 on/off 아님 — Spool 구성만 확정된 시점엔 Spool 탭 OASIS 버튼만 살아있어야 함.
+- `server.json`의 `modules` 섹션에 해당 공종 엔트리(뷰/쿼리)가 존재할 때만 그 탭의 `[Load OASIS Data]` 버튼 + OASIS 라디오 활성화
+- 미구성 탭은 버튼 비활성 + 상태 라벨 `— (OASIS 구성 대기)` 회색 표시. 버튼을 숨기지 않고 비활성으로 두는 이유: 기능이 존재한다는 것을 사용자가 인지하도록
+- `ProgressInputPanel`에 `ServerConfigured` bool 프로퍼티 하나로 노출 — 각 탭이 config 로드 후 세팅
+- Phase 1에서는 `modules` 섹션이 비어 있으므로 전 탭 자동 비활성 (별도 코드 불필요, 게이팅 로직 자체가 Phase 1 범위)
+
+**가시화 버튼 명칭 + 위치 변경 (전 탭 공통)**
+| 현재 | 변경안 | 이유 |
+|------|--------|------|
+| `적용` | `가시화 적용` | 무엇을 적용하는지 명시 |
+| `전체 초기화` | `가시화 해제` | "초기화"가 데이터/설정 리셋으로 오독됨. 실제 동작은 색상 override 제거 = 모델 원상복구 |
+
+- 위치: 핵심 기능이므로 하단 버튼 행에서 **Progress Input 그룹 직하단**으로 승격, 2버튼 전용 행(강조 스타일). 데이터 로드/전환 → 가시화가 한 시선 흐름, 소스 전환 경고(⚠)와 인접해 "다시 적용" 동선 단축
+- 보조 기능(`속성 쓰기` / `Viewpoint 저장` / `NWD Export`)은 기존 하단 행 유지 — 출력/배포용이라 사용 빈도 낮음
+- 전 공종 동일 배치 (`ProgressInputPanel` + 가시화 버튼 행을 한 세트로 두는 것도 고려 — 탭별 배치 편차 원천 차단)
+
+**리스트 영역 UI 카피 (전 탭 공통)**
+- 매칭/미매칭 필터 탭 옆에 회색 remark 추가: `※ 실적 데이터와 매칭 여부를 뜻함`
+- `매칭 Status 출력` → `매칭 Status 엑셀 출력` (실제 출력물은 Excel에서 바로 열리는 CSV — 사용자 관점 명칭)
+
+**상단 데이터 로드 UI 카피 (구현됨)**
+- Excel 로드 버튼 문구 전 탭 `Excel Import`로 통일 (탭 이름이 공종을 이미 말해줌)
+- 그 우측에 `[Template 출력]` 버튼 — 공종별 입력 양식 CSV를 바탕화면에 저장 (`Loaders/InputTemplate.cs`).
+  헤더는 ExcelLoader 탐지 키워드와 1:1 — **로더의 FindColumn 후보를 바꾸면 InputTemplate도 같이 갱신할 것**.
+  CSV는 ExcelDataReader가 못 읽으므로 안내문에 "작성 후 .xlsx로 저장" 명시 (안내문 행은 헤더 자동 탐지에 안 걸림)
+
+**단계 나누기**
+- **Phase 1 (SQL 구성 확정 전 착수 가능)**: RowMapper 추출 리팩터링 + `DataSourceSlot` 도입 + `ProgressInputPanel` UI (Server 버튼은 "구성 대기" 비활성) + 버튼 명칭 변경
+- **Phase 2 (공종별 구성 수령 후)**: `SqlServerLoader` 구현 + 서버 설정 UI + 모듈별 쿼리/컬럼 매핑
+
+**트레이드오프 / 결정 보류**
+- Cable Pull 탭은 행→노드/케이블 다대다 재구성 로직이 로더에 얽혀 있어 RowMapper 추출 난도가 높음 → Phase 1은 Spool/Hydrotest/Equipment/EIT 4개 먼저, Cable은 구성 수령 후 판단
+- 서버 인증 방식(Windows 통합 vs SQL 계정)과 접속 정보 배포 방식은 현장 IT 정책 확인 필요
+
+### 7. 매칭 현황 집계 범위(Scope) 필터 — 전 공종 확장 (구현됨 — Windows 검증 대기)
+
+**구현 현황**: `Services/ScopeFilter.cs`(판정+캐시) + `UI/ScopePanel.cs`(라디오 그룹 UserControl) 공용 컴포넌트로 구현, 5개 탭 전부 배선 완료. Cable 탭 `보이는 것만` 체크박스 + `새로고침` 버튼은 라디오 그룹으로 흡수(제거). 구현 중 확정한 세부:
+- **미매칭 행은 범위 미적용** — 모델에 없어 위치 판정이 불가하므로 어떤 범위에서도 리스트에 항상 표시. 현황 라벨에 `(… 기준, 미매칭은 전체)` 병기로 명시
+- **같은 범위로 재[적용] = 재계산** (단면/숨김/선택 변경 후 새로고침 역할 — Cable의 구 새로고침 버튼 대체), 다른 범위로 전환 = 캐시 사용
+- `선택 항목` 판정은 선택된 노드의 조상/자손 양방향 포함. `HashSet<ModelItem>` 동등성 의존 — **Windows 실측 검증 필요**
+- CSV 출력: 첫 행에 `집계 범위,{라벨}` + 범위 내 행만 출력
+- Cable만 범위 판정을 매칭 여부와 무관하게 전 노드에 적용 (box 존재 자체가 판정 대상 — 기존 보이는 것만과 동일 의미론)
+
+**배경**
+현재 clipping/가시성 기준 필터는 Cable Pull 탭의 `보이는 것만` 체크박스에만 존재 (비숨김 + 활성 clip plane 내부 판정, `SectionService` 재사용 — 4번 항목). 다른 공종의 매칭 리스트/현황도 clipping area 등 범위 기준으로 좁혀 보고 싶다는 요구. 단, 기준이 여러 개(숨김/clipping/선택)라 사용자가 헷갈리지 않도록 명시적 선택 UI가 필요.
+
+**UI: "매칭 집계 범위 (현재: xxx)" 라디오 그룹 + [적용] 버튼**
+- ◉ **전체 모델** (default — 현행 NWD 파일 기준 그대로, 기존 사용에 영향 없음)
+- ○ **숨김 제외** — hidden 처리 항목 제외 (`SectionService.IsEffectivelyHidden`, 조상까지)
+- ○ **Clipping 영역** — 활성 단면 평면 내부만 (clip plane COM 판정 재사용)
+- ○ **선택 항목** — 현재 3D 선택 기준
+
+**적용 버튼 방식 (확정)**: 라디오는 선택만 하고, 그룹 내 `[적용]` 버튼을 눌러야 재집계 실행. 라디오 클릭 자체는 아무 계산도 하지 않음 → 전환 성능 이슈 원천 차단. 현재 화면의 집계 기준은 그룹 제목 `(현재: 전체 모델)`에 항상 표시 — 라디오 선택과 실제 반영 상태가 달라도 사용자가 혼동하지 않음. 현황 라벨에도 `(Excel · Clipping 영역 기준)`처럼 소스+범위 병기.
+
+**설계 주의**
+- 범위는 **리스트/통계 집계에만** 우선 적용, 색칠(가시화) 범위 연동은 별도 검토 — "집계는 좁혔는데 색은 전체에 칠해짐" 혼동 방지를 위해 현황 라벨에 `(Clipping 영역 기준)` 등 범위 병기
+- 판정 위치: Cable은 box 마커 중심점이었고, Spool/Equipment 등은 매칭 노드의 `BoundingBox().Center`로 동일 판정 가능
+- Cable 탭 기존 `보이는 것만` 체크박스와의 관계 정리 필요 — 라디오 그룹으로 흡수(체크박스 제거)가 일관적
+- `매칭 Status 엑셀 출력`도 선택된 범위를 따름 + CSV 헤더에 범위 표기
+
+**성능 설계**
+재계산은 `[적용]` 클릭 시에만 실행. 비용의 본질: 판정 대상이 전체 모델 geometry(수백만)가 아니라 **매칭된 노드(리스트 행 수 = 수천 건)뿐**이라 1회 작업량 자체가 작다. 범위별 비용:
+- `전체 모델`: 판정 없음 (즉시). `선택 항목`: CurrentSelection 조회 1회 (즉시)
+- `숨김 제외`: 노드당 조상 체인 `IsHidden` 검사 — Cable `보이는 것만`에서 이미 수천 건 실사용 중, 문제 없음
+- `Clipping 영역`: clip plane COM 읽기는 **전환당 1회**(노드당 아님), 노드당은 `BoundingBox().Center`(Navisworks가 미리 계산해 둔 값 조회) + 평면식 산술 → 수천 건이면 밀리초~수백 ms 예상
+
+안전장치:
+- **범위별 판정 결과 캐시** (`Dictionary<scope, HashSet<nodeKey>>`) — 같은 범위로 되돌아오는 전환은 0 비용. 캐시 무효화는 `가시화 적용`/`새로고침`/모델 변경 시에만 (단면·숨김 변경 자동 감지 이벤트는 안 걸므로 — 4번 항목과 동일 정책)
+- 첫 판정이 오래 걸리는 대형 케이스 대비: 기존 marquee `_progressBar` 재사용 (UI freeze 인상 방지)
+- Windows 실측으로 확정 필요 (특히 만 건 이상 매칭 시 BoundingBox 일괄 조회)
+
+### 8. 매칭 Status 엑셀 출력 — 리포트화 (검토 단계)
+
+**배경**
+현재 출력은 행 단위 CSV 리스트(항목·Stage·매칭 O/X)뿐. 생산관리자들은 리스트에 더해 **통계치가 리포트 형태로 정리된 출력물**을 원함. Excel 출력 전반의 개선 검토 필요.
+
+**리포트에 담을 후보 (요구사항 수집 후 확정)**
+- 헤더 블록: 공종 / 기준일 / 데이터 소스(Excel 파일명 or OASIS 쿼리시각) / 집계 범위(7번) / 출력 시각
+- Stage별 건수·비율 (+ 누적 %), 매칭/미매칭 건수·매칭률
+- 구역·시스템 단위 소계 (Spool: ISO 그룹별, Equipment: Sub System별 등 — 공종별 그룹 축 상이)
+- 주간 증감(전주 대비)은 스냅샷 보관이 필요해서 범위가 큼 — 별도 판단
+
+**구현 옵션**
+| 방식 | 장점 | 단점 |
+|------|------|------|
+| CSV 상단에 요약 블록 추가 | 의존성 제로, 즉시 가능 | 서식 없음, 시트 분리 불가 |
+| `.xlsx` 생성 (ClosedXML/EPPlus 등) | 다중 시트(요약+리스트)·서식·차트 | NuGet 추가 — Navisworks 플러그인 어셈블리 바인딩 검증 필요 |
+| Excel 템플릿(.xltx)에 값만 채움 | 서식은 템플릿이 담당, 코드 단순 | 템플릿 파일 배포 관리 필요 |
+
+**방향 제안**: 단기는 CSV 요약 블록(리스트 위에 통계 섹션), 본격 리포트는 `.xlsx` 라이브러리 검증 후 "요약 시트 + 상세 리스트 시트" 2시트 구성. 생산관리자 요구 항목(어떤 통계·어떤 그룹핑)을 먼저 수집해서 확정할 것.
+
+### 9. OASIS(SQL) 연동 잔여 항목
+
+Spool / Hydrotest / Equipment 탭은 OASIS 로드 구현 완료 (`SqlLoader`, 테이블 6개 분석은
+`docs/SQL_DB_CONNECTION_ANALYSIS.md`). 남은 것:
+
+- **EIT Tray**: 트레이 진척 테이블(`Tray Number`/`Install %` 형태)이 DB에 없음 — 확인 대기.
+- **Cable**: `EIT_Cable`에 Node 컬럼 부재. 케이블↔노드 매핑(route detail + 홉 순서 SEQ)
+  테이블이 생겨야 연동 가능. `PULLING LTH` 의미(실적 vs 발주 길이)도 확인 필요
+  (샘플에서 design < pulling인데 Pulling % = 0.0%).
+- **EIT_EQ**: 소비 탭 미정. WRKDTE 단일 단계 + TagSearcher 재사용이 유력.
+- **Spool `FIT-UP`**: 설치 fit-up 단계(Setting↔Welding 사이). SpoolStage 추가 여부 결정 대기 —
+  추가 시 enum/OrderedStages/Labels/ColumnMap/InstallStages/SpoolDefaults 6곳.
+- **Equipment 병합 정책**: 현재 Mech_EQ 우선 + All_EQ 보충(dedupe). 정책 바뀌면
+  `SqlLoader.LoadEquipment`의 테이블 순회 순서만 조정.
+
+### 10. 공종(모듈)별 초기화 — 아이디어 기록 (미구현)
+
+현재 "전체 초기화"는 어느 탭에서 눌러도 `ResetAllPermanentMaterials()` — 모든 공종 색이
+같이 사라진다. 공종별 초기화(`ResetModule`)를 넣으려면:
+
+- API는 지원됨: `DocumentModels.ResetPermanentMaterials(ModelItemCollection)` (아이템 단위 리셋)
+- **최신 캐시가 아니라 "누적 painted 셋"을 리셋해야 함** — 같은 탭에서 적용을 여러 번 하면
+  (기준일 변경, 단계 체크 해제) 이전 적용에서 칠했지만 최신 캐시에 없는 아이템이 생김.
+  모듈별로 `ApplyOverride`에 넘긴 컬렉션을 합집합으로 누적했다가 그걸 리셋.
+- Cable 모듈 리셋은 색 + `RestoreHiddenCableBoxes` + 필터 포커스 상태 + cable 전용 캐시 정리까지.
+- Spool↔Hydrotest 겹침은 유리하게 동작: Spool(하위 노드)만 리셋하면 상위 PKG 오버라이드가
+  다시 드러남 (레이어 벗기기).
+- UI: 각 탭 `[적용] [공종 초기화] [전체 초기화]` 3버튼.
+- 기반은 이미 있음: stage 캐시가 `VisualModule`별로 분리되어 있어 (ColorOverrideEngine)
+  누적 painted 셋만 추가하면 됨.
+
 ## 개발 규칙
 
 - Navisworks Simulate 2022 / .NET Framework 4.8 타겟. `Autodesk.Navisworks.*` DLL은 Windows 설치 경로 참조.
 - 리눅스/맥에서는 `dotnet` 빌드 불가 (COM interop + Windows-only DLL). Windows에서만 컴파일 검증.
+  단, Autodesk 비의존 파일(DataModels/SqlLoader/SqlConnectionSettings/SourceComparer/DataSourcePanel)은
+  `Microsoft.NETFramework.ReferenceAssemblies` 패키지로 리눅스에서도 net48 컴파일 검증 가능.
+- `oasis.config`(DB 암호 포함)는 커밋 금지(.gitignore 등록) — `oasis.config.sample`만 커밋.
 - 새 탭 추가 시 그룹 결정:
   - "digit 포함 DisplayName" 매칭 → `TagSearcher` 재사용
   - 그 외 매칭 전략 → 새 `ModelItemSearcher` 인스턴스 + `ColorOverrideEngine` 생성자에 추가
