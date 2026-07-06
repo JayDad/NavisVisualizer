@@ -278,8 +278,11 @@ EquipmentSearcher의 레벨 타겟 인덱스는 건드리지 않음).
   요소 파생 (요소 0건은 회색, 마스터 외 요소 그룹은 "(마스터 외)" + 건수 진단).
   **테이블 미구성이면 요소 파생 목록으로 자동 fallback** + 단계 모드 비활성.
 - **가시화 2모드**: ① Sub-system 단계별 — 선택한 sub-system의 요소 전체가 그 sub-system의
-  마일스톤 단계색(Walkdown/P-MCC/MCC/RFCC/PCC + 미착수, 기준일 역순 스캔)을 받음 (기본,
-  마스터 필요) ② 요소 진행상태별 — 미착수/진행중/완료 3단계 정규화.
+  마일스톤 단계색(Walkdown/P-MCC/MCC/PCC + 미착수, 기준일 역순 스캔)을 받음 (기본,
+  마스터 필요). **별도 RFCC 단계 없음** — MCC(또는 Partial MCC)가 Ready for
+  Commissioning 의미. **마일스톤은 순차 아님** — P-MCC 없이 바로 MCC 가능. 역순 스캔이
+  날짜 보유 여부만 보므로 스킵 자동 허용 (enum 순서 = 달성 수준 랭킹, 시간 순서 아님).
+  ② 요소 진행상태별 — 미착수/진행중/완료 3단계 정규화.
   (초기 구현의 "sub-system별 팔레트 고유색" 모드는 단계별 모드로 대체되어 제거 —
   `SubSystemPalette` 삭제됨.)
 - **선택 UI (dual-list)**: 좌측 검색(코드+설명)+status 테이블(단계/ITR/Punch/요소 병기)
@@ -290,20 +293,23 @@ EquipmentSearcher의 레벨 타겟 인덱스는 건드리지 않음).
 **마스터 테이블 계약 (제안 — DB 생성 시 이 형태로)**
 ```sql
 CREATE TABLE [Navis].[SubSystem_Master](
-  [PJTNO]       varchar(10)   NOT NULL,  -- 프로젝트 필터 (EQ 계열과 동일 컬럼명)
-  [SUB-SYSTEM]  varchar(20)   NOT NULL,  -- 요소 테이블의 SUB-SYSTEM/Sub-System 값과 일치
-  [DESCRIPTION] nvarchar(200) NULL,
-  [Walkdown]    date NULL,               -- 이하 마일스톤 실적일 (지난 날짜 = 달성)
-  [Partial MCC] date NULL,
-  [MCC]         date NULL,
-  [RFCC]        date NULL,
-  [PCC]         date NULL,
-  [ITR TOTAL]   int NULL, [ITR DONE] int NULL,
-  [PUNCH A]     int NULL, [PUNCH B]  int NULL,  -- open punch 수
+  [PJTNO]        varchar(10)   NOT NULL,  -- 프로젝트 필터 (EQ 계열과 동일 컬럼명)
+  [SUB-SYSTEM]   varchar(20)   NOT NULL,  -- 요소 테이블의 SUB-SYSTEM/Sub-System 값과 일치
+  [DESCRIPTION]  nvarchar(200) NULL,
+  [Walkdown]     date NULL,               -- 이하 마일스톤 실적일 (지난 날짜 = 달성)
+  [Partial MCC]  date NULL,               -- 별도 RFCC 없음 — MCC/P-MCC = Ready for Commissioning
+  [MCC]          date NULL,
+  [PCC]          date NULL,
+  [A-ITR TOTAL]  int NULL, [A-ITR DONE]     int NULL,  -- ITR: 카테고리별 전체/완료 수
+  [B-ITR TOTAL]  int NULL, [B-ITR DONE]     int NULL,
+  [C-ITR TOTAL]  int NULL, [C-ITR DONE]     int NULL,
+  [PUNCH A TOTAL] int NULL, [PUNCH A CLOSED] int NULL, -- Punch: 전체/종결 수 (open = 차)
+  [PUNCH B TOTAL] int NULL, [PUNCH B CLOSED] int NULL,
   CONSTRAINT PK_SubSystem_Master PRIMARY KEY ([PJTNO],[SUB-SYSTEM]));
 ```
 - 컬럼명을 바꾸면 `SqlLoader.LoadSubSystemMaster`의 SELECT만 같이 수정 (명시 매핑이라 즉시 오류로 드러남).
 - ITR/Punch가 수치가 아니라 %로 오면 GetInt 대신 ParsePercentage 계열 추가 검토 (§2.2 스케일 함정 참조).
+- 화면 표기는 전부 "완료(종결)/전체" — 좌측 테이블 A-ITR/B-ITR/C-ITR/P.A/P.B 컬럼 + 리포트 요약.
 
 **확장 잔여 (결정/데이터 대기)**
 - **마스터 테이블 실물 생성/적재**: 위 계약으로 DB에 생성 + OASIS 적재 파이프라인은

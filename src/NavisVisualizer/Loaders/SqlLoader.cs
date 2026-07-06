@@ -188,16 +188,18 @@ FROM [Navis].[Piping_HydrotestPKG]";
 
         /// <summary>
         /// Sub-system 마스터 로드 ([Navis].[SubSystem_Master] — 계약은 CLAUDE.md 11번).
-        /// 마일스톤 날짜(Walkdown→PCC) + ITR/Punch 수치. 테이블이 아직 없으면
-        /// SQL Server가 예외를 던진다 — 호출부(SubSystemTab)가 잡아서 "마스터 미구성"
-        /// fallback(요소 파생 목록)으로 전환한다.
+        /// 마일스톤 날짜(Walkdown/Partial MCC/MCC/PCC — 별도 RFCC 없음, MCC 계열이
+        /// Ready for Commissioning 의미) + A/B/C-ITR·A/B Punch 수치(각 Total+완료/종결).
+        /// 테이블이 아직 없으면 SQL Server가 예외를 던진다 — 호출부(SubSystemTab)가
+        /// 잡아서 "마스터 미구성" fallback(요소 파생 목록)으로 전환한다.
         /// </summary>
         public static List<SubSystemMasterData> LoadSubSystemMaster(SqlConnectionSettings settings)
         {
             const string baseSql = @"
 SELECT [SUB-SYSTEM],[DESCRIPTION],
-       [Walkdown],[Partial MCC],[MCC],[RFCC],[PCC],
-       [ITR TOTAL],[ITR DONE],[PUNCH A],[PUNCH B]
+       [Walkdown],[Partial MCC],[MCC],[PCC],
+       [A-ITR TOTAL],[A-ITR DONE],[B-ITR TOTAL],[B-ITR DONE],[C-ITR TOTAL],[C-ITR DONE],
+       [PUNCH A TOTAL],[PUNCH A CLOSED],[PUNCH B TOTAL],[PUNCH B CLOSED]
 FROM [Navis].[SubSystem_Master]";
 
             var masters = new List<SubSystemMasterData>();
@@ -212,15 +214,20 @@ FROM [Navis].[SubSystem_Master]";
                 {
                     SubSystemNo = no,
                     Description = GetString(r, "DESCRIPTION"),
-                    ItrTotal = GetInt(r, "ITR TOTAL"),
-                    ItrDone  = GetInt(r, "ITR DONE"),
-                    PunchA   = GetInt(r, "PUNCH A"),
-                    PunchB   = GetInt(r, "PUNCH B"),
+                    ItrATotal    = GetInt(r, "A-ITR TOTAL"),
+                    ItrADone     = GetInt(r, "A-ITR DONE"),
+                    ItrBTotal    = GetInt(r, "B-ITR TOTAL"),
+                    ItrBDone     = GetInt(r, "B-ITR DONE"),
+                    ItrCTotal    = GetInt(r, "C-ITR TOTAL"),
+                    ItrCDone     = GetInt(r, "C-ITR DONE"),
+                    PunchATotal  = GetInt(r, "PUNCH A TOTAL"),
+                    PunchAClosed = GetInt(r, "PUNCH A CLOSED"),
+                    PunchBTotal  = GetInt(r, "PUNCH B TOTAL"),
+                    PunchBClosed = GetInt(r, "PUNCH B CLOSED"),
                 };
                 m.StageDates[SubSystemStage.Walkdown]   = GetDate(r, "Walkdown");
                 m.StageDates[SubSystemStage.PartialMcc] = GetDate(r, "Partial MCC");
                 m.StageDates[SubSystemStage.Mcc]        = GetDate(r, "MCC");
-                m.StageDates[SubSystemStage.Rfcc]       = GetDate(r, "RFCC");
                 m.StageDates[SubSystemStage.Pcc]        = GetDate(r, "PCC");
                 masters.Add(m);
             });

@@ -188,7 +188,6 @@ namespace NavisVisualizer.Models
                 [SubSystemStage.Walkdown]   = new ColorSetting { DisplayColor = Color.FromArgb(255, 215, 0),   Transparency = 0.0 },
                 [SubSystemStage.PartialMcc] = new ColorSetting { DisplayColor = Color.FromArgb(255, 140, 50),  Transparency = 0.0 },
                 [SubSystemStage.Mcc]        = new ColorSetting { DisplayColor = Color.FromArgb(65, 105, 225),  Transparency = 0.0 },
-                [SubSystemStage.Rfcc]       = new ColorSetting { DisplayColor = Color.FromArgb(138, 43, 226),  Transparency = 0.0 },
                 [SubSystemStage.Pcc]        = new ColorSetting { DisplayColor = Color.FromArgb(0, 128, 0),     Transparency = 0.0 },
             };
 
@@ -525,14 +524,17 @@ namespace NavisVisualizer.Models
     /// <summary>
     /// Sub-system 마스터의 시운전 인계 마일스톤. 날짜 역순 스캔(GetStageAtDate)은
     /// 다른 공종과 동일 패턴 — "지난 날짜 = 달성" 가정.
+    /// 별도 RFCC 단계는 없음 — MCC(또는 Partial MCC)가 Ready for Commissioning 의미.
+    /// 마일스톤은 순차가 아닐 수 있음: P-MCC 없이 바로 MCC로 갈 수 있다. 역순 스캔은
+    /// 날짜 보유 여부만 보므로 중간 단계 스킵을 자연스럽게 허용한다 (MCC 날짜만 있으면
+    /// MCC로 판정 — 이 enum 순서는 시간 순서가 아니라 "달성 수준" 랭킹).
     /// </summary>
     public enum SubSystemStage
     {
         NotStarted,
         Walkdown,     // Walkdown
-        PartialMcc,   // Partial MCC
-        Mcc,          // MCC (Mechanical Completion)
-        Rfcc,         // RFCC (Ready For Commissioning)
+        PartialMcc,   // Partial MCC (부분 RFC)
+        Mcc,          // MCC = Ready for Commissioning
         Pcc,          // PCC
     }
 
@@ -541,7 +543,7 @@ namespace NavisVisualizer.Models
         public static readonly SubSystemStage[] OrderedStages =
         {
             SubSystemStage.Walkdown, SubSystemStage.PartialMcc,
-            SubSystemStage.Mcc, SubSystemStage.Rfcc, SubSystemStage.Pcc
+            SubSystemStage.Mcc, SubSystemStage.Pcc
         };
 
         public static readonly Dictionary<SubSystemStage, string> Labels = new Dictionary<SubSystemStage, string>
@@ -550,14 +552,14 @@ namespace NavisVisualizer.Models
             [SubSystemStage.Walkdown]   = "Walkdown",
             [SubSystemStage.PartialMcc] = "P-MCC",
             [SubSystemStage.Mcc]        = "MCC",
-            [SubSystemStage.Rfcc]       = "RFCC",
             [SubSystemStage.Pcc]        = "PCC",
         };
     }
 
     /// <summary>
     /// Sub-system 마스터 행 ([Navis].[SubSystem_Master] — 계약은 CLAUDE.md 11번).
-    /// 마일스톤 날짜 5개 + ITR/Punch 수치. 선택 테이블·리포트에 status로 병기된다.
+    /// 마일스톤 날짜 4개 + A/B/C-ITR·A/B Punch 수치(각 Total + 완료/종결).
+    /// 선택 테이블·리포트에 status로 병기된다.
     /// </summary>
     public class SubSystemMasterData
     {
@@ -565,10 +567,17 @@ namespace NavisVisualizer.Models
         public string Description { get; set; }
         public Dictionary<SubSystemStage, DateTime?> StageDates { get; set; }
             = new Dictionary<SubSystemStage, DateTime?>();
-        public int? ItrTotal { get; set; }
-        public int? ItrDone { get; set; }
-        public int? PunchA { get; set; }   // open punch A
-        public int? PunchB { get; set; }   // open punch B
+
+        public int? ItrATotal { get; set; }
+        public int? ItrADone { get; set; }
+        public int? ItrBTotal { get; set; }
+        public int? ItrBDone { get; set; }
+        public int? ItrCTotal { get; set; }
+        public int? ItrCDone { get; set; }
+        public int? PunchATotal { get; set; }
+        public int? PunchAClosed { get; set; }   // 종결 수
+        public int? PunchBTotal { get; set; }
+        public int? PunchBClosed { get; set; }
 
         public SubSystemStage GetStageAtDate(DateTime referenceDate)
         {
@@ -581,13 +590,15 @@ namespace NavisVisualizer.Models
             return SubSystemStage.NotStarted;
         }
 
-        /// <summary>테이블/리포트 표기: "완료/전체" (미보유 시 "-").</summary>
-        public string ItrText =>
-            ItrTotal.HasValue ? $"{ItrDone ?? 0}/{ItrTotal}" : "-";
+        /// <summary>테이블/리포트 공통 표기: "완료(종결)/전체" (Total 미보유 시 "-").</summary>
+        public static string Ratio(int? done, int? total) =>
+            total.HasValue ? $"{done ?? 0}/{total}" : "-";
 
-        /// <summary>테이블/리포트 표기: "A{open}·B{open}" (미보유 시 "-").</summary>
-        public string PunchText =>
-            (PunchA.HasValue || PunchB.HasValue) ? $"A{PunchA ?? 0}·B{PunchB ?? 0}" : "-";
+        public string ItrAText => Ratio(ItrADone, ItrATotal);
+        public string ItrBText => Ratio(ItrBDone, ItrBTotal);
+        public string ItrCText => Ratio(ItrCDone, ItrCTotal);
+        public string PunchAText => Ratio(PunchAClosed, PunchATotal);
+        public string PunchBText => Ratio(PunchBClosed, PunchBTotal);
     }
 
     public class CableRecord

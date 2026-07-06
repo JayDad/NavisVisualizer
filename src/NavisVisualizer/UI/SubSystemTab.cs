@@ -295,10 +295,13 @@ namespace NavisVisualizer.UI
                 HideSelection = true,
             };
             _lvAll.Columns.Add("Sub-system", 96);
-            _lvAll.Columns.Add("Description", 110);
-            _lvAll.Columns.Add("단계", 56);
-            _lvAll.Columns.Add("ITR", 52);
-            _lvAll.Columns.Add("Punch", 52);
+            _lvAll.Columns.Add("Description", 105);
+            _lvAll.Columns.Add("단계", 54);
+            _lvAll.Columns.Add("A-ITR", 52);
+            _lvAll.Columns.Add("B-ITR", 52);
+            _lvAll.Columns.Add("C-ITR", 52);
+            _lvAll.Columns.Add("P.A", 48);
+            _lvAll.Columns.Add("P.B", 48);
             _lvAll.Columns.Add("요소", 40);
             _lvAll.DoubleClick += (s, e) => AddHighlightedLeft();
 
@@ -464,8 +467,11 @@ namespace NavisVisualizer.UI
                 var item = new ListViewItem(name) { Tag = name };
                 item.SubItems.Add(desc);
                 item.SubItems.Add(m != null ? SubSystemStageInfo.Labels[m.GetStageAtDate(referenceDate)] : "-");
-                item.SubItems.Add(m?.ItrText ?? "-");
-                item.SubItems.Add(m?.PunchText ?? "-");
+                item.SubItems.Add(m?.ItrAText ?? "-");
+                item.SubItems.Add(m?.ItrBText ?? "-");
+                item.SubItems.Add(m?.ItrCText ?? "-");
+                item.SubItems.Add(m?.PunchAText ?? "-");
+                item.SubItems.Add(m?.PunchBText ?? "-");
                 item.SubItems.Add(count.ToString());
                 if (count == 0) item.ForeColor = Color.Gray;       // 마스터에만 있고 요소 미배정
                 if (_selected.Contains(name)) item.BackColor = PickedBack;
@@ -740,7 +746,7 @@ namespace NavisVisualizer.UI
 
             lines.Add("");
             lines.Add("[Sub-system별 요약]");
-            lines.Add("Sub-system,Description,단계,ITR,Punch,요소,Equipment,Piping,매칭,미매칭,미착수,진행중,완료,완료율(%)");
+            lines.Add("Sub-system,Description,단계,A-ITR,B-ITR,C-ITR,Punch A,Punch B,요소,Equipment,Piping,매칭,미매칭,미착수,진행중,완료,완료율(%)");
 
             int tElems = 0, tEq = 0, tPip = 0, tMatched = 0, tUnmatched = 0, tNs = 0, tIp = 0, tDone = 0;
             bool anyMatchInfo = false;
@@ -777,12 +783,14 @@ namespace NavisVisualizer.UI
                     ? SubSystemStageInfo.Labels[m.GetStageAtDate(referenceDate)]
                     : (_master != null ? "마스터 외" : "-");
                 string doneRate = els.Count > 0 ? (done * 100.0 / els.Count).ToString("F1") : "-";
-                lines.Add($"{Csv(name)},{Csv(m?.Description ?? "")},{Csv(stageLabel)},{Csv(m?.ItrText ?? "-")},{Csv(m?.PunchText ?? "-")}," +
+                lines.Add($"{Csv(name)},{Csv(m?.Description ?? "")},{Csv(stageLabel)}," +
+                    $"{Csv(m?.ItrAText ?? "-")},{Csv(m?.ItrBText ?? "-")},{Csv(m?.ItrCText ?? "-")}," +
+                    $"{Csv(m?.PunchAText ?? "-")},{Csv(m?.PunchBText ?? "-")}," +
                     $"{els.Count},{eq},{pip},{matchedText},{unmatchedText},{ns},{ip},{done},{doneRate}");
                 tElems += els.Count; tEq += eq; tPip += pip; tNs += ns; tIp += ip; tDone += done;
             }
             string totalRate = tElems > 0 ? (tDone * 100.0 / tElems).ToString("F1") : "-";
-            lines.Add($"합계 ({names.Count}개),,,,,{tElems},{tEq},{tPip},{(anyMatchInfo ? tMatched.ToString() : "-")}," +
+            lines.Add($"합계 ({names.Count}개),,,,,,,,{tElems},{tEq},{tPip},{(anyMatchInfo ? tMatched.ToString() : "-")}," +
                 $"{(anyMatchInfo ? tUnmatched.ToString() : "-")},{tNs},{tIp},{tDone},{totalRate}");
 
             lines.Add("");

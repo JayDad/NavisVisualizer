@@ -23,7 +23,7 @@ Excel (.xlsx/.xls/.xlsb)          OASIS SQL Server ([Navis] 스키마)
 | **Hydrotest** | 6 (Review → Reinstatement) | Test Package No. (DisplayName) | 재귀 탐색 (WalkAndIndex) | `TagSearcher` 공유 |
 | **Equipment** | 4 (Delivery → Inspection) | Tag No. (DisplayName, prefix 지원) | 레벨 타겟 (BuildIndexForTags) | `EquipmentSearcher` 전용 |
 | **EIT Tray** | 4 (Tray 설치 → Cable 완료) | Tray Number (leading `/` 정규화 후) | 재귀 탐색 (WalkAndIndex) | `TagSearcher` 공유 |
-| **Sub-system** | 2모드: 마스터 단계 6 (Walkdown→PCC) / 요소 진행 3단계 | Tag No. + Test Package No. (Sub-system 축 통합) | 재귀 탐색 (WalkAndIndex) | `TagSearcher` 공유 |
+| **Sub-system** | 2모드: 마스터 단계 5 (Walkdown→PCC) / 요소 진행 3단계 | Tag No. + Test Package No. (Sub-system 축 통합) | 재귀 탐색 (WalkAndIndex) | `TagSearcher` 공유 |
 
 ### Searcher 분리 근거
 - **TagSearcher**: Spool / Hydrotest / EIT Tray / Sub-system은 *동일* 매칭 전략(`WalkAndIndex` + `FindBySpoolIds`) — 한 번 빌드하면 전부 조회 가능
@@ -66,8 +66,8 @@ Excel (.xlsx/.xls/.xlsb)          OASIS SQL Server ([Navis] 스키마)
   Piping `Sub-System`→PKGNO. Sub-system 미지정 행은 제외(건수 보고). PKG 노드 색칠이
   하위 스풀/배관을 커버하므로 배관은 PKG 단위로 충분
 - **Sub-system 마스터**: `SqlLoader.LoadSubSystemMaster` ← `[Navis].[SubSystem_Master]`
-  (`SUB-SYSTEM/DESCRIPTION` + 마일스톤 날짜 `Walkdown/Partial MCC/MCC/RFCC/PCC` +
-  `ITR TOTAL/ITR DONE/PUNCH A/PUNCH B`, `PJTNO` 필터 — 계약은 CLAUDE.md 11번).
+  (`SUB-SYSTEM/DESCRIPTION` + 마일스톤 날짜 `Walkdown/Partial MCC/MCC/PCC` +
+  `A/B/C-ITR TOTAL·DONE`, `PUNCH A/B TOTAL·CLOSED`, `PJTNO` 필터 — 계약은 CLAUDE.md 11번).
   요소 로드와 별도 try — **테이블 미구성이면 요소 파생 목록으로 자동 fallback**
   (단계별 가시화 모드만 비활성)
 - EIT Tray / Cable 탭은 OASIS 미지원 — 트레이 진척 테이블 부재, EIT_Cable에 Node 매핑 부재
