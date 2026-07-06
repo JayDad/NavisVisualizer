@@ -60,6 +60,7 @@ namespace NavisVisualizer.UI
         private Panel _progressPanel;
         private TextBox _txtFilter;
         private Button _btnDelayed;
+        private Button _btnDetail;
         private ListView _lvAll;
         private ListView _lvSelected;
         private Label _lblSelCount;
@@ -243,15 +244,16 @@ namespace NavisVisualizer.UI
 
         private GroupBox BuildSelectionGroup()
         {
-            var group = new GroupBox { Text = "Sub-system 선택", Dock = DockStyle.Fill, Height = 340 };
+            var group = new GroupBox { Text = "Sub-system 선택", Dock = DockStyle.Fill, Height = 366 };
 
-            var grid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 3 };
+            var grid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 4 };
             grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
             grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 34));
             grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
             grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
             grid.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));
+            grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
 
             // 좌측 상단: 검색 (코드 + 설명 매칭) + MCC 지연 일괄 선택
             var leftTop = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = Padding.Empty };
@@ -343,6 +345,15 @@ namespace NavisVisualizer.UI
                 TextAlign = ContentAlignment.MiddleRight,
             };
 
+            // 선택 박스 하단: 선택된 sub-system의 공종·요소별 상세 현황을 별도 창으로
+            _btnDetail = new Button
+            {
+                Dock = DockStyle.Fill,
+                Text = "선택 Sub-system 상세 현황 보기…",
+                Margin = new Padding(0, 1, 0, 0),
+            };
+            _btnDetail.Click += (s, e) => ShowDetailWindow();
+
             grid.Controls.Add(leftTop, 0, 0);
             grid.Controls.Add(rightTopLbl, 2, 0);
             grid.Controls.Add(_lvAll, 0, 1);
@@ -350,6 +361,7 @@ namespace NavisVisualizer.UI
             grid.Controls.Add(_lvSelected, 2, 1);
             grid.Controls.Add(_lblSelCount, 0, 2);
             grid.SetColumnSpan(_lblSelCount, 3);
+            grid.Controls.Add(_btnDetail, 2, 3);
 
             group.Controls.Add(grid);
             return group;
@@ -460,12 +472,11 @@ namespace NavisVisualizer.UI
         private int ElementCount(string name) =>
             _bySubSystem.TryGetValue(name, out var els) ? els.Count : 0;
 
-        /// <summary>단계 모드에서 실제 칠할 색을 정하는 유효 단계 — 지연이면 Delayed, 아니면 실적 단계.</summary>
-        private SubSystemStage? EffectiveStage(SubSystemMasterData m, DateTime referenceDate)
-        {
-            if (m == null) return null;
-            return m.IsDelayed(referenceDate) ? SubSystemStage.Delayed : m.GetStageAtDate(referenceDate);
-        }
+        /// <summary>마스터의 실적 단계(기준일). 마스터 없으면 null. 지연은 색으로 반영하지
+        /// 않는다 — 지연이어도 달성 단계(Walkdown 등)를 그대로 칠하고, 지연은 MCC계획 컬럼과
+        /// 'MCC 지연 담기'로만 다룬다.</summary>
+        private SubSystemStage? StageOf(SubSystemMasterData m, DateTime referenceDate) =>
+            m?.GetStageAtDate(referenceDate);
 
         // ----- 선택 UI (dual-list + 화살표) -----
 
@@ -490,16 +501,14 @@ namespace NavisVisualizer.UI
                 var item = new ListViewItem(name) { Tag = name };
                 item.SubItems.Add(desc);
                 item.SubItems.Add(m != null ? SubSystemStageInfo.Labels[m.GetStageAtDate(referenceDate)] : "-");
-                item.SubItems.Add(m?.PlanText(referenceDate) ?? "-");
+                item.SubItems.Add(m?.PlanText(referenceDate) ?? "-");  // 지연 시 "지연 Nd" 텍스트만
                 item.SubItems.Add(m?.ItrAText ?? "-");
                 item.SubItems.Add(m?.ItrBText ?? "-");
                 item.SubItems.Add(m?.ItrCText ?? "-");
                 item.SubItems.Add(m?.PunchAText ?? "-");
                 item.SubItems.Add(m?.PunchBText ?? "-");
                 item.SubItems.Add(count.ToString());
-                // 지연 행은 빨강으로 강조(계획 대비 MCC 실적 미입력), 요소 0건은 회색
-                if (m != null && m.IsDelayed(referenceDate)) item.ForeColor = Color.Firebrick;
-                else if (count == 0) item.ForeColor = Color.Gray;  // 마스터에만 있고 요소 미배정
+                if (count == 0) item.ForeColor = Color.Gray;  // 마스터에만 있고 요소 미배정
                 if (_selected.Contains(name)) item.BackColor = PickedBack;
                 _lvAll.Items.Add(item);
             }
@@ -607,14 +616,13 @@ namespace NavisVisualizer.UI
                 int count = ElementCount(name);
 
                 var item = new ListViewItem("■") { UseItemStyleForSubItems = false, Tag = name };
-                // 스와치 = 실제 칠해질 색(지연이면 빨강, 아니면 마스터 단계색) — 3D와 일치
-                var eff = EffectiveStage(m, referenceDate);
-                item.ForeColor = eff.HasValue && _stageSettings.TryGetValue(eff.Value, out var st)
+                // 스와치 = 실제 칠해질 마스터 단계색(기준일) — 마스터 없으면 중립 회색
+                var stg = StageOf(m, referenceDate);
+                item.ForeColor = stg.HasValue && _stageSettings.TryGetValue(stg.Value, out var st)
                     ? st.DisplayColor : Color.DimGray;
                 item.SubItems.Add(name);
                 item.SubItems.Add(m != null ? SubSystemStageInfo.Labels[m.GetStageAtDate(referenceDate)] : "-");
-                var planSub = item.SubItems.Add(m?.PlanText(referenceDate) ?? "-");
-                if (m != null && m.IsDelayed(referenceDate)) planSub.ForeColor = Color.Firebrick;
+                item.SubItems.Add(m?.PlanText(referenceDate) ?? "-");
                 item.SubItems.Add(count.ToString());
 
                 string matchText = "-";
@@ -731,10 +739,10 @@ namespace NavisVisualizer.UI
                     if (kv.Value.Checked)
                         groupSettings[kv.Key.ToString()] = _stageSettings[kv.Key];
 
-                // 요소는 자기 sub-system의 유효 단계색을 받는다(지연이면 Delayed=빨강).
+                // 요소는 자기 sub-system의 마스터 실적 단계색을 받는다(지연 여부와 무관).
                 // 마스터 외 sub-system 요소는 그룹 키 null → 색칠 제외(매칭 집계에는 포함).
                 result = _main.OverrideEngine.ApplySubSystem(doc, targets,
-                    el => EffectiveStage(GetMaster(el.SubSystem), referenceDate)?.ToString(),
+                    el => StageOf(GetMaster(el.SubSystem), referenceDate)?.ToString(),
                     groupSettings);
             }
             else
@@ -878,6 +886,165 @@ namespace NavisVisualizer.UI
         private static string Csv(string s) =>
             "\"" + (s ?? "").Replace("\"", "\"\"") + "\"";
 
+        // ----- 상세 현황 별도 창 -----
+
+        /// <summary>
+        /// 선택된 sub-system의 공종·요소별 상세 현황을 별도 창(비모달 Form)으로 띄운다.
+        /// 다공종(Equipment/Piping) 요소가 한 그리드에 sub-system → 공종 → 요소 순으로
+        /// 나열되며, 상단 검색으로 좁히고 [CSV 출력]으로 엑셀 저장도 된다.
+        /// </summary>
+        private void ShowDetailWindow()
+        {
+            if (_selected.Count == 0)
+            {
+                MessageBox.Show("먼저 Sub-system을 선택하세요.");
+                return;
+            }
+            var referenceDate = _dtpReference.Value;
+            var names = _selectionOrder.Where(_bySubSystem.ContainsKey).ToList();
+            if (names.Count == 0)
+            {
+                MessageBox.Show("선택된 Sub-system에 요소가 없습니다 (마스터에만 존재).");
+                return;
+            }
+
+            var form = new Form
+            {
+                Text = $"Sub-system 상세 현황 — 선택 {names.Count}개 · 기준일 {referenceDate:yyyy-MM-dd}",
+                Width = 940,
+                Height = 620,
+                StartPosition = FormStartPosition.CenterScreen,
+                ShowInTaskbar = true,
+            };
+
+            var top = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 32, Padding = new Padding(6, 4, 6, 0) };
+            var lblSummary = new Label { AutoSize = true, Padding = new Padding(0, 5, 12, 0) };
+            var txtSearch = new TextBox { Width = 160, Margin = new Padding(0, 3, 6, 0) };
+            var btnCsv = new Button { Text = "CSV 출력", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(8, 0, 8, 0) };
+            top.Controls.Add(lblSummary);
+            top.Controls.Add(new Label { Text = "검색:", AutoSize = true, Padding = new Padding(0, 5, 0, 0) });
+            top.Controls.Add(txtSearch);
+            top.Controls.Add(btnCsv);
+
+            var lv = new ListView
+            {
+                Dock = DockStyle.Fill,
+                View = View.Details,
+                FullRowSelect = true,
+                GridLines = true,
+                HideSelection = false,
+            };
+            lv.Columns.Add("Sub-system", 110);
+            lv.Columns.Add("Description", 150);
+            lv.Columns.Add("MCC계획", 90);
+            lv.Columns.Add("공종", 80);
+            lv.Columns.Add("요소 ID", 180);
+            lv.Columns.Add("설명", 150);
+            lv.Columns.Add("현재 단계", 90);
+            lv.Columns.Add("진행 상태", 70);
+            lv.Columns.Add("매칭", 46);
+
+            // 3D 선택 연동: 행 더블클릭 → 그 요소를 뷰에서 선택·포커스
+            lv.DoubleClick += (s, e) =>
+            {
+                if (lv.SelectedItems.Count == 0) return;
+                var el = lv.SelectedItems[0].Tag as SubSystemElement;
+                var doc = _main.GetDocument();
+                if (el == null || doc == null || !_main.TagSearcher.IsIndexBuilt || _main.TagSearcher.NeedsRebuild(doc)) return;
+                var found = _main.TagSearcher.FindBySpoolIds(new[] { el.ElementId });
+                var collection = new Autodesk.Navisworks.Api.ModelItemCollection();
+                foreach (var items in found.Values) collection.AddRange(items);
+                if (collection.Count == 0) return;
+                doc.CurrentSelection.CopyFrom(collection);
+                doc.ActiveView.FocusOnCurrentSelection();
+            };
+
+            Action<string> populate = keyword =>
+            {
+                lv.BeginUpdate();
+                lv.Items.Clear();
+                int shown = 0;
+                foreach (var name in names)
+                {
+                    var m = GetMaster(name);
+                    string plan = m?.PlanText(referenceDate) ?? "-";
+                    string desc = m?.Description ?? "";
+                    var ordered = _bySubSystem[name]
+                        .OrderBy(el => el.Discipline)
+                        .ThenBy(el => el.ElementId, StringComparer.OrdinalIgnoreCase);
+                    foreach (var el in ordered)
+                    {
+                        if (!string.IsNullOrEmpty(keyword)
+                            && name.IndexOf(keyword, StringComparison.OrdinalIgnoreCase) < 0
+                            && (el.ElementId ?? "").IndexOf(keyword, StringComparison.OrdinalIgnoreCase) < 0
+                            && (el.Description ?? "").IndexOf(keyword, StringComparison.OrdinalIgnoreCase) < 0)
+                            continue;
+
+                        string matched = "-";
+                        if (_appliedOnce && _appliedSubSystems.Contains(name))
+                            matched = _matchedIds.Contains(el.ElementId) ? "O" : "X";
+
+                        var item = new ListViewItem(name) { UseItemStyleForSubItems = false, Tag = el };
+                        item.SubItems.Add(desc);
+                        item.SubItems.Add(plan);
+                        item.SubItems.Add(SubSystemDisciplineInfo.Labels[el.Discipline]);
+                        item.SubItems.Add(el.ElementId ?? "");
+                        item.SubItems.Add(el.Description ?? "");
+                        item.SubItems.Add(el.StageLabelAt(referenceDate));
+                        item.SubItems.Add(ProgressStatusInfo.Labels[el.StatusAt(referenceDate)]);
+                        var ms = item.SubItems.Add(matched);
+                        if (matched == "X") ms.ForeColor = Color.Red;
+                        lv.Items.Add(item);
+                        shown++;
+                    }
+                }
+                lv.EndUpdate();
+                lblSummary.Text = $"요소 {shown:N0}건";
+            };
+
+            txtSearch.TextChanged += (s, e) => populate(txtSearch.Text.Trim());
+            btnCsv.Click += (s, e) => ExportDetailCsv(names, referenceDate);
+
+            populate("");
+
+            form.Controls.Add(lv);
+            form.Controls.Add(top);
+            form.Show();  // 비모달 — 창을 열어둔 채 3D 작업 가능
+        }
+
+        /// <summary>상세 창의 CSV 출력 — sub-system·공종·요소별 status 전체를 바탕화면에 저장.</summary>
+        private void ExportDetailCsv(List<string> names, DateTime referenceDate)
+        {
+            var lines = new List<string>();
+            lines.Add("Sub-system 공종·요소별 상세 현황");
+            lines.Add($"기준일,{referenceDate:yyyy-MM-dd}");
+            lines.Add($"데이터 소스,{Csv("OASIS " + _loadLabel)}");
+            lines.Add($"매칭 기준,{(_appliedOnce ? "가시화 적용 결과" : "미적용 — 매칭 미산정")}");
+            lines.Add("");
+            lines.Add("Sub-system,Description,MCC계획,공종,요소 ID,설명,현재 단계,진행 상태,매칭");
+            foreach (var name in names)
+            {
+                var m = GetMaster(name);
+                string plan = m?.MccPlan?.ToString("yyyy-MM-dd") ?? "";
+                var ordered = _bySubSystem[name]
+                    .OrderBy(el => el.Discipline)
+                    .ThenBy(el => el.ElementId, StringComparer.OrdinalIgnoreCase);
+                foreach (var el in ordered)
+                {
+                    string matched = "-";
+                    if (_appliedOnce && _appliedSubSystems.Contains(name))
+                        matched = _matchedIds.Contains(el.ElementId) ? "O" : "X";
+                    lines.Add($"{Csv(name)},{Csv(m?.Description ?? "")},{plan}," +
+                        $"{SubSystemDisciplineInfo.Labels[el.Discipline]},{Csv(el.ElementId)},{Csv(el.Description)}," +
+                        $"{Csv(el.StageLabelAt(referenceDate))},{ProgressStatusInfo.Labels[el.StatusAt(referenceDate)]},{matched}");
+                }
+            }
+            string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
+                $"SubSystem_Detail_{DateTime.Now:yyyyMMdd_HHmmss}.csv");
+            File.WriteAllLines(path, lines, new System.Text.UTF8Encoding(true));
+            MessageBox.Show($"상세 현황 저장 완료: {path}");
+        }
+
         // ----- 기타 -----
 
         private void BtnViewpoint_Click(object sender, EventArgs e)
@@ -923,24 +1090,28 @@ namespace NavisVisualizer.UI
                 int total = _selectionOrder.Sum(ElementCount);
                 linesOut.Add($"선택 Sub-system {_selected.Count}개 · 요소 {total:N0}건 (기준일 {referenceDate:yyyy-MM-dd})");
 
-                // 마스터가 있으면 sub-system 유효단계 분포(지연 포함 — 실제 칠할 색 기준)
+                // 마스터가 있으면 sub-system 실적 단계 분포 (+ 지연 개수 병기)
                 if (_master != null)
                 {
                     var stageCounts = new Dictionary<SubSystemStage, int>();
+                    int delayed = 0;
                     foreach (var name in _selectionOrder)
                     {
-                        var eff = EffectiveStage(GetMaster(name), referenceDate);
-                        if (!eff.HasValue) continue;
-                        stageCounts[eff.Value] = stageCounts.TryGetValue(eff.Value, out int c) ? c + 1 : 1;
+                        var m = GetMaster(name);
+                        if (m == null) continue;
+                        var stg = m.GetStageAtDate(referenceDate);
+                        stageCounts[stg] = stageCounts.TryGetValue(stg, out int c) ? c + 1 : 1;
+                        if (m.IsDelayed(referenceDate)) delayed++;
                     }
                     var parts = new List<string>();
-                    var order = new[] { SubSystemStage.Delayed, SubSystemStage.Pcc, SubSystemStage.Mcc,
+                    var order = new[] { SubSystemStage.Pcc, SubSystemStage.Mcc,
                         SubSystemStage.PartialMcc, SubSystemStage.Walkdown, SubSystemStage.NotStarted };
                     foreach (var st in order)
                         if (stageCounts.TryGetValue(st, out int c) && c > 0)
                             parts.Add($"{SubSystemStageInfo.Labels[st]} {c}");
-                    if (parts.Count > 0)
-                        linesOut.Add("단계: " + string.Join(" · ", parts));
+                    string line = "단계: " + string.Join(" · ", parts);
+                    if (delayed > 0) line += $"   (MCC 지연 {delayed})";
+                    if (parts.Count > 0) linesOut.Add(line);
                 }
 
                 int ns = 0, ip = 0, done = 0;

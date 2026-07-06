@@ -69,7 +69,8 @@ Excel (.xlsx/.xls/.xlsb)          OASIS SQL Server ([Navis] 스키마)
   (`SUB-SYSTEM/DESCRIPTION` + `MCC Plan`(계획일) + 마일스톤 실적일 `Walkdown/Partial MCC/MCC/PCC` +
   `A/B/C-ITR TOTAL·DONE`, `PUNCH A/B TOTAL·CLOSED`, `PJTNO` 필터 — 계약은 CLAUDE.md 11번).
   요소 로드와 별도 try — **테이블 미구성이면 요소 파생 목록으로 자동 fallback**
-  (단계별 가시화 모드만 비활성). MCC 계획일 경과 + P-MCC/MCC 실적 미입력 = `IsDelayed`(지연)
+  (단계별 가시화 모드만 비활성). MCC 계획일 경과 + P-MCC/MCC 실적 미입력 = `IsDelayed`(지연) —
+  색으로는 표시 안 하고(달성 단계 그대로 칠함) 테이블 텍스트·`[MCC 지연 담기]` 버튼·리포트로만 노출
 - EIT Tray / Cable 탭은 OASIS 미지원 — 트레이 진척 테이블 부재, EIT_Cable에 Node 매핑 부재
   (상세: `docs/SQL_DB_CONNECTION_ANALYSIS.md`)
 
@@ -223,8 +224,11 @@ Apply:
   ◀ 제거, ▶▶ 필터 결과 전체, ◀◀ 전체 해제, 더블클릭 = 추가/제거. 이미 담긴 좌측 행은
   녹색 배경, 요소 0건(마스터에만 존재)은 회색 글자, 마스터 외 요소 그룹은 "(마스터 외)"
 - 우측 행 클릭 → 해당 sub-system 매칭 아이템 3D 선택·포커스
-- [현황 리포트 출력]: CSV 리포트 (헤더 블록 + Sub-system별 요약(Description/단계/ITR/
-  Punch/공종/매칭/진행/완료율) + 상세 리스트). 선택이 있으면 선택만, 없으면 전체.
+- 선택 박스 하단 [선택 Sub-system 상세 현황 보기…] → 비모달 Form에 공종·요소별 status
+  그리드(검색·행 더블클릭 3D 포커스·[CSV 출력]). 다공종 상세를 한 창에서 표시
+- [MCC 지연 담기] (검색 옆): 기준일 기준 IsDelayed sub-system을 선택 박스에 일괄 추가
+- [현황 리포트 출력]: CSV 리포트 (헤더 블록 + Sub-system별 요약(Description/단계/MCC계획/
+  지연(일)/ITR/Punch/공종/매칭/진행/완료율) + 상세 리스트). 선택이 있으면 선택만, 없으면 전체.
   매칭 O/X는 마지막 적용 스냅샷 기준, 미적용 sub-system은 "-" (CLAUDE.md 8번 단기안의 첫 구현)
 - 적용은 `ColorOverrideEngine.ApplySubSystem` — 그룹 키(SubSystemStage명 또는 ProgressStatus명)로
   묶어 그룹당 1회 색상, 캐시는 `VisualModule.SubSystem`으로 격리. 증분 색 변경은

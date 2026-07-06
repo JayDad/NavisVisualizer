@@ -189,7 +189,6 @@ namespace NavisVisualizer.Models
                 [SubSystemStage.PartialMcc] = new ColorSetting { DisplayColor = Color.FromArgb(255, 140, 50),  Transparency = 0.0 },
                 [SubSystemStage.Mcc]        = new ColorSetting { DisplayColor = Color.FromArgb(65, 105, 225),  Transparency = 0.0 },
                 [SubSystemStage.Pcc]        = new ColorSetting { DisplayColor = Color.FromArgb(0, 128, 0),     Transparency = 0.0 },
-                [SubSystemStage.Delayed]    = new ColorSetting { DisplayColor = Color.FromArgb(220, 20, 20),   Transparency = 0.0 },
             };
 
         public static ColorSetting Unmatched =>
@@ -537,23 +536,22 @@ namespace NavisVisualizer.Models
         PartialMcc,   // 2  Partial MCC (부분 RFC)
         Mcc,          // 3  MCC = Ready for Commissioning (핵심 기점)
         Pcc,          // 4  PCC
-        Delayed,      // 5  파생 상태 — MCC 계획일 경과 + P-MCC/MCC 실적 미입력. 날짜 스캔 대상 아님.
     }
 
     public static class SubSystemStageInfo
     {
-        /// <summary>날짜 역순 스캔에 쓰는 실적 단계 (Delayed 제외 — 그건 계획 대비 파생).</summary>
+        /// <summary>날짜 역순 스캔에 쓰는 실적 단계.</summary>
         public static readonly SubSystemStage[] OrderedStages =
         {
             SubSystemStage.Walkdown, SubSystemStage.PartialMcc,
             SubSystemStage.Mcc, SubSystemStage.Pcc
         };
 
-        /// <summary>색상 그리드 표시 순서 — 실적 단계 + 미착수 + Delayed.</summary>
+        /// <summary>색상 그리드 표시 순서 — 미착수 + 실적 단계.</summary>
         public static readonly SubSystemStage[] GridOrder =
         {
             SubSystemStage.NotStarted, SubSystemStage.Walkdown, SubSystemStage.PartialMcc,
-            SubSystemStage.Mcc, SubSystemStage.Pcc, SubSystemStage.Delayed,
+            SubSystemStage.Mcc, SubSystemStage.Pcc,
         };
 
         public static readonly Dictionary<SubSystemStage, string> Labels = new Dictionary<SubSystemStage, string>
@@ -563,7 +561,6 @@ namespace NavisVisualizer.Models
             [SubSystemStage.PartialMcc] = "P-MCC",
             [SubSystemStage.Mcc]        = "MCC",
             [SubSystemStage.Pcc]        = "PCC",
-            [SubSystemStage.Delayed]    = "지연",
         };
     }
 
