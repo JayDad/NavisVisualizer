@@ -63,8 +63,14 @@ namespace NavisVisualizer.UI
                 Padding = new Padding(4)
             };
 
-            _btnLoad = new Button { Text = "EIT Tray Excel", Dock = DockStyle.Fill, Height = 30 };
+            // Excel 버튼 문구는 전 탭 "Excel Import"로 통일 + 우측에 입력 양식 출력
+            var loadPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 32, AutoSize = false };
+            _btnLoad = new Button { Text = "Excel Import", Width = 130, Height = 28 };
             _btnLoad.Click += BtnLoad_Click;
+            var btnTemplate = new Button { Text = "Input Template 출력", Width = 140, Height = 28 };
+            btnTemplate.Click += (s, e) => ExportInputTemplate();
+            loadPanel.Controls.Add(_btnLoad);
+            loadPanel.Controls.Add(btnTemplate);
             _lblFile = new Label { Text = "(파일 없음)", Dock = DockStyle.Fill, ForeColor = Color.Gray, AutoSize = false, Height = 18 };
 
             var datePanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 28, AutoSize = false };
@@ -142,7 +148,7 @@ namespace NavisVisualizer.UI
 
             _progressBar = new ProgressBar { Dock = DockStyle.Fill, Height = 12, Visible = false };
 
-            layout.Controls.Add(_btnLoad);
+            layout.Controls.Add(loadPanel);
             layout.Controls.Add(_lblFile);
             layout.Controls.Add(datePanel);
             layout.Controls.Add(new Label { Text = "단계 & 색상", Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 18 });
@@ -256,6 +262,19 @@ namespace NavisVisualizer.UI
                 {
                     MessageBox.Show($"Excel 로드 실패:\n{ex.Message}", "오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
+            }
+        }
+
+        private void ExportInputTemplate()
+        {
+            try
+            {
+                string path = InputTemplate.ExportEitTray();
+                MessageBox.Show($"입력 양식 저장 완료: {path}\n작성 후 Excel 형식(.xlsx)으로 저장해 Import 하세요.");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"입력 양식 저장 실패:\n{ex.Message}", "오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 

@@ -67,8 +67,9 @@ namespace NavisVisualizer.UI
                 Padding = new Padding(4)
             };
 
-            _srcPanel = new DataSourcePanel("Spool Excel 로드");
+            _srcPanel = new DataSourcePanel();
             _srcPanel.ExcelLoadClicked    += (s, e) => LoadExcel();
+            _srcPanel.TemplateClicked     += (s, e) => ExportInputTemplate();
             _srcPanel.OasisLoadClicked    += (s, e) => LoadOasis();
             _srcPanel.ActiveSourceChanged += (s, e) => ApplyActiveSourceData(reapply: _appliedOnce);
             _srcPanel.CompareClicked      += (s, e) => ExportComparison();
@@ -274,6 +275,19 @@ namespace NavisVisualizer.UI
                     _srcPanel.SetFailed(TabDataSource.Excel, "로드 실패");
                     MessageBox.Show($"Excel 로드 실패:\n{ex.Message}", "오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
+            }
+        }
+
+        private void ExportInputTemplate()
+        {
+            try
+            {
+                string path = InputTemplate.ExportSpool();
+                MessageBox.Show($"입력 양식 저장 완료: {path}\n작성 후 Excel 형식(.xlsx)으로 저장해 Import 하세요.");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"입력 양식 저장 실패:\n{ex.Message}", "오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 

@@ -158,6 +158,12 @@ class DataSourceSlot<T>
 - 매칭/미매칭 필터 탭 옆에 회색 remark 추가: `※ 실적 데이터와 매칭 여부를 뜻함`
 - `매칭 Status 출력` → `매칭 Status 엑셀 출력` (실제 출력물은 Excel에서 바로 열리는 CSV — 사용자 관점 명칭)
 
+**상단 데이터 로드 UI 카피 (구현됨)**
+- Excel 로드 버튼 문구 전 탭 `Excel Import`로 통일 (탭 이름이 공종을 이미 말해줌)
+- 그 우측에 `[Input Template 출력]` 버튼 — 공종별 입력 양식 CSV를 바탕화면에 저장 (`Loaders/InputTemplate.cs`).
+  헤더는 ExcelLoader 탐지 키워드와 1:1 — **로더의 FindColumn 후보를 바꾸면 InputTemplate도 같이 갱신할 것**.
+  CSV는 ExcelDataReader가 못 읽으므로 안내문에 "작성 후 .xlsx로 저장" 명시 (안내문 행은 헤더 자동 탐지에 안 걸림)
+
 **단계 나누기**
 - **Phase 1 (SQL 구성 확정 전 착수 가능)**: RowMapper 추출 리팩터링 + `DataSourceSlot` 도입 + `ProgressInputPanel` UI (Server 버튼은 "구성 대기" 비활성) + 버튼 명칭 변경
 - **Phase 2 (공종별 구성 수령 후)**: `SqlServerLoader` 구현 + 서버 설정 UI + 모듈별 쿼리/컬럼 매핑

@@ -12,10 +12,11 @@ namespace NavisVisualizer.UI
 
     /// <summary>
     /// 탭 상단의 데이터 소스 블록:
-    ///   [Excel 로드]  ● 파일명 · N건
-    ///   [OASIS 로드]  ○ (미로드)
+    ///   [Excel Import] [Input Template 출력]  ● 파일명 · N건
+    ///   [OASIS 로드]                          ○ (미로드)
     ///   적용 기준: (•)Excel ( )OASIS   [비교 출력]
     ///
+    /// Excel 버튼 문구는 전 탭 "Excel Import"로 통일 (탭 이름이 공종을 이미 말해줌).
     /// 라디오는 로드된 소스만 활성화되고 첫 로드 시 자동 선택된다(이벤트 미발생).
     /// 비교 버튼은 두 소스가 모두 로드됐을 때만 활성화. 데이터 자체는 탭이 보유하고
     /// 이 컨트롤은 상태 표시 + 이벤트만 담당한다.
@@ -27,8 +28,11 @@ namespace NavisVisualizer.UI
         /// <summary>사용자가 라디오로 적용 기준을 바꿨을 때만 발생 (자동 선택 시 미발생).</summary>
         public event EventHandler ActiveSourceChanged;
         public event EventHandler CompareClicked;
+        /// <summary>Input Template(입력 양식) 출력 버튼 — 공종별 양식 생성은 탭이 담당.</summary>
+        public event EventHandler TemplateClicked;
 
         private Button _btnExcel;
+        private Button _btnTemplate;
         private Button _btnOasis;
         private Label _dotExcel;
         private Label _dotOasis;
@@ -52,7 +56,7 @@ namespace NavisVisualizer.UI
         public bool IsLoaded(TabDataSource src) =>
             src == TabDataSource.Excel ? _excelLoaded : _oasisLoaded;
 
-        public DataSourcePanel(string excelButtonText)
+        public DataSourcePanel()
         {
             Height = 86;
             Dock = DockStyle.Fill;
@@ -60,18 +64,21 @@ namespace NavisVisualizer.UI
             var layout = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
-                ColumnCount = 3,
+                ColumnCount = 4,
                 RowCount = 3,
             };
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 18));
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
 
-            _btnExcel = new Button { Text = excelButtonText, Dock = DockStyle.Fill, Height = 24 };
+            _btnExcel = new Button { Text = "Excel Import", Dock = DockStyle.Fill, Height = 24 };
             _btnExcel.Click += (s, e) => ExcelLoadClicked?.Invoke(this, EventArgs.Empty);
+            _btnTemplate = new Button { Text = "Input Template 출력", Dock = DockStyle.Fill, Height = 24 };
+            _btnTemplate.Click += (s, e) => TemplateClicked?.Invoke(this, EventArgs.Empty);
             _dotExcel = MakeDot();
             _lblExcel = MakeStatusLabel();
 
@@ -106,13 +113,14 @@ namespace NavisVisualizer.UI
             activePanel.Controls.Add(_btnCompare);
 
             layout.Controls.Add(_btnExcel, 0, 0);
-            layout.Controls.Add(_dotExcel, 1, 0);
-            layout.Controls.Add(_lblExcel, 2, 0);
+            layout.Controls.Add(_btnTemplate, 1, 0);
+            layout.Controls.Add(_dotExcel, 2, 0);
+            layout.Controls.Add(_lblExcel, 3, 0);
             layout.Controls.Add(_btnOasis, 0, 1);
-            layout.Controls.Add(_dotOasis, 1, 1);
-            layout.Controls.Add(_lblOasis, 2, 1);
+            layout.Controls.Add(_dotOasis, 2, 1);
+            layout.Controls.Add(_lblOasis, 3, 1);
             layout.Controls.Add(activePanel, 0, 2);
-            layout.SetColumnSpan(activePanel, 3);
+            layout.SetColumnSpan(activePanel, 4);
 
             Controls.Add(layout);
 
