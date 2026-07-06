@@ -266,26 +266,48 @@ Spool / Hydrotest / Equipment 탭은 OASIS 로드 구현 완료 (`SqlLoader`, �
 
 ### 11. Sub-system 탭 — 구현됨 (Windows 검증 대기) + 확장 잔여
 
-**구현 현황**: `UI/SubSystemTab.cs` + `SqlLoader.LoadSubSystemElements` +
+**구현 현황**: `UI/SubSystemTab.cs` + `SqlLoader.LoadSubSystemElements`/`LoadSubSystemMaster` +
 `ColorOverrideEngine.ApplySubSystem`(`VisualModule.SubSystem`) + `SubSystemElement`/
-`ProgressStatus`/`SubSystemPalette`(DataModels). OASIS 전용 — 새 SQL 없이 기존 검증 쿼리
-(LoadEquipment/LoadHydrotest)를 재사용해 Sub-system 축으로 감싼다 (Equipment
-`SUB-SYSTEM`→TAG NO / Piping `Sub-System`→PKGNO, Sub-system 미지정 행은 제외 + 건수 보고).
-매칭은 개발 규칙대로 TagSearcher 재사용 (Equipment 태그도 digit 포함 정확 일치라 전체 워크
-인덱스로 조회됨 — EquipmentSearcher의 레벨 타겟 인덱스는 건드리지 않음). 선택 UI는 좌측
-검색+체크 테이블(~400개) ↔ 우측 선택 누적 테이블 + 하단 개수 라벨. 가시화 2모드
-(sub-system별 팔레트 고유색 / 진행 3단계) + CSV 현황 리포트(8번 단기안).
+`ProgressStatus`/`SubSystemStage`/`SubSystemMasterData`(DataModels). OASIS 전용 — 요소는
+기존 검증 쿼리(LoadEquipment/LoadHydrotest) 재사용 (Equipment `SUB-SYSTEM`→TAG NO /
+Piping `Sub-System`→PKGNO, 미지정 행 제외 + 건수 보고). 매칭은 개발 규칙대로 TagSearcher
+재사용 (Equipment 태그도 digit 포함 정확 일치라 전체 워크 인덱스로 조회됨 —
+EquipmentSearcher의 레벨 타겟 인덱스는 건드리지 않음).
+
+- **마스터 기준 목록**: `[Navis].[SubSystem_Master]` 로드 성공 시 좌측 목록 = 마스터 ∪
+  요소 파생 (요소 0건은 회색, 마스터 외 요소 그룹은 "(마스터 외)" + 건수 진단).
+  **테이블 미구성이면 요소 파생 목록으로 자동 fallback** + 단계 모드 비활성.
+- **가시화 2모드**: ① Sub-system 단계별 — 선택한 sub-system의 요소 전체가 그 sub-system의
+  마일스톤 단계색(Walkdown/P-MCC/MCC/RFCC/PCC + 미착수, 기준일 역순 스캔)을 받음 (기본,
+  마스터 필요) ② 요소 진행상태별 — 미착수/진행중/완료 3단계 정규화.
+  (초기 구현의 "sub-system별 팔레트 고유색" 모드는 단계별 모드로 대체되어 제거 —
+  `SubSystemPalette` 삭제됨.)
+- **선택 UI (dual-list)**: 좌측 검색(코드+설명)+status 테이블(단계/ITR/Punch/요소 병기)
+  ↔ [▶ ◀ ▶▶ ◀◀] 화살표 ↔ 우측 선택 누적 테이블(단계색 스와치) + 하단 개수 라벨.
+  다중 선택 + 더블클릭 지원. 체크박스 방식에서 전환됨.
+- CSV 현황 리포트(8번 단기안): 헤더 블록 + 요약(Description/단계/ITR/Punch 병기) + 상세.
+
+**마스터 테이블 계약 (제안 — DB 생성 시 이 형태로)**
+```sql
+CREATE TABLE [Navis].[SubSystem_Master](
+  [PJTNO]       varchar(10)   NOT NULL,  -- 프로젝트 필터 (EQ 계열과 동일 컬럼명)
+  [SUB-SYSTEM]  varchar(20)   NOT NULL,  -- 요소 테이블의 SUB-SYSTEM/Sub-System 값과 일치
+  [DESCRIPTION] nvarchar(200) NULL,
+  [Walkdown]    date NULL,               -- 이하 마일스톤 실적일 (지난 날짜 = 달성)
+  [Partial MCC] date NULL,
+  [MCC]         date NULL,
+  [RFCC]        date NULL,
+  [PCC]         date NULL,
+  [ITR TOTAL]   int NULL, [ITR DONE] int NULL,
+  [PUNCH A]     int NULL, [PUNCH B]  int NULL,  -- open punch 수
+  CONSTRAINT PK_SubSystem_Master PRIMARY KEY ([PJTNO],[SUB-SYSTEM]));
+```
+- 컬럼명을 바꾸면 `SqlLoader.LoadSubSystemMaster`의 SELECT만 같이 수정 (명시 매핑이라 즉시 오류로 드러남).
+- ITR/Punch가 수치가 아니라 %로 오면 GetInt 대신 ParsePercentage 계열 추가 검토 (§2.2 스케일 함정 참조).
 
 **확장 잔여 (결정/데이터 대기)**
-- **Sub-system 마스터 리스트 (우선순위 높음)**: 현재 좌측 목록은 요소 데이터에서 파생
-  (GroupBy) — 요소가 아직 안 달린 sub-system은 목록에 안 보이고(완료율 분모 왜곡),
-  요소 행의 오타 코드가 유령 sub-system으로 조용히 생기며, 설명(명칭) 검색이 불가.
-  마스터 테이블/뷰(`Sub-System No / Description / System` 형태) 계약 확정 시:
-  `SqlLoader.LoadSubSystemMaster` 추가 → 좌측 목록을 마스터 기준으로 전환(요소 0건은
-  회색 표시, 선택·리포트 가능), 마스터 외 코드를 참조하는 요소는 "마스터 외 N개 ·
-  요소 M건" 진단 + 리포트 별도 섹션, 검색은 코드+설명 양쪽. **마스터 미구성 시 현행
-  파생 방식 자동 fallback** (현 구조가 안전망). 분석된 6개 테이블에는 마스터 없음 —
-  데이터 오너 확인 선결.
+- **마스터 테이블 실물 생성/적재**: 위 계약으로 DB에 생성 + OASIS 적재 파이프라인은
+  데이터 오너 몫. 마일스톤 날짜가 실적일인지 계획일인지 확정 필요 (현재 로직은 실적일 가정).
 - **Spool 단위 sub-system**: 현재 배관은 PKG 노드 색칠이 하위 스풀을 커버. 개별 스풀
   granularity가 필요해지면 `Piping_Spool`에 Sub-System 컬럼 계약 확정 후
   `LoadSubSystemElements`에 추가 (Discipline enum 확장).

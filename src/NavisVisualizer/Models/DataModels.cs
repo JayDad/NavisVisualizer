@@ -181,6 +181,17 @@ namespace NavisVisualizer.Models
                 [ProgressStatus.Completed]  = new ColorSetting { DisplayColor = Color.FromArgb(0, 128, 0),     Transparency = 0.0 },
             };
 
+        public static Dictionary<SubSystemStage, ColorSetting> SubSystemStageDefaults =>
+            new Dictionary<SubSystemStage, ColorSetting>
+            {
+                [SubSystemStage.NotStarted] = new ColorSetting { DisplayColor = Color.FromArgb(169, 169, 169), Transparency = 0.7 },
+                [SubSystemStage.Walkdown]   = new ColorSetting { DisplayColor = Color.FromArgb(255, 215, 0),   Transparency = 0.0 },
+                [SubSystemStage.PartialMcc] = new ColorSetting { DisplayColor = Color.FromArgb(255, 140, 50),  Transparency = 0.0 },
+                [SubSystemStage.Mcc]        = new ColorSetting { DisplayColor = Color.FromArgb(65, 105, 225),  Transparency = 0.0 },
+                [SubSystemStage.Rfcc]       = new ColorSetting { DisplayColor = Color.FromArgb(138, 43, 226),  Transparency = 0.0 },
+                [SubSystemStage.Pcc]        = new ColorSetting { DisplayColor = Color.FromArgb(0, 128, 0),     Transparency = 0.0 },
+            };
+
         public static ColorSetting Unmatched =>
             new ColorSetting { DisplayColor = Color.FromArgb(200, 200, 200), Transparency = 0.9 };
     }
@@ -512,27 +523,71 @@ namespace NavisVisualizer.Models
     }
 
     /// <summary>
-    /// Sub-system별 색상 모드에서 선택 순서대로 배정되는 구분색 팔레트.
-    /// 20색을 넘으면 순환한다 (동시 가시화가 수십 개를 넘으면 어차피 색으로 구분 불가).
+    /// Sub-system 마스터의 시운전 인계 마일스톤. 날짜 역순 스캔(GetStageAtDate)은
+    /// 다른 공종과 동일 패턴 — "지난 날짜 = 달성" 가정.
     /// </summary>
-    public static class SubSystemPalette
+    public enum SubSystemStage
     {
-        public static readonly Color[] Colors =
+        NotStarted,
+        Walkdown,     // Walkdown
+        PartialMcc,   // Partial MCC
+        Mcc,          // MCC (Mechanical Completion)
+        Rfcc,         // RFCC (Ready For Commissioning)
+        Pcc,          // PCC
+    }
+
+    public static class SubSystemStageInfo
+    {
+        public static readonly SubSystemStage[] OrderedStages =
         {
-            Color.FromArgb(230,  25,  75), Color.FromArgb(  0, 130, 200),
-            Color.FromArgb( 60, 180,  75), Color.FromArgb(245, 130,  48),
-            Color.FromArgb(145,  30, 180), Color.FromArgb( 70, 240, 240),
-            Color.FromArgb(240,  50, 230), Color.FromArgb(255, 225,  25),
-            Color.FromArgb(  0, 128, 128), Color.FromArgb(170, 110,  40),
-            Color.FromArgb(  0,   0, 128), Color.FromArgb(210, 245,  60),
-            Color.FromArgb(128,   0,   0), Color.FromArgb(128, 128,   0),
-            Color.FromArgb(255, 105, 180), Color.FromArgb(  0, 100,   0),
-            Color.FromArgb(138,  43, 226), Color.FromArgb( 70, 130, 180),
-            Color.FromArgb(218, 165,  32), Color.FromArgb(250, 128, 114),
+            SubSystemStage.Walkdown, SubSystemStage.PartialMcc,
+            SubSystemStage.Mcc, SubSystemStage.Rfcc, SubSystemStage.Pcc
         };
 
-        public static Color At(int index) =>
-            Colors[((index % Colors.Length) + Colors.Length) % Colors.Length];
+        public static readonly Dictionary<SubSystemStage, string> Labels = new Dictionary<SubSystemStage, string>
+        {
+            [SubSystemStage.NotStarted] = "미착수",
+            [SubSystemStage.Walkdown]   = "Walkdown",
+            [SubSystemStage.PartialMcc] = "P-MCC",
+            [SubSystemStage.Mcc]        = "MCC",
+            [SubSystemStage.Rfcc]       = "RFCC",
+            [SubSystemStage.Pcc]        = "PCC",
+        };
+    }
+
+    /// <summary>
+    /// Sub-system 마스터 행 ([Navis].[SubSystem_Master] — 계약은 CLAUDE.md 11번).
+    /// 마일스톤 날짜 5개 + ITR/Punch 수치. 선택 테이블·리포트에 status로 병기된다.
+    /// </summary>
+    public class SubSystemMasterData
+    {
+        public string SubSystemNo { get; set; }
+        public string Description { get; set; }
+        public Dictionary<SubSystemStage, DateTime?> StageDates { get; set; }
+            = new Dictionary<SubSystemStage, DateTime?>();
+        public int? ItrTotal { get; set; }
+        public int? ItrDone { get; set; }
+        public int? PunchA { get; set; }   // open punch A
+        public int? PunchB { get; set; }   // open punch B
+
+        public SubSystemStage GetStageAtDate(DateTime referenceDate)
+        {
+            var stages = SubSystemStageInfo.OrderedStages;
+            for (int i = stages.Length - 1; i >= 0; i--)
+            {
+                if (StageDates.TryGetValue(stages[i], out var date) && date.HasValue && date.Value.Date <= referenceDate.Date)
+                    return stages[i];
+            }
+            return SubSystemStage.NotStarted;
+        }
+
+        /// <summary>테이블/리포트 표기: "완료/전체" (미보유 시 "-").</summary>
+        public string ItrText =>
+            ItrTotal.HasValue ? $"{ItrDone ?? 0}/{ItrTotal}" : "-";
+
+        /// <summary>테이블/리포트 표기: "A{open}·B{open}" (미보유 시 "-").</summary>
+        public string PunchText =>
+            (PunchA.HasValue || PunchB.HasValue) ? $"A{PunchA ?? 0}·B{PunchB ?? 0}" : "-";
     }
 
     public class CableRecord
