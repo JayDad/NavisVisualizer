@@ -277,6 +277,15 @@ Spool / Hydrotest / Equipment 탭은 OASIS 로드 구현 완료 (`SqlLoader`, �
 (sub-system별 팔레트 고유색 / 진행 3단계) + CSV 현황 리포트(8번 단기안).
 
 **확장 잔여 (결정/데이터 대기)**
+- **Sub-system 마스터 리스트 (우선순위 높음)**: 현재 좌측 목록은 요소 데이터에서 파생
+  (GroupBy) — 요소가 아직 안 달린 sub-system은 목록에 안 보이고(완료율 분모 왜곡),
+  요소 행의 오타 코드가 유령 sub-system으로 조용히 생기며, 설명(명칭) 검색이 불가.
+  마스터 테이블/뷰(`Sub-System No / Description / System` 형태) 계약 확정 시:
+  `SqlLoader.LoadSubSystemMaster` 추가 → 좌측 목록을 마스터 기준으로 전환(요소 0건은
+  회색 표시, 선택·리포트 가능), 마스터 외 코드를 참조하는 요소는 "마스터 외 N개 ·
+  요소 M건" 진단 + 리포트 별도 섹션, 검색은 코드+설명 양쪽. **마스터 미구성 시 현행
+  파생 방식 자동 fallback** (현 구조가 안전망). 분석된 6개 테이블에는 마스터 없음 —
+  데이터 오너 확인 선결.
 - **Spool 단위 sub-system**: 현재 배관은 PKG 노드 색칠이 하위 스풀을 커버. 개별 스풀
   granularity가 필요해지면 `Piping_Spool`에 Sub-System 컬럼 계약 확정 후
   `LoadSubSystemElements`에 추가 (Discipline enum 확장).
