@@ -155,6 +155,37 @@ FROM [Navis].[Piping_HydrotestPKG]";
             return items;
         }
 
+        // ------------------------------------------------------------
+        // Sub-system  ←  Mech_EQ/All_EQ (Equipment) + Piping_HydrotestPKG (Piping)
+        // ------------------------------------------------------------
+
+        /// <summary>
+        /// Sub-system 탭용 통합 요소 로드. 새 SQL 없이 기존 검증된 쿼리
+        /// (LoadEquipment / LoadHydrotest)를 재사용하고 Sub-system 축으로 감싼다.
+        /// Sub-system 값이 없는 행은 그룹핑이 불가능해 제외하며, 조용한 누락이 되지
+        /// 않도록 그 수를 noSubSystemCount로 보고한다.
+        /// </summary>
+        public static List<SubSystemElement> LoadSubSystemElements(
+            SqlConnectionSettings settings, out int noSubSystemCount)
+        {
+            var elements = new List<SubSystemElement>();
+            noSubSystemCount = 0;
+
+            foreach (var eq in LoadEquipment(settings))
+            {
+                if (string.IsNullOrWhiteSpace(eq.SubSystem)) { noSubSystemCount++; continue; }
+                elements.Add(SubSystemElement.FromEquipment(eq));
+            }
+
+            foreach (var pkg in LoadHydrotest(settings))
+            {
+                if (string.IsNullOrWhiteSpace(pkg.SystemNo)) { noSubSystemCount++; continue; }
+                elements.Add(SubSystemElement.FromPackage(pkg));
+            }
+
+            return elements;
+        }
+
         #region Shared helpers
 
         /// <summary>

@@ -173,6 +173,14 @@ namespace NavisVisualizer.Models
                 [CableStage.Completed]  = new ColorSetting { DisplayColor = Color.FromArgb(0, 128, 0),     Transparency = 0.0 },
             };
 
+        public static Dictionary<ProgressStatus, ColorSetting> ProgressDefaults =>
+            new Dictionary<ProgressStatus, ColorSetting>
+            {
+                [ProgressStatus.NotStarted] = new ColorSetting { DisplayColor = Color.FromArgb(169, 169, 169), Transparency = 0.7 },
+                [ProgressStatus.InProgress] = new ColorSetting { DisplayColor = Color.FromArgb(255, 215, 0),   Transparency = 0.0 },
+                [ProgressStatus.Completed]  = new ColorSetting { DisplayColor = Color.FromArgb(0, 128, 0),     Transparency = 0.0 },
+            };
+
         public static ColorSetting Unmatched =>
             new ColorSetting { DisplayColor = Color.FromArgb(200, 200, 200), Transparency = 0.9 };
     }
@@ -397,6 +405,134 @@ namespace NavisVisualizer.Models
             if (string.IsNullOrEmpty(id)) return "";
             return id.TrimStart('/').Trim();
         }
+    }
+
+    // ============================================================
+    // Sub-system (Equipment + Piping 통합 축)
+    // ============================================================
+
+    public enum SubSystemDiscipline
+    {
+        Equipment,   // Mech_EQ / All_EQ — TAG NO 매칭
+        Piping,      // Piping_HydrotestPKG — PKGNO 매칭 (PKG 노드 색칠이 하위 스풀/배관을 커버)
+    }
+
+    public static class SubSystemDisciplineInfo
+    {
+        public static readonly Dictionary<SubSystemDiscipline, string> Labels = new Dictionary<SubSystemDiscipline, string>
+        {
+            [SubSystemDiscipline.Equipment] = "Equipment",
+            [SubSystemDiscipline.Piping]    = "Piping",
+        };
+    }
+
+    /// <summary>
+    /// 공종별 stage 체계를 Sub-system 탭의 공통 축으로 정규화한 진행 상태.
+    /// 공종마다 stage 수가 달라(Equipment 4 / Hydrotest 6) 단일 색상 체계로
+    /// 묶으려면 미착수/진행중/완료 3단계로 접는다.
+    /// </summary>
+    public enum ProgressStatus
+    {
+        NotStarted,
+        InProgress,
+        Completed,
+    }
+
+    public static class ProgressStatusInfo
+    {
+        public static readonly ProgressStatus[] Ordered =
+        {
+            ProgressStatus.NotStarted, ProgressStatus.InProgress, ProgressStatus.Completed
+        };
+
+        public static readonly Dictionary<ProgressStatus, string> Labels = new Dictionary<ProgressStatus, string>
+        {
+            [ProgressStatus.NotStarted] = "미착수",
+            [ProgressStatus.InProgress] = "진행중",
+            [ProgressStatus.Completed]  = "완료",
+        };
+    }
+
+    /// <summary>
+    /// Sub-system 탭의 통합 요소. 공종별 원본 데이터(EquipmentData/TestPackageData)를
+    /// 감싸 공통 축(Sub-system, 매칭 키, 진행 상태)으로 노출한다 — stage 계산은
+    /// 원본 모델의 GetStageAtDate를 그대로 재사용한다.
+    /// </summary>
+    public class SubSystemElement
+    {
+        public string SubSystem { get; }
+        public SubSystemDiscipline Discipline { get; }
+        /// <summary>모델 매칭 키. Equipment는 TAG NO(로더에서 선행 '/' 정규화됨), Piping은 PKGNO.</summary>
+        public string ElementId { get; }
+        public string Description { get; }
+
+        private readonly EquipmentData _equipment;
+        private readonly TestPackageData _package;
+
+        private SubSystemElement(string subSystem, SubSystemDiscipline discipline,
+            string elementId, string description, EquipmentData equipment, TestPackageData package)
+        {
+            SubSystem = subSystem;
+            Discipline = discipline;
+            ElementId = elementId;
+            Description = description;
+            _equipment = equipment;
+            _package = package;
+        }
+
+        public static SubSystemElement FromEquipment(EquipmentData eq) =>
+            new SubSystemElement(eq.SubSystem?.Trim(), SubSystemDiscipline.Equipment,
+                eq.TagNo, eq.Description ?? "", eq, null);
+
+        public static SubSystemElement FromPackage(TestPackageData pkg) =>
+            new SubSystemElement(pkg.SystemNo?.Trim(), SubSystemDiscipline.Piping,
+                pkg.TestPkgId, pkg.LineService ?? "", null, pkg);
+
+        /// <summary>기준일 시점의 공종별 상세 단계 라벨 (리포트 상세 리스트용).</summary>
+        public string StageLabelAt(DateTime referenceDate)
+        {
+            if (_equipment != null)
+                return EquipmentStageInfo.Labels[_equipment.GetStageAtDate(referenceDate)];
+            return HydrotestStageInfo.Labels[_package.GetStageAtDate(referenceDate)];
+        }
+
+        /// <summary>기준일 시점의 정규화 진행 상태. 마지막 stage 도달 = 완료, 그 외 착수 = 진행중.</summary>
+        public ProgressStatus StatusAt(DateTime referenceDate)
+        {
+            if (_equipment != null)
+            {
+                var stage = _equipment.GetStageAtDate(referenceDate);
+                if (stage == EquipmentStage.NotStarted) return ProgressStatus.NotStarted;
+                return stage == EquipmentStage.Inspection ? ProgressStatus.Completed : ProgressStatus.InProgress;
+            }
+            var pkgStage = _package.GetStageAtDate(referenceDate);
+            if (pkgStage == HydrotestStage.NotStarted) return ProgressStatus.NotStarted;
+            return pkgStage == HydrotestStage.Reinstatement ? ProgressStatus.Completed : ProgressStatus.InProgress;
+        }
+    }
+
+    /// <summary>
+    /// Sub-system별 색상 모드에서 선택 순서대로 배정되는 구분색 팔레트.
+    /// 20색을 넘으면 순환한다 (동시 가시화가 수십 개를 넘으면 어차피 색으로 구분 불가).
+    /// </summary>
+    public static class SubSystemPalette
+    {
+        public static readonly Color[] Colors =
+        {
+            Color.FromArgb(230,  25,  75), Color.FromArgb(  0, 130, 200),
+            Color.FromArgb( 60, 180,  75), Color.FromArgb(245, 130,  48),
+            Color.FromArgb(145,  30, 180), Color.FromArgb( 70, 240, 240),
+            Color.FromArgb(240,  50, 230), Color.FromArgb(255, 225,  25),
+            Color.FromArgb(  0, 128, 128), Color.FromArgb(170, 110,  40),
+            Color.FromArgb(  0,   0, 128), Color.FromArgb(210, 245,  60),
+            Color.FromArgb(128,   0,   0), Color.FromArgb(128, 128,   0),
+            Color.FromArgb(255, 105, 180), Color.FromArgb(  0, 100,   0),
+            Color.FromArgb(138,  43, 226), Color.FromArgb( 70, 130, 180),
+            Color.FromArgb(218, 165,  32), Color.FromArgb(250, 128, 114),
+        };
+
+        public static Color At(int index) =>
+            Colors[((index % Colors.Length) + Colors.Length) % Colors.Length];
     }
 
     public class CableRecord

@@ -16,6 +16,7 @@ namespace NavisVisualizer.Visualizers
         Equipment,
         EitTray,
         Cable,
+        SubSystem,
     }
 
     public class ColorOverrideEngine
@@ -247,6 +248,62 @@ namespace NavisVisualizer.Visualizers
                 cache[key] = collection;
 
                 if (colorSettings.TryGetValue(kv.Key, out var setting))
+                    ApplyOverride(doc, collection, setting);
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Sub-system 탭: 요소를 groupSelector가 주는 키(모드에 따라 sub-system 이름
+        /// 또는 ProgressStatus 이름)로 묶어 그룹당 1회 색상을 적용한다. 매칭은
+        /// TagSearcher(전체 워크 인덱스) 기준 — Equipment 태그와 Hydrotest PKG 모두
+        /// digit 포함 DisplayName 정확 일치라 동일 인덱스로 조회된다.
+        /// groupSelector가 null을 반환하거나 groupSettings에 없는 키는 색칠하지
+        /// 않는다(체크 해제된 단계). 캐시 키는 그룹 키 그대로라 진행 상태 모드에서는
+        /// UpdateStageColor(VisualModule.SubSystem, status명)로 증분 색 변경이 된다.
+        /// </summary>
+        public OverrideResult ApplySubSystem(
+            Document doc,
+            List<SubSystemElement> elements,
+            Func<SubSystemElement, string> groupSelector,
+            Dictionary<string, ColorSetting> groupSettings)
+        {
+            var result = new OverrideResult();
+            var groupItems = new Dictionary<string, List<ModelItem>>(StringComparer.OrdinalIgnoreCase);
+
+            var allIds = elements.Select(el => el.ElementId).Distinct();
+            var searchResult = _tagSearcher.FindBySpoolIds(allIds);
+
+            foreach (var el in elements)
+            {
+                if (!searchResult.TryGetValue(el.ElementId, out var items) || items.Count == 0)
+                {
+                    result.UnmatchedIds.Add(el.ElementId);
+                    continue;
+                }
+                result.MatchedCount++;
+
+                string key = groupSelector(el);
+                if (key == null || !groupSettings.ContainsKey(key)) continue;
+
+                if (!groupItems.TryGetValue(key, out var list))
+                {
+                    list = new List<ModelItem>();
+                    groupItems[key] = list;
+                }
+                list.AddRange(items);
+            }
+
+            var cache = ModuleCache(VisualModule.SubSystem);
+            cache.Clear();
+
+            foreach (var kv in groupItems)
+            {
+                var collection = ToCollection(kv.Value);
+                cache[kv.Key] = collection;
+
+                if (groupSettings.TryGetValue(kv.Key, out var setting))
                     ApplyOverride(doc, collection, setting);
             }
 

@@ -209,7 +209,11 @@ class DataSourceSlot<T>
 - 첫 판정이 오래 걸리는 대형 케이스 대비: 기존 marquee `_progressBar` 재사용 (UI freeze 인상 방지)
 - Windows 실측으로 확정 필요 (특히 만 건 이상 매칭 시 BoundingBox 일괄 조회)
 
-### 8. 매칭 Status 엑셀 출력 — 리포트화 (검토 단계)
+### 8. 매칭 Status 엑셀 출력 — 리포트화 (검토 단계 — 단기안은 Sub-system 탭에 첫 구현)
+
+> **구현 현황**: 아래 "단기 = CSV 요약 블록" 방향이 Sub-system 탭 `[현황 리포트 출력]`으로
+> 첫 구현됨 (헤더 블록 + Sub-system별 요약 + 상세 리스트 — 11번 참조). 기존 4개 탭의
+> `매칭 Status 출력`은 아직 행 단위 리스트 그대로 — 요약 블록 이식은 요구 항목 확정 후.
 
 **배경**
 현재 출력은 행 단위 CSV 리스트(항목·Stage·매칭 O/X)뿐. 생산관리자들은 리스트에 더해 **통계치가 리포트 형태로 정리된 출력물**을 원함. Excel 출력 전반의 개선 검토 필요.
@@ -259,6 +263,32 @@ Spool / Hydrotest / Equipment 탭은 OASIS 로드 구현 완료 (`SqlLoader`, �
 - UI: 각 탭 `[적용] [공종 초기화] [전체 초기화]` 3버튼.
 - 기반은 이미 있음: stage 캐시가 `VisualModule`별로 분리되어 있어 (ColorOverrideEngine)
   누적 painted 셋만 추가하면 됨.
+
+### 11. Sub-system 탭 — 구현됨 (Windows 검증 대기) + 확장 잔여
+
+**구현 현황**: `UI/SubSystemTab.cs` + `SqlLoader.LoadSubSystemElements` +
+`ColorOverrideEngine.ApplySubSystem`(`VisualModule.SubSystem`) + `SubSystemElement`/
+`ProgressStatus`/`SubSystemPalette`(DataModels). OASIS 전용 — 새 SQL 없이 기존 검증 쿼리
+(LoadEquipment/LoadHydrotest)를 재사용해 Sub-system 축으로 감싼다 (Equipment
+`SUB-SYSTEM`→TAG NO / Piping `Sub-System`→PKGNO, Sub-system 미지정 행은 제외 + 건수 보고).
+매칭은 개발 규칙대로 TagSearcher 재사용 (Equipment 태그도 digit 포함 정확 일치라 전체 워크
+인덱스로 조회됨 — EquipmentSearcher의 레벨 타겟 인덱스는 건드리지 않음). 선택 UI는 좌측
+검색+체크 테이블(~400개) ↔ 우측 선택 누적 테이블 + 하단 개수 라벨. 가시화 2모드
+(sub-system별 팔레트 고유색 / 진행 3단계) + CSV 현황 리포트(8번 단기안).
+
+**확장 잔여 (결정/데이터 대기)**
+- **Spool 단위 sub-system**: 현재 배관은 PKG 노드 색칠이 하위 스풀을 커버. 개별 스풀
+  granularity가 필요해지면 `Piping_Spool`에 Sub-System 컬럼 계약 확정 후
+  `LoadSubSystemElements`에 추가 (Discipline enum 확장).
+- **EIT Tray / Cable 편입**: OASIS 테이블 자체가 없음 — 9번 항목 해소 후 동일 패턴으로 추가.
+- **Excel 소스**: 미지원 (OASIS 전용). 필요 시 DataSourcePanel 이중 소스로 확장 —
+  Excel에 Sub-system 컬럼 계약이 먼저.
+- **집계 범위(ScopePanel) 미배선** — 필요 시 7번 공용 컴포넌트 그대로 연결 가능.
+- **팔레트 색 사용자 지정 없음** (자동 배정만). 색은 선택 순서 기준 배정, 세션 내 유지.
+- **선택 축소 후 재적용 시 이전 색 잔존**: 다른 탭과 동일한 10번 공통 문제 (해제된
+  sub-system의 색은 `전체 초기화`로만 제거됨).
+- 우측 테이블 `매칭` 열과 리포트의 매칭 O/X는 **마지막 [적용] 스냅샷** 기준 — 적용에
+  포함되지 않았던 sub-system은 "-" 표시 (미적용 상태에서 O로 찍히는 기존 탭 결함을 답습하지 않음).
 
 ## 개발 규칙
 

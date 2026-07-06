@@ -33,6 +33,7 @@ namespace NavisVisualizer.UI
         private EquipmentTab _equipmentTab;
         private EitTrayTab _eitTrayTab;
         private CableTab _cableTab;
+        private SubSystemTab _subSystemTab;
         private ToolsTab _toolsTab;
 
         public MainDockablePanel()
@@ -70,6 +71,11 @@ namespace NavisVisualizer.UI
             _cableTab.Dock = DockStyle.Fill;
             cablePage.Controls.Add(_cableTab);
 
+            var subSysPage = new TabPage("Sub-system");
+            _subSystemTab = new SubSystemTab(this);
+            _subSystemTab.Dock = DockStyle.Fill;
+            subSysPage.Controls.Add(_subSystemTab);
+
             var toolPage = new TabPage("Tools");
             _toolsTab = new ToolsTab(this);
             _toolsTab.Dock = DockStyle.Fill;
@@ -80,6 +86,7 @@ namespace NavisVisualizer.UI
             _tabControl.TabPages.Add(eqPage);
             _tabControl.TabPages.Add(eitPage);
             _tabControl.TabPages.Add(cablePage);
+            _tabControl.TabPages.Add(subSysPage);
             _tabControl.TabPages.Add(toolPage);
 
             Controls.Add(_tabControl);

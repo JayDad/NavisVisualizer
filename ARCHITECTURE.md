@@ -23,9 +23,10 @@ Excel (.xlsx/.xls/.xlsb)          OASIS SQL Server ([Navis] 스키마)
 | **Hydrotest** | 6 (Review → Reinstatement) | Test Package No. (DisplayName) | 재귀 탐색 (WalkAndIndex) | `TagSearcher` 공유 |
 | **Equipment** | 4 (Delivery → Inspection) | Tag No. (DisplayName, prefix 지원) | 레벨 타겟 (BuildIndexForTags) | `EquipmentSearcher` 전용 |
 | **EIT Tray** | 4 (Tray 설치 → Cable 완료) | Tray Number (leading `/` 정규화 후) | 재귀 탐색 (WalkAndIndex) | `TagSearcher` 공유 |
+| **Sub-system** | 그룹 2모드 (sub-system별 고유색 / 진행 3단계) | Tag No. + Test Package No. (Sub-system 축 통합) | 재귀 탐색 (WalkAndIndex) | `TagSearcher` 공유 |
 
 ### Searcher 분리 근거
-- **TagSearcher**: Spool / Hydrotest / EIT Tray는 *동일* 매칭 전략(`WalkAndIndex` + `FindBySpoolIds`) — 한 번 빌드하면 셋 다 조회 가능
+- **TagSearcher**: Spool / Hydrotest / EIT Tray / Sub-system은 *동일* 매칭 전략(`WalkAndIndex` + `FindBySpoolIds`) — 한 번 빌드하면 전부 조회 가능
 - **EquipmentSearcher**: 레벨-타겟 전략으로 인덱스 구조가 근본적으로 달라 충돌 방지 목적의 물리적 분리
 - 단일 Searcher 공유 시: Equipment 먼저 적용 → TagSearcher 탭은 비어 있는 레벨-타겟 인덱스를 재사용 → 0 매칭 (버그)
 
@@ -60,6 +61,10 @@ Excel (.xlsx/.xls/.xlsb)          OASIS SQL Server ([Navis] 스키마)
 | Hydrotest | `[Navis].[Piping_HydrotestPKG]` | `PKGNO`→TestPkgId, `Sub-System`→SystemNo, `LINESVC`→LineService |
 | Equipment | `[Navis].[Mech_EQ]` + `[All_EQ]` 병합 (Mech 우선) | TAG NO 선행 `/` 정규화, `Delivered` **날짜**→StageDates[Delivery] 직접 매핑 |
 
+- **Sub-system 탭은 OASIS 전용** — 새 SQL 없이 `LoadEquipment`+`LoadHydrotest`를 재사용해
+  Sub-system 축으로 감싼다 (`SqlLoader.LoadSubSystemElements`). Equipment `SUB-SYSTEM`→TAG NO,
+  Piping `Sub-System`→PKGNO. Sub-system 미지정 행은 제외(건수 보고). PKG 노드 색칠이
+  하위 스풀/배관을 커버하므로 배관은 PKG 단위로 충분
 - EIT Tray / Cable 탭은 OASIS 미지원 — 트레이 진척 테이블 부재, EIT_Cable에 Node 매핑 부재
   (상세: `docs/SQL_DB_CONNECTION_ANALYSIS.md`)
 
@@ -97,6 +102,11 @@ GetStageAtDate(referenceDate):
 - 기준일과 `Tray install date` 비교로 NotStarted/Installed 판정
 - Tray Installed 이후: `Best Cable Progress` 기준 (≥100% → Completed, >0% → Pulling)
 - Cable Progress는 날짜 미보유 → 현재 상태 기준 (입력 데이터에 per-cable 완료일 추가 시 stage별 날짜 로직으로 교체)
+
+**Sub-system** (`ProgressStatus` 3단계 정규화):
+- 공종마다 stage 수가 달라(Equipment 4 / Hydrotest 6) 단일 색상 체계로 묶기 위해
+  `SubSystemElement.StatusAt(기준일)`이 미착수/진행중/완료로 접는다
+  (마지막 stage 도달 = 완료, 그 외 착수 = 진행중) — 원본 `GetStageAtDate` 재사용
 
 ### 3. Model Item Indexing (`Searchers/ModelItemSearcher.cs`)
 
@@ -181,9 +191,9 @@ Apply:
 
 ### 6. UI Architecture (`UI/`)
 
-**탭 구성:** Hydrotest | Spool | Equipment | Tools
+**탭 구성:** Hydrotest | Spool | Equipment | EIT Tray | Cable Pull | Sub-system | Tools
 
-**공통 패턴 (3개 탭 동일):**
+**공통 패턴 (날짜 기반 탭 동일):**
 - DateTimePicker (기준일, 기본: 오늘)
 - 2열 색상 패널 (색상 피커 + 투명도 드롭다운)
 - 색상 변경 시 증분 업데이트 (캐시 활용)
@@ -191,6 +201,21 @@ Apply:
 - 검색 + "매칭 Status 출력" CSV Export
 - ListView 컬럼 정렬 (오름차순/내림차순)
 - 적용 / 전체 초기화 / 속성 쓰기 / Viewpoint 저장 / NWD Export
+
+**Sub-system 탭 (`UI/SubSystemTab.cs`):**
+- OASIS 전용 로드 (단일 소스 — DataSourcePanel 미사용)
+- 시각화 2모드 라디오: **Sub-system별 색상**(선택 순서대로 `SubSystemPalette` 20색 자동 배정,
+  한 번 배정된 색은 세션 내 유지) / **공정 단계별**(미착수·진행중·완료 3색 + 기준일,
+  색상 패널은 이 모드에서만 활성)
+- 선택 UI: 좌측 검색 필터 + 체크박스 ListView(~400개 스크롤) ↔ 우측 선택 누적 ListView
+  (색 견본·요소수·매칭수) + 하단 선택 개수/요소 합계 라벨. [표시 전체선택]은 필터 통과
+  항목만, [선택 해제]는 우측 하이라이트만, [전체 해제]는 전부
+- 우측 행 클릭 → 해당 sub-system 매칭 아이템 3D 선택·포커스
+- [현황 리포트 출력]: CSV 리포트 (헤더 블록 + Sub-system별 요약(공종/매칭/단계/완료율) +
+  상세 리스트). 선택이 있으면 선택만, 없으면 전체. 매칭 O/X는 마지막 적용 스냅샷 기준,
+  미적용 sub-system은 "-" (CLAUDE.md 8번 단기안의 첫 구현)
+- 적용은 `ColorOverrideEngine.ApplySubSystem` — 그룹 키(sub-system명 또는 ProgressStatus명)로
+  묶어 그룹당 1회 색상, 캐시는 `VisualModule.SubSystem`으로 격리
 
 **Tools 탭:**
 - Property Dumper: 선택 아이템 속성 CSV 출력
