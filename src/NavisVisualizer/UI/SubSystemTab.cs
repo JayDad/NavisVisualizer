@@ -133,7 +133,7 @@ namespace NavisVisualizer.UI
             modeGroup.Controls.Add(modeFlow);
 
             _stagePanel = BuildColorGrid(
-                new[] { SubSystemStage.NotStarted }.Concat(SubSystemStageInfo.OrderedStages).ToArray(),
+                SubSystemStageInfo.GridOrder,
                 SubSystemStageInfo.Labels, _stageSettings, _stageChecks, ApplyMode.Stage);
             _progressPanel = BuildColorGrid(
                 ProgressStatusInfo.Ordered,
@@ -294,14 +294,15 @@ namespace NavisVisualizer.UI
                 GridLines = true,
                 HideSelection = true,
             };
-            _lvAll.Columns.Add("Sub-system", 96);
-            _lvAll.Columns.Add("Description", 105);
-            _lvAll.Columns.Add("단계", 54);
-            _lvAll.Columns.Add("A-ITR", 52);
-            _lvAll.Columns.Add("B-ITR", 52);
-            _lvAll.Columns.Add("C-ITR", 52);
-            _lvAll.Columns.Add("P.A", 48);
-            _lvAll.Columns.Add("P.B", 48);
+            _lvAll.Columns.Add("Sub-system", 92);
+            _lvAll.Columns.Add("Description", 98);
+            _lvAll.Columns.Add("단계", 52);
+            _lvAll.Columns.Add("MCC계획", 66);
+            _lvAll.Columns.Add("A-ITR", 50);
+            _lvAll.Columns.Add("B-ITR", 50);
+            _lvAll.Columns.Add("C-ITR", 50);
+            _lvAll.Columns.Add("P.A", 46);
+            _lvAll.Columns.Add("P.B", 46);
             _lvAll.Columns.Add("요소", 40);
             _lvAll.DoubleClick += (s, e) => AddHighlightedLeft();
 
@@ -314,10 +315,11 @@ namespace NavisVisualizer.UI
                 HideSelection = true,
             };
             _lvSelected.Columns.Add("", 20);
-            _lvSelected.Columns.Add("Sub-system", 92);
-            _lvSelected.Columns.Add("단계", 54);
-            _lvSelected.Columns.Add("요소", 38);
-            _lvSelected.Columns.Add("매칭", 44);
+            _lvSelected.Columns.Add("Sub-system", 86);
+            _lvSelected.Columns.Add("단계", 50);
+            _lvSelected.Columns.Add("MCC계획", 62);
+            _lvSelected.Columns.Add("요소", 36);
+            _lvSelected.Columns.Add("매칭", 42);
             _lvSelected.SelectedIndexChanged += LvSelected_SelectedIndexChanged;
             _lvSelected.DoubleClick += (s, e) => RemoveHighlightedRight();
 
@@ -444,6 +446,13 @@ namespace NavisVisualizer.UI
         private int ElementCount(string name) =>
             _bySubSystem.TryGetValue(name, out var els) ? els.Count : 0;
 
+        /// <summary>단계 모드에서 실제 칠할 색을 정하는 유효 단계 — 지연이면 Delayed, 아니면 실적 단계.</summary>
+        private SubSystemStage? EffectiveStage(SubSystemMasterData m, DateTime referenceDate)
+        {
+            if (m == null) return null;
+            return m.IsDelayed(referenceDate) ? SubSystemStage.Delayed : m.GetStageAtDate(referenceDate);
+        }
+
         // ----- 선택 UI (dual-list + 화살표) -----
 
         private void RefreshLeftList()
@@ -467,13 +476,16 @@ namespace NavisVisualizer.UI
                 var item = new ListViewItem(name) { Tag = name };
                 item.SubItems.Add(desc);
                 item.SubItems.Add(m != null ? SubSystemStageInfo.Labels[m.GetStageAtDate(referenceDate)] : "-");
+                item.SubItems.Add(m?.PlanText(referenceDate) ?? "-");
                 item.SubItems.Add(m?.ItrAText ?? "-");
                 item.SubItems.Add(m?.ItrBText ?? "-");
                 item.SubItems.Add(m?.ItrCText ?? "-");
                 item.SubItems.Add(m?.PunchAText ?? "-");
                 item.SubItems.Add(m?.PunchBText ?? "-");
                 item.SubItems.Add(count.ToString());
-                if (count == 0) item.ForeColor = Color.Gray;       // 마스터에만 있고 요소 미배정
+                // 지연 행은 빨강으로 강조(계획 대비 MCC 실적 미입력), 요소 0건은 회색
+                if (m != null && m.IsDelayed(referenceDate)) item.ForeColor = Color.Firebrick;
+                else if (count == 0) item.ForeColor = Color.Gray;  // 마스터에만 있고 요소 미배정
                 if (_selected.Contains(name)) item.BackColor = PickedBack;
                 _lvAll.Items.Add(item);
             }
@@ -555,11 +567,14 @@ namespace NavisVisualizer.UI
                 int count = ElementCount(name);
 
                 var item = new ListViewItem("■") { UseItemStyleForSubItems = false, Tag = name };
-                // 스와치 = 마스터 단계색 (기준일 기준) — 마스터 없으면 중립 회색
-                item.ForeColor = m != null && _stageSettings.TryGetValue(m.GetStageAtDate(referenceDate), out var st)
+                // 스와치 = 실제 칠해질 색(지연이면 빨강, 아니면 마스터 단계색) — 3D와 일치
+                var eff = EffectiveStage(m, referenceDate);
+                item.ForeColor = eff.HasValue && _stageSettings.TryGetValue(eff.Value, out var st)
                     ? st.DisplayColor : Color.DimGray;
                 item.SubItems.Add(name);
                 item.SubItems.Add(m != null ? SubSystemStageInfo.Labels[m.GetStageAtDate(referenceDate)] : "-");
+                var planSub = item.SubItems.Add(m?.PlanText(referenceDate) ?? "-");
+                if (m != null && m.IsDelayed(referenceDate)) planSub.ForeColor = Color.Firebrick;
                 item.SubItems.Add(count.ToString());
 
                 string matchText = "-";
@@ -676,13 +691,11 @@ namespace NavisVisualizer.UI
                     if (kv.Value.Checked)
                         groupSettings[kv.Key.ToString()] = _stageSettings[kv.Key];
 
-                // 요소는 자기 sub-system의 마스터 단계색을 받는다. 마스터 외 sub-system
-                // 요소는 그룹 키 null → 색칠 제외(매칭 집계에는 포함).
-                result = _main.OverrideEngine.ApplySubSystem(doc, targets, el =>
-                {
-                    var m = GetMaster(el.SubSystem);
-                    return m?.GetStageAtDate(referenceDate).ToString();
-                }, groupSettings);
+                // 요소는 자기 sub-system의 유효 단계색을 받는다(지연이면 Delayed=빨강).
+                // 마스터 외 sub-system 요소는 그룹 키 null → 색칠 제외(매칭 집계에는 포함).
+                result = _main.OverrideEngine.ApplySubSystem(doc, targets,
+                    el => EffectiveStage(GetMaster(el.SubSystem), referenceDate)?.ToString(),
+                    groupSettings);
             }
             else
             {
@@ -741,12 +754,14 @@ namespace NavisVisualizer.UI
             lines.Add($"기준일,{referenceDate:yyyy-MM-dd}");
             lines.Add($"데이터 소스,{Csv("OASIS " + _loadLabel)}");
             lines.Add($"Sub-system 마스터,{(_master != null ? $"{_master.Count}개 로드됨" : "미구성 — 요소 파생 목록 기준")}");
+            int delayedCount = names.Count(n => { var mm = GetMaster(n); return mm != null && mm.IsDelayed(referenceDate); });
+            lines.Add($"MCC 지연,{delayedCount}개 (계획일 경과·P-MCC/MCC 실적 미입력)");
             lines.Add($"집계 대상,{(selectedOnly ? "선택" : "전체")} Sub-system {names.Count}개");
             lines.Add($"매칭 기준,{(_appliedOnce ? "가시화 적용 결과 (적용된 Sub-system만 산정)" : "미적용 — 매칭 미산정")}");
 
             lines.Add("");
             lines.Add("[Sub-system별 요약]");
-            lines.Add("Sub-system,Description,단계,A-ITR,B-ITR,C-ITR,Punch A,Punch B,요소,Equipment,Piping,매칭,미매칭,미착수,진행중,완료,완료율(%)");
+            lines.Add("Sub-system,Description,단계,MCC계획,지연(일),A-ITR,B-ITR,C-ITR,Punch A,Punch B,요소,Equipment,Piping,매칭,미매칭,미착수,진행중,완료,완료율(%)");
 
             int tElems = 0, tEq = 0, tPip = 0, tMatched = 0, tUnmatched = 0, tNs = 0, tIp = 0, tDone = 0;
             bool anyMatchInfo = false;
@@ -782,15 +797,17 @@ namespace NavisVisualizer.UI
                 string stageLabel = m != null
                     ? SubSystemStageInfo.Labels[m.GetStageAtDate(referenceDate)]
                     : (_master != null ? "마스터 외" : "-");
+                string planStr = m?.MccPlan?.ToString("yyyy-MM-dd") ?? "";
+                string delayStr = (m != null && m.IsDelayed(referenceDate)) ? m.DelayDays(referenceDate).ToString() : "-";
                 string doneRate = els.Count > 0 ? (done * 100.0 / els.Count).ToString("F1") : "-";
-                lines.Add($"{Csv(name)},{Csv(m?.Description ?? "")},{Csv(stageLabel)}," +
+                lines.Add($"{Csv(name)},{Csv(m?.Description ?? "")},{Csv(stageLabel)},{planStr},{delayStr}," +
                     $"{Csv(m?.ItrAText ?? "-")},{Csv(m?.ItrBText ?? "-")},{Csv(m?.ItrCText ?? "-")}," +
                     $"{Csv(m?.PunchAText ?? "-")},{Csv(m?.PunchBText ?? "-")}," +
                     $"{els.Count},{eq},{pip},{matchedText},{unmatchedText},{ns},{ip},{done},{doneRate}");
                 tElems += els.Count; tEq += eq; tPip += pip; tNs += ns; tIp += ip; tDone += done;
             }
             string totalRate = tElems > 0 ? (tDone * 100.0 / tElems).ToString("F1") : "-";
-            lines.Add($"합계 ({names.Count}개),,,,,,,,{tElems},{tEq},{tPip},{(anyMatchInfo ? tMatched.ToString() : "-")}," +
+            lines.Add($"합계 ({names.Count}개),,,,,,,,,,{tElems},{tEq},{tPip},{(anyMatchInfo ? tMatched.ToString() : "-")}," +
                 $"{(anyMatchInfo ? tUnmatched.ToString() : "-")},{tNs},{tIp},{tDone},{totalRate}");
 
             lines.Add("");
@@ -866,20 +883,20 @@ namespace NavisVisualizer.UI
                 int total = _selectionOrder.Sum(ElementCount);
                 linesOut.Add($"선택 Sub-system {_selected.Count}개 · 요소 {total:N0}건 (기준일 {referenceDate:yyyy-MM-dd})");
 
-                // 마스터가 있으면 sub-system 단계 분포
+                // 마스터가 있으면 sub-system 유효단계 분포(지연 포함 — 실제 칠할 색 기준)
                 if (_master != null)
                 {
                     var stageCounts = new Dictionary<SubSystemStage, int>();
                     foreach (var name in _selectionOrder)
                     {
-                        var m = GetMaster(name);
-                        if (m == null) continue;
-                        var st = m.GetStageAtDate(referenceDate);
-                        stageCounts[st] = stageCounts.TryGetValue(st, out int c) ? c + 1 : 1;
+                        var eff = EffectiveStage(GetMaster(name), referenceDate);
+                        if (!eff.HasValue) continue;
+                        stageCounts[eff.Value] = stageCounts.TryGetValue(eff.Value, out int c) ? c + 1 : 1;
                     }
                     var parts = new List<string>();
-                    var allStages = new[] { SubSystemStage.NotStarted }.Concat(SubSystemStageInfo.OrderedStages).Reverse();
-                    foreach (var st in allStages)
+                    var order = new[] { SubSystemStage.Delayed, SubSystemStage.Pcc, SubSystemStage.Mcc,
+                        SubSystemStage.PartialMcc, SubSystemStage.Walkdown, SubSystemStage.NotStarted };
+                    foreach (var st in order)
                         if (stageCounts.TryGetValue(st, out int c) && c > 0)
                             parts.Add($"{SubSystemStageInfo.Labels[st]} {c}");
                     if (parts.Count > 0)

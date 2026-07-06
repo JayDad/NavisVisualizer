@@ -197,7 +197,7 @@ FROM [Navis].[Piping_HydrotestPKG]";
         {
             const string baseSql = @"
 SELECT [SUB-SYSTEM],[DESCRIPTION],
-       [Walkdown],[Partial MCC],[MCC],[PCC],
+       [MCC Plan],[Walkdown],[Partial MCC],[MCC],[PCC],
        [A-ITR TOTAL],[A-ITR DONE],[B-ITR TOTAL],[B-ITR DONE],[C-ITR TOTAL],[C-ITR DONE],
        [PUNCH A TOTAL],[PUNCH A CLOSED],[PUNCH B TOTAL],[PUNCH B CLOSED]
 FROM [Navis].[SubSystem_Master]";
@@ -214,6 +214,7 @@ FROM [Navis].[SubSystem_Master]";
                 {
                     SubSystemNo = no,
                     Description = GetString(r, "DESCRIPTION"),
+                    MccPlan      = GetDate(r, "MCC Plan"),
                     ItrATotal    = GetInt(r, "A-ITR TOTAL"),
                     ItrADone     = GetInt(r, "A-ITR DONE"),
                     ItrBTotal    = GetInt(r, "B-ITR TOTAL"),

@@ -189,6 +189,7 @@ namespace NavisVisualizer.Models
                 [SubSystemStage.PartialMcc] = new ColorSetting { DisplayColor = Color.FromArgb(255, 140, 50),  Transparency = 0.0 },
                 [SubSystemStage.Mcc]        = new ColorSetting { DisplayColor = Color.FromArgb(65, 105, 225),  Transparency = 0.0 },
                 [SubSystemStage.Pcc]        = new ColorSetting { DisplayColor = Color.FromArgb(0, 128, 0),     Transparency = 0.0 },
+                [SubSystemStage.Delayed]    = new ColorSetting { DisplayColor = Color.FromArgb(220, 20, 20),   Transparency = 0.0 },
             };
 
         public static ColorSetting Unmatched =>
@@ -531,19 +532,28 @@ namespace NavisVisualizer.Models
     /// </summary>
     public enum SubSystemStage
     {
-        NotStarted,
-        Walkdown,     // Walkdown
-        PartialMcc,   // Partial MCC (부분 RFC)
-        Mcc,          // MCC = Ready for Commissioning
-        Pcc,          // PCC
+        NotStarted,   // 0
+        Walkdown,     // 1  Walkdown
+        PartialMcc,   // 2  Partial MCC (부분 RFC)
+        Mcc,          // 3  MCC = Ready for Commissioning (핵심 기점)
+        Pcc,          // 4  PCC
+        Delayed,      // 5  파생 상태 — MCC 계획일 경과 + P-MCC/MCC 실적 미입력. 날짜 스캔 대상 아님.
     }
 
     public static class SubSystemStageInfo
     {
+        /// <summary>날짜 역순 스캔에 쓰는 실적 단계 (Delayed 제외 — 그건 계획 대비 파생).</summary>
         public static readonly SubSystemStage[] OrderedStages =
         {
             SubSystemStage.Walkdown, SubSystemStage.PartialMcc,
             SubSystemStage.Mcc, SubSystemStage.Pcc
+        };
+
+        /// <summary>색상 그리드 표시 순서 — 실적 단계 + 미착수 + Delayed.</summary>
+        public static readonly SubSystemStage[] GridOrder =
+        {
+            SubSystemStage.NotStarted, SubSystemStage.Walkdown, SubSystemStage.PartialMcc,
+            SubSystemStage.Mcc, SubSystemStage.Pcc, SubSystemStage.Delayed,
         };
 
         public static readonly Dictionary<SubSystemStage, string> Labels = new Dictionary<SubSystemStage, string>
@@ -553,6 +563,7 @@ namespace NavisVisualizer.Models
             [SubSystemStage.PartialMcc] = "P-MCC",
             [SubSystemStage.Mcc]        = "MCC",
             [SubSystemStage.Pcc]        = "PCC",
+            [SubSystemStage.Delayed]    = "지연",
         };
     }
 
@@ -567,6 +578,9 @@ namespace NavisVisualizer.Models
         public string Description { get; set; }
         public Dictionary<SubSystemStage, DateTime?> StageDates { get; set; }
             = new Dictionary<SubSystemStage, DateTime?>();
+
+        /// <summary>MCC 계획일 (핵심 기점). 실적(StageDates[Mcc])과 별개 — 지연 판정 기준.</summary>
+        public DateTime? MccPlan { get; set; }
 
         public int? ItrATotal { get; set; }
         public int? ItrADone { get; set; }
@@ -588,6 +602,28 @@ namespace NavisVisualizer.Models
                     return stages[i];
             }
             return SubSystemStage.NotStarted;
+        }
+
+        /// <summary>
+        /// 지연 = MCC 계획일이 기준일까지 도래했는데 P-MCC/MCC 실적이 아직 미입력
+        /// (실적 단계가 P-MCC 미만). MCC가 핵심 기점이므로 계획일 경과 = 지연 관리 대상.
+        /// P-MCC 또는 MCC 실적이 하나라도 있으면 지연 아님.
+        /// </summary>
+        public bool IsDelayed(DateTime referenceDate)
+        {
+            if (!MccPlan.HasValue || MccPlan.Value.Date > referenceDate.Date) return false;
+            return GetStageAtDate(referenceDate) < SubSystemStage.PartialMcc;
+        }
+
+        /// <summary>지연일수 (계획일 경과 일수). 지연 아니면 0.</summary>
+        public int DelayDays(DateTime referenceDate) =>
+            IsDelayed(referenceDate) ? (referenceDate.Date - MccPlan.Value.Date).Days : 0;
+
+        /// <summary>테이블/리포트 표기: 지연 시 "지연 Nd", 아니면 계획일(yy-MM-dd) 또는 "-".</summary>
+        public string PlanText(DateTime referenceDate)
+        {
+            if (IsDelayed(referenceDate)) return $"지연 {DelayDays(referenceDate)}d";
+            return MccPlan.HasValue ? MccPlan.Value.ToString("yy-MM-dd") : "-";
         }
 
         /// <summary>테이블/리포트 공통 표기: "완료(종결)/전체" (Total 미보유 시 "-").</summary>

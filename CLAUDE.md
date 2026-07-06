@@ -278,11 +278,16 @@ EquipmentSearcher의 레벨 타겟 인덱스는 건드리지 않음).
   요소 파생 (요소 0건은 회색, 마스터 외 요소 그룹은 "(마스터 외)" + 건수 진단).
   **테이블 미구성이면 요소 파생 목록으로 자동 fallback** + 단계 모드 비활성.
 - **가시화 2모드**: ① Sub-system 단계별 — 선택한 sub-system의 요소 전체가 그 sub-system의
-  마일스톤 단계색(Walkdown/P-MCC/MCC/PCC + 미착수, 기준일 역순 스캔)을 받음 (기본,
-  마스터 필요). **별도 RFCC 단계 없음** — MCC(또는 Partial MCC)가 Ready for
+  마일스톤 단계색(Walkdown/P-MCC/MCC/PCC + 미착수 + **지연**, 기준일 역순 스캔)을 받음
+  (기본, 마스터 필요). **별도 RFCC 단계 없음** — MCC(또는 Partial MCC)가 Ready for
   Commissioning 의미. **마일스톤은 순차 아님** — P-MCC 없이 바로 MCC 가능. 역순 스캔이
   날짜 보유 여부만 보므로 스킵 자동 허용 (enum 순서 = 달성 수준 랭킹, 시간 순서 아님).
   ② 요소 진행상태별 — 미착수/진행중/완료 3단계 정규화.
+- **MCC 지연 감지**: 마스터에 `MCC Plan`(계획일)이 있고 기준일까지 도래했는데 P-MCC/MCC
+  실적이 미입력(실적 단계 < P-MCC)이면 `IsDelayed` = true → 단계 모드에서 그 sub-system
+  요소를 `Delayed`(빨강) 그룹으로 칠하고, 좌/우 테이블 `MCC계획` 컬럼에 "지연 Nd"(빨강),
+  좌측 행 전체 빨강 강조. 리포트 헤더에 지연 개수 + 요약에 `MCC계획`/`지연(일)` 컬럼.
+  MCC가 핵심 기점이므로 계획 대비 지연을 최우선 시각화.
   (초기 구현의 "sub-system별 팔레트 고유색" 모드는 단계별 모드로 대체되어 제거 —
   `SubSystemPalette` 삭제됨.)
 - **선택 UI (dual-list)**: 좌측 검색(코드+설명)+status 테이블(단계/ITR/Punch/요소 병기)
@@ -296,9 +301,10 @@ CREATE TABLE [Navis].[SubSystem_Master](
   [PJTNO]        varchar(10)   NOT NULL,  -- 프로젝트 필터 (EQ 계열과 동일 컬럼명)
   [SUB-SYSTEM]   varchar(20)   NOT NULL,  -- 요소 테이블의 SUB-SYSTEM/Sub-System 값과 일치
   [DESCRIPTION]  nvarchar(200) NULL,
+  [MCC Plan]     date NULL,               -- MCC 계획일 (핵심 기점) — 지연 판정 기준
   [Walkdown]     date NULL,               -- 이하 마일스톤 실적일 (지난 날짜 = 달성)
   [Partial MCC]  date NULL,               -- 별도 RFCC 없음 — MCC/P-MCC = Ready for Commissioning
-  [MCC]          date NULL,
+  [MCC]          date NULL,               -- MCC 실적일 (계획일과 별개)
   [PCC]          date NULL,
   [A-ITR TOTAL]  int NULL, [A-ITR DONE]     int NULL,  -- ITR: 카테고리별 전체/완료 수
   [B-ITR TOTAL]  int NULL, [B-ITR DONE]     int NULL,
@@ -310,6 +316,8 @@ CREATE TABLE [Navis].[SubSystem_Master](
 - 컬럼명을 바꾸면 `SqlLoader.LoadSubSystemMaster`의 SELECT만 같이 수정 (명시 매핑이라 즉시 오류로 드러남).
 - ITR/Punch가 수치가 아니라 %로 오면 GetInt 대신 ParsePercentage 계열 추가 검토 (§2.2 스케일 함정 참조).
 - 화면 표기는 전부 "완료(종결)/전체" — 좌측 테이블 A-ITR/B-ITR/C-ITR/P.A/P.B 컬럼 + 리포트 요약.
+- `MCC Plan` 미보유(null)면 지연 판정 안 함 — 계획일 없는 sub-system은 지연 대상에서 제외.
+- 마일스톤 날짜가 실적일인지 계획일인지: `MCC Plan`만 계획, 나머지(Walkdown/P-MCC/MCC/PCC)는 실적 가정.
 
 **확장 잔여 (결정/데이터 대기)**
 - **마스터 테이블 실물 생성/적재**: 위 계약으로 DB에 생성 + OASIS 적재 파이프라인은
