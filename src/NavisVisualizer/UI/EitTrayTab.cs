@@ -37,6 +37,7 @@ namespace NavisVisualizer.UI
         private Button _btnViewpoint;
         private Button _btnNwd;
         private Label _lblStats;
+        private Label _lblUnmatched;   // fixed 미매칭(모델 없음) count, pinned to the corner
         private ProgressBar _progressBar;
 
         private int _sortColumn = -1;
@@ -97,7 +98,20 @@ namespace NavisVisualizer.UI
             btnExport.Click += BtnExport_Click;
             searchPanel.Controls.Add(btnExport);
 
-            _lblStats = new Label { Dock = DockStyle.Fill, Text = "로드된 데이터 없음", AutoSize = false, Height = 36 };
+            // Stats row: scoped stats left, fixed 미매칭(모델 없음) count pinned right.
+            var statsRow = new Panel { Dock = DockStyle.Fill, Height = 36 };
+            _lblStats = new Label { Dock = DockStyle.Fill, Text = "로드된 데이터 없음", AutoSize = false };
+            _lblUnmatched = new Label
+            {
+                Dock = DockStyle.Right,
+                Width = 150,
+                AutoSize = false,
+                TextAlign = ContentAlignment.TopRight,
+                ForeColor = Color.Gray,
+                Text = "",
+            };
+            statsRow.Controls.Add(_lblStats);      // Fill added first (lowest z-order)
+            statsRow.Controls.Add(_lblUnmatched);  // Right pinned after
 
             // Aggregation scope group (radios select only; [적용] runs the judgement)
             _scopePanel = new ScopePanel { Dock = DockStyle.Fill };
@@ -155,7 +169,7 @@ namespace NavisVisualizer.UI
             layout.Controls.Add(colorPanel);
             layout.Controls.Add(btnPanel);
             layout.Controls.Add(_progressBar);
-            layout.Controls.Add(_lblStats);
+            layout.Controls.Add(statsRow);
             layout.Controls.Add(searchPanel);
             layout.Controls.Add(_scopePanel);
             layout.Controls.Add(_tabFilter);
@@ -349,23 +363,14 @@ namespace NavisVisualizer.UI
         // ----- 현황 집계 범위 (aggregation scope) -----
 
         /// <summary>
-        /// A row passes the active scope. No scope → all pass. A matched row passes
-        /// when its node was judged inside the scope. An unmatched row (no model node)
-        /// passes only for scopes that keep unmatched rows (전체 모델, 숨김 제외); under
-        /// a positive-membership scope (선택 항목, Clipping 영역) it has no position to
-        /// be inside, so it is dropped — this is why 미매칭 goes to 0 there.
+        /// A row passes the active scope. No scope → all pass; a matched row passes when
+        /// its node was judged inside the scope. An unmatched row (present in the data but
+        /// with no model node — hence no position) is spatially unjudgeable, so it always
+        /// passes: its count is a fixed, scope-independent figure shown in _lblUnmatched,
+        /// not folded into the scoped 매칭 stats.
         /// </summary>
-        private bool InScope(string id)
-        {
-            if (_scopeKeys == null) return true;
-            if (_matchedTrayNos.Contains(id)) return _scopeKeys.Contains(id);
-            return !MatchScopeInfo.ExcludesUnmatched(_scopePanel.CurrentScope);
-        }
-
-        /// <summary>Unmatched rows that survive the active scope (all or none for these tabs).</summary>
-        private int UnmatchedInScope() =>
-            _scopeKeys != null && MatchScopeInfo.ExcludesUnmatched(_scopePanel.CurrentScope)
-                ? 0 : _unmatchedTrayNos.Count;
+        private bool InScope(string id) =>
+            _scopeKeys == null || !_matchedTrayNos.Contains(id) || _scopeKeys.Contains(id);
 
         /// <summary>
         /// Matched raw TrayNumber → ModelItems. The index is keyed by the normalized id
@@ -446,7 +451,7 @@ namespace NavisVisualizer.UI
             int total = _scopeKeys == null ? _trays.Count : _trays.Count(t => InScope(t.TrayNumber));
             _tabFilter.TabPages[0].Text = $"전체 ({total})";
             _tabFilter.TabPages[1].Text = $"매칭 ({matchedInScope})";
-            _tabFilter.TabPages[2].Text = $"미매칭 ({UnmatchedInScope()})";
+            _tabFilter.TabPages[2].Text = $"미매칭 ({_unmatchedTrayNos.Count})";
         }
 
         private void BtnReset_Click(object sender, EventArgs e)
@@ -455,6 +460,7 @@ namespace NavisVisualizer.UI
             if (doc == null) return;
             _main.OverrideEngine.Reset(doc);
             _lblStats.Text = "전체 초기화 완료";
+            _lblUnmatched.Text = "";
         }
 
         private void BtnViewpoint_Click(object sender, EventArgs e)
@@ -587,16 +593,13 @@ namespace NavisVisualizer.UI
                 int matchedInScope = _scopeKeys == null
                     ? _matchedTrayNos.Count
                     : _matchedTrayNos.Count(id => _scopeKeys.Contains(id));
-                line2 = $"매칭 {matchedInScope} / 미매칭 {UnmatchedInScope()}";
+                line2 = $"매칭 {matchedInScope}";
                 if (_scopeKeys != null)
-                {
-                    string note = MatchScopeInfo.ExcludesUnmatched(_scopePanel.CurrentScope)
-                        ? "" : ", 미매칭은 전체";
-                    line2 += $" ({MatchScopeInfo.Label(_scopePanel.CurrentScope)} 기준{note})";
-                }
+                    line2 += $" ({MatchScopeInfo.Label(_scopePanel.CurrentScope)} 기준)";
             }
             _lblStats.Text = string.Join("  ", parts)
                            + (!string.IsNullOrEmpty(line2) ? $"\n{line2}" : "");
+            _lblUnmatched.Text = hasApplied ? $"미매칭 {_unmatchedTrayNos.Count}건" : "";
         }
 
         private Dictionary<EitStage, ColorSetting> CloneDefaults(Dictionary<EitStage, ColorSetting> defaults)

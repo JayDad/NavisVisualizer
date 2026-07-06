@@ -38,18 +38,6 @@ namespace NavisVisualizer.Services
                 default:                        return "전체 모델";
             }
         }
-
-        /// <summary>
-        /// Whether a scope drops rows that have no matched model node.
-        /// Positive-membership scopes (선택 항목, Clipping 영역) require a model
-        /// position — an unmatched row (no node) definitionally cannot be inside the
-        /// selection or clip volume, so it is out of scope. 숨김 제외 is a negative
-        /// filter (only removes hidden items); an unmatched row is not hidden, so it
-        /// stays. 전체 모델 keeps everything. This is why the 미매칭 count shrinks to 0
-        /// under 선택 항목/Clipping but is unaffected by 숨김 제외.
-        /// </summary>
-        public static bool ExcludesUnmatched(MatchScope scope) =>
-            scope == MatchScope.SelectedItems || scope == MatchScope.ClippingVolume;
     }
 
     /// <summary>
