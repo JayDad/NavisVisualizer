@@ -646,8 +646,15 @@ namespace NavisVisualizer.UI
         private void UpdateStats(OverrideResult result = null)
         {
             var referenceDate = _dtpReference.Value;
-            var counts = _packages
-                .Where(p => InScope(p.TestPkgId))
+            bool hasApplied = _matchedPkgIds.Count > 0 || _unmatchedPkgIds.Count > 0;
+
+            // Stage 현황 counts MATCHED (in-scope) packages only once matching is applied.
+            // Unmatched rows have no model node, so folding their stages in is misleading —
+            // the breakdown would show numbers even with 0 matches. Before applying, show all.
+            var statBasis = _packages.Where(p => InScope(p.TestPkgId));
+            if (hasApplied)
+                statBasis = statBasis.Where(p => _matchedPkgIds.Contains(p.TestPkgId));
+            var counts = statBasis
                 .GroupBy(p => p.GetStageAtDate(referenceDate))
                 .ToDictionary(g => g.Key, g => g.Count());
 
@@ -660,7 +667,6 @@ namespace NavisVisualizer.UI
             }
 
             string line2 = "";
-            bool hasApplied = _matchedPkgIds.Count > 0 || _unmatchedPkgIds.Count > 0;
             if (hasApplied)
             {
                 int matchedInScope = _scopeKeys == null
