@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Web.Script.Serialization;
 using Autodesk.Navisworks.Api;
 using Autodesk.Navisworks.Api.ComApi;
 using ComTypes = System.Runtime.InteropServices.ComTypes;
@@ -39,11 +40,30 @@ namespace NavisVisualizer.Services
         public bool KeepPositiveSide { get; set; } = true;
 
         /// <summary>
-        /// Returns the enabled clipping planes of the current view. Empty list means
+        /// Returns the active clipping planes of the current view. Empty list means
         /// "no active section" — callers treat every point as visible in that case.
-        /// Never throws; returns empty on any COM failure.
+        ///
+        /// A section BOX is not exposed through the COM ClippingPlanes() collection (that
+        /// only holds Planes-mode planes), so it is read first from the managed
+        /// View.GetClippingPlanes() JSON, which includes the OrientedBox. Planes mode and
+        /// the no-section case fall through to the COM path (unchanged, already working).
+        /// Never throws; returns empty on any failure.
         /// </summary>
         public List<ClipPlane> GetActiveClipPlanes(Document doc)
+        {
+            if (doc == null) return new List<ClipPlane>();
+
+            var box = TryGetSectionBoxPlanes(doc);
+            if (box != null) return box;   // enabled section box → 6 planes from OrientedBox
+
+            return GetActiveClipPlanesCom(doc);
+        }
+
+        /// <summary>
+        /// COM ClippingPlanes() reader (Planes mode). Empty on any COM failure. This is the
+        /// original path; the managed box reader above takes priority when a box is active.
+        /// </summary>
+        private List<ClipPlane> GetActiveClipPlanesCom(Document doc)
         {
             var planes = new List<ClipPlane>();
             if (doc == null) return planes;
@@ -112,11 +132,118 @@ namespace NavisVisualizer.Services
             return false;
         }
 
+        /// <summary>
+        /// Reads an enabled section BOX from the managed View.GetClippingPlanes() JSON and
+        /// returns it as six half-space planes. Returns null when there is no box (Planes
+        /// mode / no section) or the box can't be interpreted with certainty — callers then
+        /// fall back to the COM plane reader, so this never regresses the working plane path.
+        ///
+        /// The JSON model (NW2017+): { "OrientedBox": { "Box": [[minX,minY,minZ],
+        /// [maxX,maxY,maxZ]], "Rotation": [rx,ry,rz] }, "Enabled": true }. The box is
+        /// expressed as INWARD-normal planes so "inside" is the positive side — matching the
+        /// KeepPositiveSide convention that already works for single planes.
+        /// </summary>
+        private List<ClipPlane> TryGetSectionBoxPlanes(Document doc)
+        {
+            try
+            {
+                string json = ReadClippingPlanesJson(doc);
+                if (string.IsNullOrWhiteSpace(json)) return null;
+
+                if (!(new JavaScriptSerializer().DeserializeObject(json) is Dictionary<string, object> root))
+                    return null;
+
+                if (!root.TryGetValue("OrientedBox", out var obObj) ||
+                    !(obObj is Dictionary<string, object> ob))
+                    return null; // not a box → let COM handle Planes mode
+
+                // Whole-set enable gate: a disabled box means no clipping.
+                if (root.TryGetValue("Enabled", out var en) && en is bool eb && !eb)
+                    return new List<ClipPlane>();
+
+                if (!TryReadDoubleMatrix(ob, "Box", out var box) ||
+                    box.Length < 2 || box[0].Length < 3 || box[1].Length < 3)
+                    return null;
+
+                double minX = box[0][0], minY = box[0][1], minZ = box[0][2];
+                double maxX = box[1][0], maxY = box[1][1], maxZ = box[1][2];
+
+                // Only axis-aligned boxes are handled with certainty. A rotated box needs the
+                // Rotation convention confirmed against a real dump — bail (COM fallback)
+                // rather than ship a wrong volume.
+                if (TryReadDoubles(ob, "Rotation", out var rot))
+                    foreach (var r in rot)
+                        if (Math.Abs(r) > 1e-6) return null;
+
+                return new List<ClipPlane>
+                {
+                    new ClipPlane { A =  1, B =  0, C =  0, D = -minX }, // x >= minX
+                    new ClipPlane { A = -1, B =  0, C =  0, D =  maxX }, // x <= maxX
+                    new ClipPlane { A =  0, B =  1, C =  0, D = -minY }, // y >= minY
+                    new ClipPlane { A =  0, B = -1, C =  0, D =  maxY }, // y <= maxY
+                    new ClipPlane { A =  0, B =  0, C =  1, D = -minZ }, // z >= minZ
+                    new ClipPlane { A =  0, B =  0, C = -1, D =  maxZ }, // z <= maxZ
+                };
+            }
+            catch { return null; }
+        }
+
+        /// <summary>
+        /// Calls View.GetClippingPlanes() by reflection so a signature mismatch on a given
+        /// Navisworks build degrades to null (COM fallback) instead of a build break.
+        /// </summary>
+        internal static string ReadClippingPlanesJson(Document doc)
+        {
+            var view = doc?.ActiveView;
+            if (view == null) return null;
+            var mi = view.GetType().GetMethod("GetClippingPlanes", Type.EmptyTypes);
+            if (mi == null) return null;
+            return mi.Invoke(view, null) as string;
+        }
+
+        private static bool TryReadDoubles(Dictionary<string, object> d, string key, out double[] arr)
+        {
+            arr = null;
+            if (!d.TryGetValue(key, out var v) || !(v is object[] a)) return false;
+            arr = new double[a.Length];
+            for (int i = 0; i < a.Length; i++) arr[i] = Convert.ToDouble(a[i]);
+            return true;
+        }
+
+        private static bool TryReadDoubleMatrix(Dictionary<string, object> d, string key, out double[][] m)
+        {
+            m = null;
+            if (!d.TryGetValue(key, out var v) || !(v is object[] a)) return false;
+            m = new double[a.Length][];
+            for (int i = 0; i < a.Length; i++)
+            {
+                if (!(a[i] is object[] row)) return false;
+                m[i] = new double[row.Length];
+                for (int j = 0; j < row.Length; j++) m[i][j] = Convert.ToDouble(row[j]);
+            }
+            return true;
+        }
+
         /// <summary>Diagnostic dump of the raw clip-plane structure for Windows calibration.</summary>
         public string DumpClipPlanes(Document doc)
         {
             var sb = new StringBuilder();
             if (doc == null) { return "No document open."; }
+
+            // Managed JSON first — this is where the section BOX lives (OrientedBox).
+            // Dump it for BOTH a Planes section and a Box section to compare formats.
+            sb.AppendLine("=== View.GetClippingPlanes() (managed JSON — 박스 포함 경로) ===");
+            try
+            {
+                string json = ReadClippingPlanesJson(doc);
+                sb.AppendLine(string.IsNullOrEmpty(json) ? "(빈 문자열 / 메서드 없음)" : json);
+                var boxPlanes = TryGetSectionBoxPlanes(doc);
+                sb.AppendLine(boxPlanes == null
+                    ? "→ 박스 아님(또는 회전 박스/미해석) → COM 평면 경로 사용"
+                    : $"→ 박스 해석됨: {boxPlanes.Count} 평면");
+            }
+            catch (Exception ex) { sb.AppendLine($"(GetClippingPlanes 실패: {ex.Message})"); }
+            sb.AppendLine();
 
             try
             {

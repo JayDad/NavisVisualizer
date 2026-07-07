@@ -52,9 +52,14 @@ federated 구조에서 `MEBTray1.nwc`(파일명에 digit)가 `/SM/MEB/ELEC` → 
 
 `CableTab`의 `보이는 것만` 체크박스는 노드별 박스(점 마커)의 `BoundingBox().Center`가 화면에 보이는지로 리스트를 거른다. 단면(clip plane)은 플러그인이 만들지 않고 Navisworks 기본 Sectioning으로 자른 것을 읽기만 한다. 판정 = **비숨김(`SectionService.IsEffectivelyHidden`, 조상까지 검사) AND 활성 단면 평면 내부**. 노드에 박스 여러 개면 하나라도 보이면 visible.
 
-- 단면 평면은 관리형 API에 노출되지 않아 `SectionService`가 COM을 late-binding(IDispatch)으로 읽는다. `UserDataService`와 동일 패턴.
+- **단면 BOX는 COM `ClippingPlanes()`에 안 들어온다** (그 컬렉션은 Planes 모드 평면만; 박스 걸어도 `Count`=1 = 잔여 평면 1개뿐 → "박스==단일 평면" 버그의 원인). 박스는 **관리형 `View.GetClippingPlanes()`가 JSON으로 노출**(`OrientedBox`)하므로 이걸 우선 읽는다:
+  - `SectionService.GetActiveClipPlanes` = ① 관리형 JSON에서 enabled OrientedBox → 6개 반평면(안쪽 법선, `KeepPositiveSide=true`와 일치)으로 변환, ② 박스 아니면(Planes 모드/무단면) 기존 COM 경로. → Planes 모드는 무변경, 박스 능력만 추가.
+  - `View.GetClippingPlanes()`는 **리플렉션으로 호출**(빌드별 시그니처 차이 시 컴파일 깨짐 대신 null → COM fallback). JSON 파싱은 `JavaScriptSerializer`(`System.Web.Extensions`).
+  - **현재 축정렬(Rotation≈0) 박스만 확정 처리**. 회전 박스는 Rotation 규약 미확정이라 null 반환(잘못된 볼륨 배포 방지) → COM fallback. 회전 박스/포맷 확인은 Tools 탭 `Clip Plane 덤프` 최상단의 **원본 JSON**으로.
+  - 단위 가정: 박스 좌표가 관리형 `BoundingBox().Center`와 같은 모델 단위 — Windows 실측 확인 필요.
+- Planes 모드 단면 평면은 관리형에 (평면 리스트로는) 안 나와 `SectionService`가 COM을 late-binding(IDispatch)으로 읽는다. `UserDataService`와 동일 패턴.
 
-**Navisworks 2022 실측으로 확정된 COM 경로 (중요 — 다시 헤매지 말 것):**
+**Navisworks 2022 실측으로 확정된 COM 경로 (Planes 모드 — 박스는 위 관리형 JSON 사용):**
 ```
 ComApiBridge.State (InwOpState10)
   .CurrentView                       → InwOpView
