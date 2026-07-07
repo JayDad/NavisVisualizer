@@ -127,13 +127,39 @@ namespace NavisVisualizer.Services
                 sb.AppendLine($"CurrentView  = {(view == null ? "NULL (멤버명 다름?)" : TypeName(view))}");
                 if (view == null) { sb.AppendLine("→ CurrentView를 못 읽음. 여기서 중단."); return sb.ToString(); }
 
+                // Section BOX may not live in ClippingPlanes(). Enumerate the view's real
+                // members so a box/section accessor (SectionBox / ClipBox / GetClipPlaneSet …)
+                // shows up. Run this dump WHILE a section box is active to compare.
+                sb.AppendLine("  [InwOpView(CurrentView) 실제 멤버 목록 — 박스 접근자 탐색용]");
+                foreach (var m in ListComMembers(view))
+                    sb.AppendLine($"    · {m}");
+
+                // GetTypeInfo often exposes only base members, so also probe likely box
+                // accessor names by late binding (same trick as GetNormal/distance below).
+                sb.AppendLine("  [View 박스 접근자 후보 프로브 (non-null이면 그 경로가 박스)]");
+                foreach (var name in new[] { "SectionBox", "ClipBox", "ClippingBox", "CuttingBox",
+                                             "Box", "GetClipPlaneSet", "ClipPlaneSet", "SectionPlanes",
+                                             "GetSectionBox", "ClippingBoxPlanes", "OrientedBox" })
+                {
+                    object val = TryGet(view, name);
+                    if (val != null) sb.AppendLine($"    {name} → {TypeName(val)}");
+                }
+                sb.AppendLine();
+
                 object clipColl = Invoke(view, "ClippingPlanes");
                 sb.AppendLine($"ClippingPlanes = {(clipColl == null ? "NULL (멤버명 다름?)" : TypeName(clipColl))}");
                 if (clipColl == null) { sb.AppendLine("→ ClippingPlanes를 못 읽음. 여기서 중단."); return sb.ToString(); }
 
+                // Enumerate the collection's members too — box mode may expose a mode flag
+                // or a box definition here rather than as extra planes.
+                sb.AppendLine("  [InwOpClipPlaneColl 실제 멤버 목록]");
+                foreach (var m in ListComMembers(clipColl))
+                    sb.AppendLine($"    · {m}");
+
                 object countObj = Invoke(clipColl, "Count");
                 sb.AppendLine($"Count        = {(countObj?.ToString() ?? "NULL")}");
                 sb.AppendLine($"KeepPositiveSide = {KeepPositiveSide}");
+                sb.AppendLine("(Planes 모드와 Box 모드에서 각각 덤프해 Count·Enabled 개수·법선을 비교할 것)");
                 sb.AppendLine();
 
                 int count = countObj == null ? 0 : Convert.ToInt32(countObj);
