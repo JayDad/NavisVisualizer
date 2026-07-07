@@ -573,8 +573,15 @@ namespace NavisVisualizer.UI
 
         private void UpdateStats(OverrideResult result = null)
         {
-            var counts = _trays
-                .Where(t => InScope(t.TrayNumber))
+            bool hasApplied = _matchedTrayNos.Count > 0 || _unmatchedTrayNos.Count > 0;
+
+            // Stage 현황 counts MATCHED (in-scope) trays only once matching is applied.
+            // Unmatched rows have no model node, so folding their stages in is misleading —
+            // the breakdown would show numbers even with 0 matches. Before applying, show all.
+            var statBasis = _trays.Where(t => InScope(t.TrayNumber));
+            if (hasApplied)
+                statBasis = statBasis.Where(t => _matchedTrayNos.Contains(t.TrayNumber));
+            var counts = statBasis
                 .GroupBy(t => t.GetStage())
                 .ToDictionary(g => g.Key, g => g.Count());
 
@@ -587,7 +594,6 @@ namespace NavisVisualizer.UI
             }
 
             string line2 = "";
-            bool hasApplied = _matchedTrayNos.Count > 0 || _unmatchedTrayNos.Count > 0;
             if (hasApplied)
             {
                 int matchedInScope = _scopeKeys == null
