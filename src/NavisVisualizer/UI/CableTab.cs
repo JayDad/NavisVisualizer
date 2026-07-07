@@ -44,7 +44,7 @@ namespace NavisVisualizer.UI
         private bool _suppressFocusCheck;
         private Button _btnSelCables;
 
-        // Aggregation scope (매칭 집계 범위) — replaces the old "보이는 것만" checkbox.
+        // Aggregation scope (현황 집계 범위) — replaces the old "보이는 것만" checkbox.
         // null = 전체 모델 (no filtering). Judged per node via its box marker(s).
         private ScopePanel _scopePanel;
         private readonly ScopeFilter _scopeFilter;
@@ -480,7 +480,7 @@ namespace NavisVisualizer.UI
             _focusOn = value;
         }
 
-        // ----- 매칭 집계 범위 (aggregation scope) -----
+        // ----- 현황 집계 범위 (aggregation scope) -----
 
         /// <summary>
         /// Node ID → its box marker ModelItems (empty list when the box is missing in

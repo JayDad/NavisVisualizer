@@ -155,6 +155,87 @@ FROM [Navis].[Piping_HydrotestPKG]";
             return items;
         }
 
+        // ------------------------------------------------------------
+        // Sub-system  ←  Mech_EQ/All_EQ (Equipment) + Piping_HydrotestPKG (Piping)
+        // ------------------------------------------------------------
+
+        /// <summary>
+        /// Sub-system 탭용 통합 요소 로드. 새 SQL 없이 기존 검증된 쿼리
+        /// (LoadEquipment / LoadHydrotest)를 재사용하고 Sub-system 축으로 감싼다.
+        /// Sub-system 값이 없는 행은 그룹핑이 불가능해 제외하며, 조용한 누락이 되지
+        /// 않도록 그 수를 noSubSystemCount로 보고한다.
+        /// </summary>
+        public static List<SubSystemElement> LoadSubSystemElements(
+            SqlConnectionSettings settings, out int noSubSystemCount)
+        {
+            var elements = new List<SubSystemElement>();
+            noSubSystemCount = 0;
+
+            foreach (var eq in LoadEquipment(settings))
+            {
+                if (string.IsNullOrWhiteSpace(eq.SubSystem)) { noSubSystemCount++; continue; }
+                elements.Add(SubSystemElement.FromEquipment(eq));
+            }
+
+            foreach (var pkg in LoadHydrotest(settings))
+            {
+                if (string.IsNullOrWhiteSpace(pkg.SystemNo)) { noSubSystemCount++; continue; }
+                elements.Add(SubSystemElement.FromPackage(pkg));
+            }
+
+            return elements;
+        }
+
+        /// <summary>
+        /// Sub-system 마스터 로드 ([Navis].[SubSystem_Master] — 계약은 CLAUDE.md 11번).
+        /// 마일스톤 날짜(Walkdown/Partial MCC/MCC/PCC — 별도 RFCC 없음, MCC 계열이
+        /// Ready for Commissioning 의미) + A/B/C-ITR·A/B Punch 수치(각 Total+완료/종결).
+        /// 테이블이 아직 없으면 SQL Server가 예외를 던진다 — 호출부(SubSystemTab)가
+        /// 잡아서 "마스터 미구성" fallback(요소 파생 목록)으로 전환한다.
+        /// </summary>
+        public static List<SubSystemMasterData> LoadSubSystemMaster(SqlConnectionSettings settings)
+        {
+            const string baseSql = @"
+SELECT [SUB-SYSTEM],[DESCRIPTION],
+       [MCC Plan],[Walkdown],[Partial MCC],[MCC],[PCC],
+       [A-ITR TOTAL],[A-ITR DONE],[B-ITR TOTAL],[B-ITR DONE],[C-ITR TOTAL],[C-ITR DONE],
+       [PUNCH A TOTAL],[PUNCH A CLOSED],[PUNCH B TOTAL],[PUNCH B CLOSED]
+FROM [Navis].[SubSystem_Master]";
+
+            var masters = new List<SubSystemMasterData>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            ExecuteReader(settings, baseSql, "PJTNO", r =>
+            {
+                string no = GetString(r, "SUB-SYSTEM");
+                if (string.IsNullOrEmpty(no) || !seen.Add(no)) return;
+
+                var m = new SubSystemMasterData
+                {
+                    SubSystemNo = no,
+                    Description = GetString(r, "DESCRIPTION"),
+                    MccPlan      = GetDate(r, "MCC Plan"),
+                    ItrATotal    = GetInt(r, "A-ITR TOTAL"),
+                    ItrADone     = GetInt(r, "A-ITR DONE"),
+                    ItrBTotal    = GetInt(r, "B-ITR TOTAL"),
+                    ItrBDone     = GetInt(r, "B-ITR DONE"),
+                    ItrCTotal    = GetInt(r, "C-ITR TOTAL"),
+                    ItrCDone     = GetInt(r, "C-ITR DONE"),
+                    PunchATotal  = GetInt(r, "PUNCH A TOTAL"),
+                    PunchAClosed = GetInt(r, "PUNCH A CLOSED"),
+                    PunchBTotal  = GetInt(r, "PUNCH B TOTAL"),
+                    PunchBClosed = GetInt(r, "PUNCH B CLOSED"),
+                };
+                m.StageDates[SubSystemStage.Walkdown]   = GetDate(r, "Walkdown");
+                m.StageDates[SubSystemStage.PartialMcc] = GetDate(r, "Partial MCC");
+                m.StageDates[SubSystemStage.Mcc]        = GetDate(r, "MCC");
+                m.StageDates[SubSystemStage.Pcc]        = GetDate(r, "PCC");
+                masters.Add(m);
+            });
+
+            return masters;
+        }
+
         #region Shared helpers
 
         /// <summary>
@@ -189,6 +270,20 @@ FROM [Navis].[Piping_HydrotestPKG]";
             object v = r[column];
             if (v == null || v == DBNull.Value) return "";
             return v.ToString().Trim();
+        }
+
+        /// <summary>정수 컬럼. typed 숫자는 그대로 변환, varchar는 InvariantCulture 파싱. 실패 시 null.</summary>
+        private static int? GetInt(IDataRecord r, string column)
+        {
+            object v = r[column];
+            if (v == null || v == DBNull.Value) return null;
+            if (v is int i) return i;
+            try { return Convert.ToInt32(v, CultureInfo.InvariantCulture); }
+            catch
+            {
+                return int.TryParse(v.ToString().Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out int parsed)
+                    ? parsed : (int?)null;
+            }
         }
 
         /// <summary>

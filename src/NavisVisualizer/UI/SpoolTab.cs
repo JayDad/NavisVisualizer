@@ -25,7 +25,7 @@ namespace NavisVisualizer.UI
         private HashSet<string> _matchedSpoolIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private List<string> _unmatchedSpoolIds = new List<string>();
 
-        // Aggregation scope (매칭 집계 범위) — null = 전체 모델 (no filtering)
+        // Aggregation scope (현황 집계 범위) — null = 전체 모델 (no filtering)
         private ScopePanel _scopePanel;
         private readonly ScopeFilter _scopeFilter;
         private HashSet<string> _scopeKeys;
@@ -41,6 +41,7 @@ namespace NavisVisualizer.UI
         private Button   _btnViewpoint;
         private Button   _btnNwd;
         private Label    _lblStats;
+        private Label    _lblUnmatched;   // fixed 미매칭(모델 없음) count, pinned to the corner
         private ProgressBar _progressBar;
 
         private int _sortColumn = -1;
@@ -106,8 +107,23 @@ namespace NavisVisualizer.UI
             btnExport.Click += BtnExport_Click;
             searchPanel.Controls.Add(btnExport);
 
-            // Stats label
-            _lblStats = new Label { Dock = DockStyle.Fill, Text = "로드된 데이터 없음", AutoSize = false, Height = 36 };
+            // Stats row: scoped stage/match stats on the left, the fixed 미매칭(모델 없음)
+            // count pinned to the right corner. 미매칭 is data present in Excel/OASIS but
+            // absent from the model — it has no position, so it never responds to scope
+            // and must not sit beside the scoped 매칭 count as if it were a scoped pair.
+            var statsRow = new Panel { Dock = DockStyle.Fill, Height = 36 };
+            _lblStats = new Label { Dock = DockStyle.Fill, Text = "로드된 데이터 없음", AutoSize = false };
+            _lblUnmatched = new Label
+            {
+                Dock = DockStyle.Right,
+                Width = 150,
+                AutoSize = false,
+                TextAlign = ContentAlignment.TopRight,
+                ForeColor = Color.Gray,
+                Text = "",
+            };
+            statsRow.Controls.Add(_lblStats);      // Fill added first (lowest z-order)
+            statsRow.Controls.Add(_lblUnmatched);  // Right pinned after
 
             // Aggregation scope group (radios select only; [적용] runs the judgement)
             _scopePanel = new ScopePanel { Dock = DockStyle.Fill };
@@ -172,7 +188,7 @@ namespace NavisVisualizer.UI
             layout.Controls.Add(colorPanels.instPanel);
             layout.Controls.Add(btnPanel);
             layout.Controls.Add(_progressBar);
-            layout.Controls.Add(_lblStats);
+            layout.Controls.Add(statsRow);
             layout.Controls.Add(searchPanel);
             layout.Controls.Add(_scopePanel);
             layout.Controls.Add(_tabFilter);
@@ -453,12 +469,14 @@ namespace NavisVisualizer.UI
             FilterList();
         }
 
-        // ----- 매칭 집계 범위 (aggregation scope) -----
+        // ----- 현황 집계 범위 (aggregation scope) -----
 
         /// <summary>
-        /// A row passes the scope when no scope is active, when it is unmatched
-        /// (no model position — spatially unjudgeable, always shown), or when its
-        /// matched node was judged inside the scope.
+        /// A row passes the active scope. No scope → all pass; a matched row passes when
+        /// its node was judged inside the scope. An unmatched row (present in the data but
+        /// with no model node — hence no position) is spatially unjudgeable, so it always
+        /// passes: its count is a fixed, scope-independent figure shown in _lblUnmatched,
+        /// not folded into the scoped 매칭 stats.
         /// </summary>
         private bool InScope(string id) =>
             _scopeKeys == null || !_matchedSpoolIds.Contains(id) || _scopeKeys.Contains(id);
@@ -574,6 +592,7 @@ namespace NavisVisualizer.UI
             if (doc == null) return;
             _main.OverrideEngine.Reset(doc);
             _lblStats.Text = "전체 초기화 완료";
+            _lblUnmatched.Text = "";
         }
 
         private void BtnViewpoint_Click(object sender, EventArgs e)
@@ -716,12 +735,13 @@ namespace NavisVisualizer.UI
                 int matchedInScope = _scopeKeys == null
                     ? _matchedSpoolIds.Count
                     : _matchedSpoolIds.Count(id => _scopeKeys.Contains(id));
-                line2 = $"매칭 {matchedInScope} / 미매칭 {_unmatchedSpoolIds.Count}";
+                line2 = $"매칭 {matchedInScope}";
                 if (_scopeKeys != null)
-                    line2 += $" ({MatchScopeInfo.Label(_scopePanel.CurrentScope)} 기준, 미매칭은 전체)";
+                    line2 += $" ({MatchScopeInfo.Label(_scopePanel.CurrentScope)} 기준)";
             }
             _lblStats.Text = string.Join("  ", parts)
                            + (!string.IsNullOrEmpty(line2) ? $"\n{line2}" : "");
+            _lblUnmatched.Text = hasApplied ? $"미매칭 {_unmatchedSpoolIds.Count}건" : "";
         }
 
         private Dictionary<SpoolStage, ColorSetting> CloneDefaults(Dictionary<SpoolStage, ColorSetting> defaults)

@@ -52,9 +52,14 @@ federated 구조에서 `MEBTray1.nwc`(파일명에 digit)가 `/SM/MEB/ELEC` → 
 
 `CableTab`의 `보이는 것만` 체크박스는 노드별 박스(점 마커)의 `BoundingBox().Center`가 화면에 보이는지로 리스트를 거른다. 단면(clip plane)은 플러그인이 만들지 않고 Navisworks 기본 Sectioning으로 자른 것을 읽기만 한다. 판정 = **비숨김(`SectionService.IsEffectivelyHidden`, 조상까지 검사) AND 활성 단면 평면 내부**. 노드에 박스 여러 개면 하나라도 보이면 visible.
 
-- 단면 평면은 관리형 API에 노출되지 않아 `SectionService`가 COM을 late-binding(IDispatch)으로 읽는다. `UserDataService`와 동일 패턴.
+- **단면 BOX는 COM `ClippingPlanes()`에 안 들어온다** (그 컬렉션은 Planes 모드 평면만; 박스 걸어도 `Count`=1 = 잔여 평면 1개뿐 → "박스==단일 평면" 버그의 원인). 박스는 **관리형 `View.GetClippingPlanes()`가 JSON으로 노출**(`OrientedBox`)하므로 이걸 우선 읽는다:
+  - `SectionService.GetActiveClipPlanes` = ① 관리형 JSON에서 enabled OrientedBox → 6개 반평면(안쪽 법선, `KeepPositiveSide=true`와 일치)으로 변환, ② 박스 아니면(Planes 모드/무단면) 기존 COM 경로. → Planes 모드는 무변경, 박스 능력만 추가.
+  - `View.GetClippingPlanes()`는 **리플렉션으로 호출**(빌드별 시그니처 차이 시 컴파일 깨짐 대신 null → COM fallback). JSON 파싱은 `JavaScriptSerializer`(`System.Web.Extensions`).
+  - **현재 축정렬(Rotation≈0) 박스만 확정 처리**. 회전 박스는 Rotation 규약 미확정이라 null 반환(잘못된 볼륨 배포 방지) → COM fallback. 회전 박스/포맷 확인은 Tools 탭 `Clip Plane 덤프` 최상단의 **원본 JSON**으로.
+  - 단위 가정: 박스 좌표가 관리형 `BoundingBox().Center`와 같은 모델 단위 — Windows 실측 확인 필요.
+- Planes 모드 단면 평면은 관리형에 (평면 리스트로는) 안 나와 `SectionService`가 COM을 late-binding(IDispatch)으로 읽는다. `UserDataService`와 동일 패턴.
 
-**Navisworks 2022 실측으로 확정된 COM 경로 (중요 — 다시 헤매지 말 것):**
+**Navisworks 2022 실측으로 확정된 COM 경로 (Planes 모드 — 박스는 위 관리형 JSON 사용):**
 ```
 ComApiBridge.State (InwOpState10)
   .CurrentView                       → InwOpView
@@ -174,21 +179,28 @@ class DataSourceSlot<T>
 
 ### 7. 매칭 현황 집계 범위(Scope) 필터 — 전 공종 확장 (구현됨 — Windows 검증 대기)
 
-**구현 현황**: `Services/ScopeFilter.cs`(판정+캐시) + `UI/ScopePanel.cs`(라디오 그룹 UserControl) 공용 컴포넌트로 구현, 5개 탭 전부 배선 완료. Cable 탭 `보이는 것만` 체크박스 + `새로고침` 버튼은 라디오 그룹으로 흡수(제거). 구현 중 확정한 세부:
-- **미매칭 행은 범위 미적용** — 모델에 없어 위치 판정이 불가하므로 어떤 범위에서도 리스트에 항상 표시. 현황 라벨에 `(… 기준, 미매칭은 전체)` 병기로 명시
-- **같은 범위로 재[적용] = 재계산** (단면/숨김/선택 변경 후 새로고침 역할 — Cable의 구 새로고침 버튼 대체), 다른 범위로 전환 = 캐시 사용
+**그룹 명칭은 "현황 집계 범위"** (구 "매칭 집계 범위" — 매칭 리스트뿐 아니라 현황 전반을 좁힌다는 의미). 라디오 순서: **전체 모델 · 선택 항목 · 숨김 제외 · Clipping 영역**.
+
+**구현 현황**: `Services/ScopeFilter.cs`(판정) + `UI/ScopePanel.cs`(라디오 그룹 UserControl) 공용 컴포넌트로 구현, 5개 탭 전부 배선 완료. Cable 탭 `보이는 것만` 체크박스 + `새로고침` 버튼은 라디오 그룹으로 흡수(제거). 구현 중 확정한 세부:
+- **미매칭은 범위와 무관한 고정 전역 수치** (Spool/Hydrotest/Equipment/EIT):
+  - 이들 탭의 미매칭 = **실적 데이터(Excel/OASIS)에는 있으나 모델에서 못 찾은 행** = 노드/위치가 없음 → 선택·단면·숨김 어떤 범위로도 판정 불가. 따라서 `InScope`는 미매칭을 항상 통과시키고, 카운트는 **항상 전체 미매칭 수**.
+  - **표시 분리**: 미매칭을 스코프된 `매칭` 옆에 나란히 두면 "선택한 것 중 매칭 N/미매칭 M"으로 오독됨(M은 전역인데). 그래서 통계 라벨에서 미매칭을 빼고, **우측 코너 별도 라벨**(`_lblUnmatched`, "미매칭 N건", 회색)로 고정 표시. 탭 헤더 `미매칭 (N)`과 CSV/현황 출력도 전체 미매칭 그대로.
+  - (초기엔 선택/Clipping에서 미매칭을 0으로 줄이는 안을 넣었다가, "미매칭=모델없음"의 본질을 흐린다는 판단으로 철회 — 미매칭은 데이터 품질 지표로 스코프와 직교.)
+  - **Cable은 예외**: Cable의 미매칭 = box(위치 있음)인데 데이터 매칭 안 된 노드 → 위치가 있어 범위 판정이 가능하므로 매칭과 함께 스코프됨(코너 분리 불필요, 기존 유지).
+- **[적용]은 항상 재계산** — 단면/숨김/선택은 이벤트 없이 실시간 변하므로 판정 결과를 **캐시하지 않는다**. (구 구현은 다른 범위로 전환했다 되돌아오면 캐시된 옛 판정이 되살아나 단면 해제 후에도 숫자가 안 바뀌는 버그가 있었음.) 판정 비용은 매칭 노드 수(수천) 수준이라 매 클릭 재계산이 부담 없음.
 - `선택 항목` 판정은 선택된 노드의 조상/자손 양방향 포함. `HashSet<ModelItem>` 동등성 의존 — **Windows 실측 검증 필요**
 - CSV 출력: 첫 행에 `집계 범위,{라벨}` + 범위 내 행만 출력
 - Cable만 범위 판정을 매칭 여부와 무관하게 전 노드에 적용 (box 존재 자체가 판정 대상 — 기존 보이는 것만과 동일 의미론)
+- **Clipping 영역은 여전히 "비숨김 AND 단면 내부"** (기존 `보이는 것만` 의미 유지). 숨김을 무시한 순수 기하 단면만 원하면 `ScopeFilter.Compute`의 ClippingVolume 분기에서 `IsEffectivelyHidden` 게이트만 제거하면 됨.
 
 **배경**
 현재 clipping/가시성 기준 필터는 Cable Pull 탭의 `보이는 것만` 체크박스에만 존재 (비숨김 + 활성 clip plane 내부 판정, `SectionService` 재사용 — 4번 항목). 다른 공종의 매칭 리스트/현황도 clipping area 등 범위 기준으로 좁혀 보고 싶다는 요구. 단, 기준이 여러 개(숨김/clipping/선택)라 사용자가 헷갈리지 않도록 명시적 선택 UI가 필요.
 
-**UI: "매칭 집계 범위 (현재: xxx)" 라디오 그룹 + [적용] 버튼**
+**UI: "현황 집계 범위 (현재: xxx)" 라디오 그룹 + [적용] 버튼**
 - ◉ **전체 모델** (default — 현행 NWD 파일 기준 그대로, 기존 사용에 영향 없음)
-- ○ **숨김 제외** — hidden 처리 항목 제외 (`SectionService.IsEffectivelyHidden`, 조상까지)
-- ○ **Clipping 영역** — 활성 단면 평면 내부만 (clip plane COM 판정 재사용)
 - ○ **선택 항목** — 현재 3D 선택 기준
+- ○ **숨김 제외** — hidden 처리 항목 제외 (`SectionService.IsEffectivelyHidden`, 조상까지)
+- ○ **Clipping 영역** — 비숨김 AND 활성 단면 평면 내부 (clip plane COM 판정 재사용)
 
 **적용 버튼 방식 (확정)**: 라디오는 선택만 하고, 그룹 내 `[적용]` 버튼을 눌러야 재집계 실행. 라디오 클릭 자체는 아무 계산도 하지 않음 → 전환 성능 이슈 원천 차단. 현재 화면의 집계 기준은 그룹 제목 `(현재: 전체 모델)`에 항상 표시 — 라디오 선택과 실제 반영 상태가 달라도 사용자가 혼동하지 않음. 현황 라벨에도 `(Excel · Clipping 영역 기준)`처럼 소스+범위 병기.
 
@@ -205,11 +217,15 @@ class DataSourceSlot<T>
 - `Clipping 영역`: clip plane COM 읽기는 **전환당 1회**(노드당 아님), 노드당은 `BoundingBox().Center`(Navisworks가 미리 계산해 둔 값 조회) + 평면식 산술 → 수천 건이면 밀리초~수백 ms 예상
 
 안전장치:
-- **범위별 판정 결과 캐시** (`Dictionary<scope, HashSet<nodeKey>>`) — 같은 범위로 되돌아오는 전환은 0 비용. 캐시 무효화는 `가시화 적용`/`새로고침`/모델 변경 시에만 (단면·숨김 변경 자동 감지 이벤트는 안 걸므로 — 4번 항목과 동일 정책)
+- **판정 결과는 캐시하지 않고 [적용]마다 재계산** — 단면·숨김·선택은 자동 감지 이벤트가 없어 캐시하면 옛 상태가 되살아난다(단면 해제 후에도 숫자 그대로 = 구 버그). 매칭 노드 수(수천) 수준이라 매 클릭 재판정이 즉시급. (구 `Dictionary<scope, HashSet>` 캐시는 제거됨.)
 - 첫 판정이 오래 걸리는 대형 케이스 대비: 기존 marquee `_progressBar` 재사용 (UI freeze 인상 방지)
 - Windows 실측으로 확정 필요 (특히 만 건 이상 매칭 시 BoundingBox 일괄 조회)
 
-### 8. 매칭 Status 엑셀 출력 — 리포트화 (검토 단계)
+### 8. 매칭 Status 엑셀 출력 — 리포트화 (검토 단계 — 단기안은 Sub-system 탭에 첫 구현)
+
+> **구현 현황**: 아래 "단기 = CSV 요약 블록" 방향이 Sub-system 탭 `[현황 리포트 출력]`으로
+> 첫 구현됨 (헤더 블록 + Sub-system별 요약 + 상세 리스트 — 11번 참조). 기존 4개 탭의
+> `매칭 Status 출력`은 아직 행 단위 리스트 그대로 — 요약 블록 이식은 요구 항목 확정 후.
 
 **배경**
 현재 출력은 행 단위 CSV 리스트(항목·Stage·매칭 O/X)뿐. 생산관리자들은 리스트에 더해 **통계치가 리포트 형태로 정리된 출력물**을 원함. Excel 출력 전반의 개선 검토 필요.
@@ -259,6 +275,105 @@ Spool / Hydrotest / Equipment 탭은 OASIS 로드 구현 완료 (`SqlLoader`, �
 - UI: 각 탭 `[적용] [공종 초기화] [전체 초기화]` 3버튼.
 - 기반은 이미 있음: stage 캐시가 `VisualModule`별로 분리되어 있어 (ColorOverrideEngine)
   누적 painted 셋만 추가하면 됨.
+
+### 11. Sub-system 탭 — 구현됨 (Windows 검증 대기) + 확장 잔여
+
+**구현 현황**: `UI/SubSystemTab.cs` + `SqlLoader.LoadSubSystemElements`/`LoadSubSystemMaster` +
+`ColorOverrideEngine.ApplySubSystem`(`VisualModule.SubSystem`) + `SubSystemElement`/
+`ProgressStatus`/`SubSystemStage`/`SubSystemMasterData`(DataModels). OASIS 전용 — 요소는
+기존 검증 쿼리(LoadEquipment/LoadHydrotest) 재사용 (Equipment `SUB-SYSTEM`→TAG NO /
+Piping `Sub-System`→PKGNO, 미지정 행 제외 + 건수 보고). 매칭은 개발 규칙대로 TagSearcher
+재사용 (Equipment 태그도 digit 포함 정확 일치라 전체 워크 인덱스로 조회됨 —
+EquipmentSearcher의 레벨 타겟 인덱스는 건드리지 않음).
+
+- **마스터 기준 목록**: `[Navis].[SubSystem_Master]` 로드 성공 시 좌측 목록 = 마스터 ∪
+  요소 파생 (요소 0건은 회색, 마스터 외 요소 그룹은 "(마스터 외)" + 건수 진단).
+  **테이블 미구성이면 요소 파생 목록으로 자동 fallback** + 단계 모드 비활성.
+- **가시화 2모드**: ① Sub-system 단계별 — 선택한 sub-system의 요소 전체가 그 sub-system의
+  마일스톤 단계색(Walkdown/P-MCC/MCC/PCC + 미착수, 기준일 역순 스캔)을 받음
+  (기본, 마스터 필요). **별도 RFCC 단계 없음** — MCC(또는 Partial MCC)가 Ready for
+  Commissioning 의미. **마일스톤은 순차 아님** — P-MCC 없이 바로 MCC 가능. 역순 스캔이
+  날짜 보유 여부만 보므로 스킵 자동 허용 (enum 순서 = 달성 수준 랭킹, 시간 순서 아님).
+  ② 요소 진행상태별 — 미착수/진행중/완료 3단계 정규화.
+- **MCC 지연 감지 (색으로는 표시 안 함)**: 마스터에 `MCC Plan`(계획일)이 있고 기준일까지
+  도래했는데 P-MCC/MCC 실적이 미입력(실적 단계 < P-MCC)이면 `IsDelayed` = true.
+  **지연은 별도 색(빨강)으로 칠하지 않는다** — 지연이어도 달성 단계(Walkdown 등)가 있어
+  stage와 직교하기 때문. 대신 ⓐ 좌/우 테이블 `MCC계획` 컬럼에 "지연 Nd" 텍스트,
+  ⓑ `[MCC 지연 담기]` 버튼(검색 옆)으로 지연 sub-system을 선택 박스에 일괄 담기,
+  ⓒ 현황 라벨·리포트에 지연 개수/일수로만 노출. 3D 색은 실제 달성 단계 그대로.
+- **상세 현황 별도 창**: 선택 박스 하단 `[선택 Sub-system 상세 현황 보기…]` → 비모달 Form.
+  선택된 sub-system의 **공종(Equipment/Piping)·요소별 status**를 한 그리드에 나열
+  (sub-system→공종→요소 정렬, 검색 필터, 행 더블클릭 시 3D 선택·포커스, `[CSV 출력]`
+  으로 엑셀 저장). 다공종 상세 요소 현황을 한 창에서 전부 표시.
+  (초기 구현의 "sub-system별 팔레트 고유색" 모드는 단계별 모드로 대체되어 제거 —
+  `SubSystemPalette` 삭제됨.)
+- **선택 UI (dual-list)**: 좌측 검색(코드+설명)+status 테이블(단계/ITR/Punch/요소 병기)
+  ↔ [▶ ◀ ▶▶ ◀◀] 화살표 ↔ 우측 선택 누적 테이블(단계색 스와치) + 하단 개수 라벨.
+  다중 선택 + 더블클릭 지원. 체크박스 방식에서 전환됨.
+- CSV 현황 리포트(8번 단기안): 헤더 블록 + 요약(Description/단계/ITR/Punch 병기) + 상세.
+
+**마스터 테이블 계약 (제안 — DB 생성 시 이 형태로)**
+```sql
+CREATE TABLE [Navis].[SubSystem_Master](
+  [PJTNO]        varchar(10)   NOT NULL,  -- 프로젝트 필터 (EQ 계열과 동일 컬럼명)
+  [SUB-SYSTEM]   varchar(20)   NOT NULL,  -- 요소 테이블의 SUB-SYSTEM/Sub-System 값과 일치
+  [DESCRIPTION]  nvarchar(200) NULL,
+  [MCC Plan]     date NULL,               -- MCC 계획일 (핵심 기점) — 지연 판정 기준
+  [Walkdown]     date NULL,               -- 이하 마일스톤 실적일 (지난 날짜 = 달성)
+  [Partial MCC]  date NULL,               -- 별도 RFCC 없음 — MCC/P-MCC = Ready for Commissioning
+  [MCC]          date NULL,               -- MCC 실적일 (계획일과 별개)
+  [PCC]          date NULL,
+  [A-ITR TOTAL]  int NULL, [A-ITR DONE]     int NULL,  -- ITR: 카테고리별 전체/완료 수
+  [B-ITR TOTAL]  int NULL, [B-ITR DONE]     int NULL,
+  [C-ITR TOTAL]  int NULL, [C-ITR DONE]     int NULL,
+  [PUNCH A TOTAL] int NULL, [PUNCH A CLOSED] int NULL, -- Punch: 전체/종결 수 (open = 차)
+  [PUNCH B TOTAL] int NULL, [PUNCH B CLOSED] int NULL,
+  CONSTRAINT PK_SubSystem_Master PRIMARY KEY ([PJTNO],[SUB-SYSTEM]));
+```
+- 컬럼명을 바꾸면 `SqlLoader.LoadSubSystemMaster`의 SELECT만 같이 수정 (명시 매핑이라 즉시 오류로 드러남).
+- ITR/Punch가 수치가 아니라 %로 오면 GetInt 대신 ParsePercentage 계열 추가 검토 (§2.2 스케일 함정 참조).
+- 화면 표기는 전부 "완료(종결)/전체" — 좌측 테이블 A-ITR/B-ITR/C-ITR/P.A/P.B 컬럼 + 리포트 요약.
+- `MCC Plan` 미보유(null)면 지연 판정 안 함 — 계획일 없는 sub-system은 지연 대상에서 제외.
+- 마일스톤 날짜가 실적일인지 계획일인지: `MCC Plan`만 계획, 나머지(Walkdown/P-MCC/MCC/PCC)는 실적 가정.
+
+**확장 잔여 (결정/데이터 대기)**
+- **마스터 테이블 실물 생성/적재**: 위 계약으로 DB에 생성 + OASIS 적재 파이프라인은
+  데이터 오너 몫. 마일스톤 날짜가 실적일인지 계획일인지 확정 필요 (현재 로직은 실적일 가정).
+- **Spool 단위 sub-system**: 현재 배관은 PKG 노드 색칠이 하위 스풀을 커버. 개별 스풀
+  granularity가 필요해지면 `Piping_Spool`에 Sub-System 컬럼 계약 확정 후
+  `LoadSubSystemElements`에 추가 (Discipline enum 확장).
+- **EIT Tray / Cable 편입**: OASIS 테이블 자체가 없음 — 9번 항목 해소 후 동일 패턴으로 추가.
+- **Excel 소스**: 미지원 (OASIS 전용). 필요 시 DataSourcePanel 이중 소스로 확장 —
+  Excel에 Sub-system 컬럼 계약이 먼저.
+- **집계 범위(ScopePanel) 미배선** — 필요 시 7번 공용 컴포넌트 그대로 연결 가능.
+- **팔레트 색 사용자 지정 없음** (자동 배정만). 색은 선택 순서 기준 배정, 세션 내 유지.
+- **선택 축소 후 재적용 시 이전 색 잔존**: 다른 탭과 동일한 10번 공통 문제 (해제된
+  sub-system의 색은 `전체 초기화`로만 제거됨).
+- 우측 테이블 `매칭` 열과 리포트의 매칭 O/X는 **마지막 [적용] 스냅샷** 기준 — 적용에
+  포함되지 않았던 sub-system은 "-" 표시 (미적용 상태에서 O로 찍히는 기존 탭 결함을 답습하지 않음).
+
+## 레슨런 (하드 트러블슈팅 기록 — 다시 헤매지 말 것)
+
+### L1. 단면(Clipping): **Section Box는 COM `ClippingPlanes()`에 없다** (가장 값진 교훈)
+- 증상: `Clipping 영역` 범위에서 **박스를 걸어도 단일 +z 평면과 결과가 똑같음**. 박스로 영역이 안 좁혀짐.
+- 진단: Tools 탭 `Clip Plane 덤프`에서 박스 적용 상태인데 `ClippingPlanes().Count == 1`. → COM 컬렉션은 **Planes 모드 평면만** 담고, 박스를 걸면 잔여 평면 1개만 남아 "박스==평면"으로 보인 것.
+- 해결: Navisworks **관리형 `View.GetClippingPlanes()`가 JSON으로 `OrientedBox`를 노출**. 박스는 이 JSON에서 읽어 6개 반평면(안쪽 법선)으로 변환. Planes 모드/무단면은 기존 COM 경로 유지. (상세: 4번 항목.)
+- 부수 교훈: **"관리형 API는 단면을 노출 안 한다"는 애초 가정이 틀렸다.** Planes 리스트로는 안 나오지만 `GetClippingPlanes()` JSON에는 박스·평면 전체가 들어있다. 가정 전에 API 문서/실측 확인.
+
+### L2. 라이브 외부 상태(단면/숨김/선택)는 **캐시 금지**
+- `ScopeFilter`가 범위별 판정을 `Dictionary`로 캐시했더니, 다른 범위로 갔다 돌아오면 옛 판정이 되살아나 **단면 해제 후에도 숫자가 안 바뀌는** 버그. 이들 상태는 변경 이벤트가 없어 무효화 시점을 알 수 없다. → `[적용]`마다 무조건 재계산 (대상이 매칭 노드 수천 건이라 비용 무시 가능).
+
+### L3. 미매칭은 스코프와 **직교**하는 고정 전역 수치
+- Spool/Hydro/Equip/EIT의 미매칭 = 실적엔 있으나 **모델에 노드가 없는 행** → 위치가 없어 선택/단면/숨김으로 판정 불가. 스코프로 0으로 줄이면 "미매칭=모델없음"의 본질이 흐려짐. → 항상 전체 미매칭, 통계 라벨과 분리해 **우측 코너 별도 표시**. (Cable은 box 위치가 있어 예외 — 스코프됨.)
+
+### L4. 빌드별 시그니처가 불확실한 관리형 API는 **리플렉션 호출**
+- `View.GetClippingPlanes()`를 직접 호출하면 특정 NW 빌드에서 없을 때 **컴파일이 깨진다**. Linux에서 컴파일 검증이 불가한 이 프로젝트에선 치명적. → 리플렉션(`GetMethod(..., Type.EmptyTypes)`)으로 호출해 없으면 null → 기존 경로 fallback. 컴파일 안전 + graceful degrade.
+
+### L5. 진단 도구에 먼저 투자 (Linux 컴파일 불가 환경 특성)
+- COM/Windows 전용이라 개발 머신에서 실행·디버깅이 안 됨. `Clip Plane 덤프`처럼 **상태를 그대로 뱉는 진단 출력**이 근본 원인(Count=1, 원본 JSON)을 한 번에 짚어줬다. 추측성 코드 수정보다 "덤프 보강 → 실측값 받기 → 확신 후 수정" 루프가 빠르고 안전.
+
+### L6. 미확정 규약은 **부분 지원 + 안전 fallback**
+- 관리형 박스 JSON에서 축정렬 박스(Rotation≈0)만 확정 처리하고, **회전 박스는 규약 미확정이라 null 반환(→ COM fallback)**. 잘못된 볼륨을 확신 없이 배포하지 않는다. 회전 포맷은 덤프 원본 JSON 확보 후 마무리.
 
 ## 개발 규칙
 

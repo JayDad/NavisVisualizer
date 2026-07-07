@@ -173,6 +173,24 @@ namespace NavisVisualizer.Models
                 [CableStage.Completed]  = new ColorSetting { DisplayColor = Color.FromArgb(0, 128, 0),     Transparency = 0.0 },
             };
 
+        public static Dictionary<ProgressStatus, ColorSetting> ProgressDefaults =>
+            new Dictionary<ProgressStatus, ColorSetting>
+            {
+                [ProgressStatus.NotStarted] = new ColorSetting { DisplayColor = Color.FromArgb(169, 169, 169), Transparency = 0.7 },
+                [ProgressStatus.InProgress] = new ColorSetting { DisplayColor = Color.FromArgb(255, 215, 0),   Transparency = 0.0 },
+                [ProgressStatus.Completed]  = new ColorSetting { DisplayColor = Color.FromArgb(0, 128, 0),     Transparency = 0.0 },
+            };
+
+        public static Dictionary<SubSystemStage, ColorSetting> SubSystemStageDefaults =>
+            new Dictionary<SubSystemStage, ColorSetting>
+            {
+                [SubSystemStage.NotStarted] = new ColorSetting { DisplayColor = Color.FromArgb(169, 169, 169), Transparency = 0.7 },
+                [SubSystemStage.Walkdown]   = new ColorSetting { DisplayColor = Color.FromArgb(255, 215, 0),   Transparency = 0.0 },
+                [SubSystemStage.PartialMcc] = new ColorSetting { DisplayColor = Color.FromArgb(255, 140, 50),  Transparency = 0.0 },
+                [SubSystemStage.Mcc]        = new ColorSetting { DisplayColor = Color.FromArgb(65, 105, 225),  Transparency = 0.0 },
+                [SubSystemStage.Pcc]        = new ColorSetting { DisplayColor = Color.FromArgb(0, 128, 0),     Transparency = 0.0 },
+            };
+
         public static ColorSetting Unmatched =>
             new ColorSetting { DisplayColor = Color.FromArgb(200, 200, 200), Transparency = 0.9 };
     }
@@ -397,6 +415,223 @@ namespace NavisVisualizer.Models
             if (string.IsNullOrEmpty(id)) return "";
             return id.TrimStart('/').Trim();
         }
+    }
+
+    // ============================================================
+    // Sub-system (Equipment + Piping 통합 축)
+    // ============================================================
+
+    public enum SubSystemDiscipline
+    {
+        Equipment,   // Mech_EQ / All_EQ — TAG NO 매칭
+        Piping,      // Piping_HydrotestPKG — PKGNO 매칭 (PKG 노드 색칠이 하위 스풀/배관을 커버)
+    }
+
+    public static class SubSystemDisciplineInfo
+    {
+        public static readonly Dictionary<SubSystemDiscipline, string> Labels = new Dictionary<SubSystemDiscipline, string>
+        {
+            [SubSystemDiscipline.Equipment] = "Equipment",
+            [SubSystemDiscipline.Piping]    = "Piping",
+        };
+    }
+
+    /// <summary>
+    /// 공종별 stage 체계를 Sub-system 탭의 공통 축으로 정규화한 진행 상태.
+    /// 공종마다 stage 수가 달라(Equipment 4 / Hydrotest 6) 단일 색상 체계로
+    /// 묶으려면 미착수/진행중/완료 3단계로 접는다.
+    /// </summary>
+    public enum ProgressStatus
+    {
+        NotStarted,
+        InProgress,
+        Completed,
+    }
+
+    public static class ProgressStatusInfo
+    {
+        public static readonly ProgressStatus[] Ordered =
+        {
+            ProgressStatus.NotStarted, ProgressStatus.InProgress, ProgressStatus.Completed
+        };
+
+        public static readonly Dictionary<ProgressStatus, string> Labels = new Dictionary<ProgressStatus, string>
+        {
+            [ProgressStatus.NotStarted] = "미착수",
+            [ProgressStatus.InProgress] = "진행중",
+            [ProgressStatus.Completed]  = "완료",
+        };
+    }
+
+    /// <summary>
+    /// Sub-system 탭의 통합 요소. 공종별 원본 데이터(EquipmentData/TestPackageData)를
+    /// 감싸 공통 축(Sub-system, 매칭 키, 진행 상태)으로 노출한다 — stage 계산은
+    /// 원본 모델의 GetStageAtDate를 그대로 재사용한다.
+    /// </summary>
+    public class SubSystemElement
+    {
+        public string SubSystem { get; }
+        public SubSystemDiscipline Discipline { get; }
+        /// <summary>모델 매칭 키. Equipment는 TAG NO(로더에서 선행 '/' 정규화됨), Piping은 PKGNO.</summary>
+        public string ElementId { get; }
+        public string Description { get; }
+
+        private readonly EquipmentData _equipment;
+        private readonly TestPackageData _package;
+
+        private SubSystemElement(string subSystem, SubSystemDiscipline discipline,
+            string elementId, string description, EquipmentData equipment, TestPackageData package)
+        {
+            SubSystem = subSystem;
+            Discipline = discipline;
+            ElementId = elementId;
+            Description = description;
+            _equipment = equipment;
+            _package = package;
+        }
+
+        public static SubSystemElement FromEquipment(EquipmentData eq) =>
+            new SubSystemElement(eq.SubSystem?.Trim(), SubSystemDiscipline.Equipment,
+                eq.TagNo, eq.Description ?? "", eq, null);
+
+        public static SubSystemElement FromPackage(TestPackageData pkg) =>
+            new SubSystemElement(pkg.SystemNo?.Trim(), SubSystemDiscipline.Piping,
+                pkg.TestPkgId, pkg.LineService ?? "", null, pkg);
+
+        /// <summary>기준일 시점의 공종별 상세 단계 라벨 (리포트 상세 리스트용).</summary>
+        public string StageLabelAt(DateTime referenceDate)
+        {
+            if (_equipment != null)
+                return EquipmentStageInfo.Labels[_equipment.GetStageAtDate(referenceDate)];
+            return HydrotestStageInfo.Labels[_package.GetStageAtDate(referenceDate)];
+        }
+
+        /// <summary>기준일 시점의 정규화 진행 상태. 마지막 stage 도달 = 완료, 그 외 착수 = 진행중.</summary>
+        public ProgressStatus StatusAt(DateTime referenceDate)
+        {
+            if (_equipment != null)
+            {
+                var stage = _equipment.GetStageAtDate(referenceDate);
+                if (stage == EquipmentStage.NotStarted) return ProgressStatus.NotStarted;
+                return stage == EquipmentStage.Inspection ? ProgressStatus.Completed : ProgressStatus.InProgress;
+            }
+            var pkgStage = _package.GetStageAtDate(referenceDate);
+            if (pkgStage == HydrotestStage.NotStarted) return ProgressStatus.NotStarted;
+            return pkgStage == HydrotestStage.Reinstatement ? ProgressStatus.Completed : ProgressStatus.InProgress;
+        }
+    }
+
+    /// <summary>
+    /// Sub-system 마스터의 시운전 인계 마일스톤. 날짜 역순 스캔(GetStageAtDate)은
+    /// 다른 공종과 동일 패턴 — "지난 날짜 = 달성" 가정.
+    /// 별도 RFCC 단계는 없음 — MCC(또는 Partial MCC)가 Ready for Commissioning 의미.
+    /// 마일스톤은 순차가 아닐 수 있음: P-MCC 없이 바로 MCC로 갈 수 있다. 역순 스캔은
+    /// 날짜 보유 여부만 보므로 중간 단계 스킵을 자연스럽게 허용한다 (MCC 날짜만 있으면
+    /// MCC로 판정 — 이 enum 순서는 시간 순서가 아니라 "달성 수준" 랭킹).
+    /// </summary>
+    public enum SubSystemStage
+    {
+        NotStarted,   // 0
+        Walkdown,     // 1  Walkdown
+        PartialMcc,   // 2  Partial MCC (부분 RFC)
+        Mcc,          // 3  MCC = Ready for Commissioning (핵심 기점)
+        Pcc,          // 4  PCC
+    }
+
+    public static class SubSystemStageInfo
+    {
+        /// <summary>날짜 역순 스캔에 쓰는 실적 단계.</summary>
+        public static readonly SubSystemStage[] OrderedStages =
+        {
+            SubSystemStage.Walkdown, SubSystemStage.PartialMcc,
+            SubSystemStage.Mcc, SubSystemStage.Pcc
+        };
+
+        /// <summary>색상 그리드 표시 순서 — 미착수 + 실적 단계.</summary>
+        public static readonly SubSystemStage[] GridOrder =
+        {
+            SubSystemStage.NotStarted, SubSystemStage.Walkdown, SubSystemStage.PartialMcc,
+            SubSystemStage.Mcc, SubSystemStage.Pcc,
+        };
+
+        public static readonly Dictionary<SubSystemStage, string> Labels = new Dictionary<SubSystemStage, string>
+        {
+            [SubSystemStage.NotStarted] = "미착수",
+            [SubSystemStage.Walkdown]   = "Walkdown",
+            [SubSystemStage.PartialMcc] = "P-MCC",
+            [SubSystemStage.Mcc]        = "MCC",
+            [SubSystemStage.Pcc]        = "PCC",
+        };
+    }
+
+    /// <summary>
+    /// Sub-system 마스터 행 ([Navis].[SubSystem_Master] — 계약은 CLAUDE.md 11번).
+    /// 마일스톤 날짜 4개 + A/B/C-ITR·A/B Punch 수치(각 Total + 완료/종결).
+    /// 선택 테이블·리포트에 status로 병기된다.
+    /// </summary>
+    public class SubSystemMasterData
+    {
+        public string SubSystemNo { get; set; }
+        public string Description { get; set; }
+        public Dictionary<SubSystemStage, DateTime?> StageDates { get; set; }
+            = new Dictionary<SubSystemStage, DateTime?>();
+
+        /// <summary>MCC 계획일 (핵심 기점). 실적(StageDates[Mcc])과 별개 — 지연 판정 기준.</summary>
+        public DateTime? MccPlan { get; set; }
+
+        public int? ItrATotal { get; set; }
+        public int? ItrADone { get; set; }
+        public int? ItrBTotal { get; set; }
+        public int? ItrBDone { get; set; }
+        public int? ItrCTotal { get; set; }
+        public int? ItrCDone { get; set; }
+        public int? PunchATotal { get; set; }
+        public int? PunchAClosed { get; set; }   // 종결 수
+        public int? PunchBTotal { get; set; }
+        public int? PunchBClosed { get; set; }
+
+        public SubSystemStage GetStageAtDate(DateTime referenceDate)
+        {
+            var stages = SubSystemStageInfo.OrderedStages;
+            for (int i = stages.Length - 1; i >= 0; i--)
+            {
+                if (StageDates.TryGetValue(stages[i], out var date) && date.HasValue && date.Value.Date <= referenceDate.Date)
+                    return stages[i];
+            }
+            return SubSystemStage.NotStarted;
+        }
+
+        /// <summary>
+        /// 지연 = MCC 계획일이 기준일까지 도래했는데 P-MCC/MCC 실적이 아직 미입력
+        /// (실적 단계가 P-MCC 미만). MCC가 핵심 기점이므로 계획일 경과 = 지연 관리 대상.
+        /// P-MCC 또는 MCC 실적이 하나라도 있으면 지연 아님.
+        /// </summary>
+        public bool IsDelayed(DateTime referenceDate)
+        {
+            if (!MccPlan.HasValue || MccPlan.Value.Date > referenceDate.Date) return false;
+            return GetStageAtDate(referenceDate) < SubSystemStage.PartialMcc;
+        }
+
+        /// <summary>지연일수 (계획일 경과 일수). 지연 아니면 0.</summary>
+        public int DelayDays(DateTime referenceDate) =>
+            IsDelayed(referenceDate) ? (referenceDate.Date - MccPlan.Value.Date).Days : 0;
+
+        /// <summary>테이블/리포트 표기: 지연 시 "지연 Nd", 아니면 계획일(yy-MM-dd) 또는 "-".</summary>
+        public string PlanText(DateTime referenceDate)
+        {
+            if (IsDelayed(referenceDate)) return $"지연 {DelayDays(referenceDate)}d";
+            return MccPlan.HasValue ? MccPlan.Value.ToString("yy-MM-dd") : "-";
+        }
+
+        /// <summary>테이블/리포트 공통 표기: "완료(종결)/전체" (Total 미보유 시 "-").</summary>
+        public static string Ratio(int? done, int? total) =>
+            total.HasValue ? $"{done ?? 0}/{total}" : "-";
+
+        public string ItrAText => Ratio(ItrADone, ItrATotal);
+        public string ItrBText => Ratio(ItrBDone, ItrBTotal);
+        public string ItrCText => Ratio(ItrCDone, ItrCTotal);
+        public string PunchAText => Ratio(PunchAClosed, PunchATotal);
+        public string PunchBText => Ratio(PunchBClosed, PunchBTotal);
     }
 
     public class CableRecord

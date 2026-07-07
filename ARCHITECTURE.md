@@ -23,9 +23,10 @@ Excel (.xlsx/.xls/.xlsb)          OASIS SQL Server ([Navis] 스키마)
 | **Hydrotest** | 6 (Review → Reinstatement) | Test Package No. (DisplayName) | 재귀 탐색 (WalkAndIndex) | `TagSearcher` 공유 |
 | **Equipment** | 4 (Delivery → Inspection) | Tag No. (DisplayName, prefix 지원) | 레벨 타겟 (BuildIndexForTags) | `EquipmentSearcher` 전용 |
 | **EIT Tray** | 4 (Tray 설치 → Cable 완료) | Tray Number (leading `/` 정규화 후) | 재귀 탐색 (WalkAndIndex) | `TagSearcher` 공유 |
+| **Sub-system** | 2모드: 마스터 단계 5 (Walkdown→PCC) / 요소 진행 3단계 | Tag No. + Test Package No. (Sub-system 축 통합) | 재귀 탐색 (WalkAndIndex) | `TagSearcher` 공유 |
 
 ### Searcher 분리 근거
-- **TagSearcher**: Spool / Hydrotest / EIT Tray는 *동일* 매칭 전략(`WalkAndIndex` + `FindBySpoolIds`) — 한 번 빌드하면 셋 다 조회 가능
+- **TagSearcher**: Spool / Hydrotest / EIT Tray / Sub-system은 *동일* 매칭 전략(`WalkAndIndex` + `FindBySpoolIds`) — 한 번 빌드하면 전부 조회 가능
 - **EquipmentSearcher**: 레벨-타겟 전략으로 인덱스 구조가 근본적으로 달라 충돌 방지 목적의 물리적 분리
 - 단일 Searcher 공유 시: Equipment 먼저 적용 → TagSearcher 탭은 비어 있는 레벨-타겟 인덱스를 재사용 → 0 매칭 (버그)
 
@@ -60,6 +61,16 @@ Excel (.xlsx/.xls/.xlsb)          OASIS SQL Server ([Navis] 스키마)
 | Hydrotest | `[Navis].[Piping_HydrotestPKG]` | `PKGNO`→TestPkgId, `Sub-System`→SystemNo, `LINESVC`→LineService |
 | Equipment | `[Navis].[Mech_EQ]` + `[All_EQ]` 병합 (Mech 우선) | TAG NO 선행 `/` 정규화, `Delivered` **날짜**→StageDates[Delivery] 직접 매핑 |
 
+- **Sub-system 탭은 OASIS 전용** — 새 SQL 없이 `LoadEquipment`+`LoadHydrotest`를 재사용해
+  Sub-system 축으로 감싼다 (`SqlLoader.LoadSubSystemElements`). Equipment `SUB-SYSTEM`→TAG NO,
+  Piping `Sub-System`→PKGNO. Sub-system 미지정 행은 제외(건수 보고). PKG 노드 색칠이
+  하위 스풀/배관을 커버하므로 배관은 PKG 단위로 충분
+- **Sub-system 마스터**: `SqlLoader.LoadSubSystemMaster` ← `[Navis].[SubSystem_Master]`
+  (`SUB-SYSTEM/DESCRIPTION` + `MCC Plan`(계획일) + 마일스톤 실적일 `Walkdown/Partial MCC/MCC/PCC` +
+  `A/B/C-ITR TOTAL·DONE`, `PUNCH A/B TOTAL·CLOSED`, `PJTNO` 필터 — 계약은 CLAUDE.md 11번).
+  요소 로드와 별도 try — **테이블 미구성이면 요소 파생 목록으로 자동 fallback**
+  (단계별 가시화 모드만 비활성). MCC 계획일 경과 + P-MCC/MCC 실적 미입력 = `IsDelayed`(지연) —
+  색으로는 표시 안 하고(달성 단계 그대로 칠함) 테이블 텍스트·`[MCC 지연 담기]` 버튼·리포트로만 노출
 - EIT Tray / Cable 탭은 OASIS 미지원 — 트레이 진척 테이블 부재, EIT_Cable에 Node 매핑 부재
   (상세: `docs/SQL_DB_CONNECTION_ANALYSIS.md`)
 
@@ -97,6 +108,15 @@ GetStageAtDate(referenceDate):
 - 기준일과 `Tray install date` 비교로 NotStarted/Installed 판정
 - Tray Installed 이후: `Best Cable Progress` 기준 (≥100% → Completed, >0% → Pulling)
 - Cable Progress는 날짜 미보유 → 현재 상태 기준 (입력 데이터에 per-cable 완료일 추가 시 stage별 날짜 로직으로 교체)
+
+**Sub-system 마스터** (6단계 — `SubSystemMasterData.GetStageAtDate`):
+- NotStarted → Walkdown → Partial MCC → MCC → RFCC → PCC (마일스톤 실적일 역순 스캔)
+- ITR(`done/total`)·Punch(`A·B` open 수치)는 stage 계산에 안 쓰고 선택 테이블/리포트에 status로 병기
+
+**Sub-system 요소** (`ProgressStatus` 3단계 정규화):
+- 공종마다 stage 수가 달라(Equipment 4 / Hydrotest 6) 단일 색상 체계로 묶기 위해
+  `SubSystemElement.StatusAt(기준일)`이 미착수/진행중/완료로 접는다
+  (마지막 stage 도달 = 완료, 그 외 착수 = 진행중) — 원본 `GetStageAtDate` 재사용
 
 ### 3. Model Item Indexing (`Searchers/ModelItemSearcher.cs`)
 
@@ -181,9 +201,9 @@ Apply:
 
 ### 6. UI Architecture (`UI/`)
 
-**탭 구성:** Hydrotest | Spool | Equipment | Tools
+**탭 구성:** Hydrotest | Spool | Equipment | EIT Tray | Cable Pull | Sub-system | Tools
 
-**공통 패턴 (3개 탭 동일):**
+**공통 패턴 (날짜 기반 탭 동일):**
 - DateTimePicker (기준일, 기본: 오늘)
 - 2열 색상 패널 (색상 피커 + 투명도 드롭다운)
 - 색상 변경 시 증분 업데이트 (캐시 활용)
@@ -191,6 +211,28 @@ Apply:
 - 검색 + "매칭 Status 출력" CSV Export
 - ListView 컬럼 정렬 (오름차순/내림차순)
 - 적용 / 전체 초기화 / 속성 쓰기 / Viewpoint 저장 / NWD Export
+
+**Sub-system 탭 (`UI/SubSystemTab.cs`):**
+- OASIS 전용 로드 (단일 소스 — DataSourcePanel 미사용). 요소 + 마스터를 한 번에 로드,
+  마스터 미구성이면 요소 파생 목록 fallback + 단계 모드 라디오 비활성
+- 시각화 2모드 라디오: **Sub-system 단계별**(마스터 Walkdown→PCC 6색 — 선택한 sub-system의
+  요소 전체가 그 sub-system의 현재 마일스톤 색을 받음, 기본·마스터 필요) /
+  **요소 진행상태별**(미착수·진행중·완료 3색). 색상 그리드는 모드에 따라 전환 표시
+- 선택 UI (dual-list): 좌측 검색(코드+설명) + status 테이블(Sub-system/Description/단계/
+  ITR/Punch/요소, ~400개 스크롤) ↔ **[▶ ◀ ▶▶ ◀◀] 화살표** ↔ 우측 선택 누적 테이블
+  (단계색 스와치·단계·요소·매칭) + 하단 선택 개수/요소 합계 라벨. 다중 선택 후 ▶ 추가 /
+  ◀ 제거, ▶▶ 필터 결과 전체, ◀◀ 전체 해제, 더블클릭 = 추가/제거. 이미 담긴 좌측 행은
+  녹색 배경, 요소 0건(마스터에만 존재)은 회색 글자, 마스터 외 요소 그룹은 "(마스터 외)"
+- 우측 행 클릭 → 해당 sub-system 매칭 아이템 3D 선택·포커스
+- 선택 박스 하단 [선택 Sub-system 상세 현황 보기…] → 비모달 Form에 공종·요소별 status
+  그리드(검색·행 더블클릭 3D 포커스·[CSV 출력]). 다공종 상세를 한 창에서 표시
+- [MCC 지연 담기] (검색 옆): 기준일 기준 IsDelayed sub-system을 선택 박스에 일괄 추가
+- [현황 리포트 출력]: CSV 리포트 (헤더 블록 + Sub-system별 요약(Description/단계/MCC계획/
+  지연(일)/ITR/Punch/공종/매칭/진행/완료율) + 상세 리스트). 선택이 있으면 선택만, 없으면 전체.
+  매칭 O/X는 마지막 적용 스냅샷 기준, 미적용 sub-system은 "-" (CLAUDE.md 8번 단기안의 첫 구현)
+- 적용은 `ColorOverrideEngine.ApplySubSystem` — 그룹 키(SubSystemStage명 또는 ProgressStatus명)로
+  묶어 그룹당 1회 색상, 캐시는 `VisualModule.SubSystem`으로 격리. 증분 색 변경은
+  마지막 적용 모드와 같은 그리드에서만 유효
 
 **Tools 탭:**
 - Property Dumper: 선택 아이템 속성 CSV 출력
