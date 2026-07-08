@@ -20,6 +20,9 @@ namespace NavisVisualizer.UI
         private readonly Dictionary<TabDataSource, List<SpoolData>> _spoolsBySource
             = new Dictionary<TabDataSource, List<SpoolData>>();
         private bool _appliedOnce;
+        // 레벨 타겟 인덱스(BuildIndexForTags)는 태그 셋 기반이라 소스 전환 시 재빌드 필요
+        // (NeedsRebuild는 모델 변경만 감지 — 소스가 바뀌어도 doc은 그대로). Equipment와 동일.
+        private bool _needsIndexRebuild;
         private Dictionary<SpoolStage, ColorSetting> _colorSettings;
 
         // Match tracking
@@ -366,6 +369,9 @@ namespace NavisVisualizer.UI
             if (!willReapply)
                 _scopePanel.ResetToFullModel();
 
+            // 레벨 타겟 인덱스는 활성 소스 태그 셋 기반 → 소스 전환 시 재빌드 강제.
+            _needsIndexRebuild = true;
+
             _tabFilter.TabPages[0].Text = $"전체 ({_spools.Count})";
             _tabFilter.TabPages[1].Text = "매칭";
             _tabFilter.TabPages[2].Text = "미매칭";
@@ -454,6 +460,7 @@ namespace NavisVisualizer.UI
             // 비용 제거. 리스크: 스풀이 여러 깊이에 섞여 있으면 첫 깊이만 잡음(CLAUDE.md §2).
             var spoolIdSet = new HashSet<string>(_spools.Select(s => s.SpoolId));
             _main.SpoolTagSearcher.BuildIndexForTags(doc, spoolIdSet, NwdScope.Spool);
+            _needsIndexRebuild = false;
 
             _progressBar.Visible = false;
             _progressBar.Style = ProgressBarStyle.Blocks;
@@ -467,7 +474,7 @@ namespace NavisVisualizer.UI
                 MessageBox.Show("데이터를 먼저 로드하고 모델을 열어주세요.");
                 return;
             }
-            if (_main.SpoolTagSearcher.NeedsRebuild(doc))
+            if (_needsIndexRebuild || _main.SpoolTagSearcher.NeedsRebuild(doc))
                 BuildIndex();
 
             var activeSettings = new Dictionary<SpoolStage, ColorSetting>();
@@ -534,9 +541,9 @@ namespace NavisVisualizer.UI
                 MessageBox.Show("먼저 적용(가시화)을 실행하세요. 숨김은 매칭된 스풀에 적용됩니다.");
                 return;
             }
-            if (_main.SpoolTagSearcher.NeedsRebuild(doc))
+            if (_needsIndexRebuild || _main.SpoolTagSearcher.NeedsRebuild(doc))
             {
-                MessageBox.Show("모델이 변경되었습니다. 적용(가시화)을 다시 실행한 뒤 사용하세요.");
+                MessageBox.Show("모델 또는 데이터 소스가 변경되었습니다. 적용(가시화)을 다시 실행한 뒤 사용하세요.");
                 return;
             }
 
@@ -596,9 +603,9 @@ namespace NavisVisualizer.UI
                     MessageBox.Show("먼저 적용(가시화)을 실행하세요. 집계 범위는 매칭된 항목에 적용됩니다.");
                     return;
                 }
-                if (_main.SpoolTagSearcher.NeedsRebuild(doc))
+                if (_needsIndexRebuild || _main.SpoolTagSearcher.NeedsRebuild(doc))
                 {
-                    MessageBox.Show("모델이 변경되었습니다. 적용(가시화)을 다시 실행한 뒤 범위를 선택하세요.");
+                    MessageBox.Show("모델 또는 데이터 소스가 변경되었습니다. 적용(가시화)을 다시 실행한 뒤 범위를 선택하세요.");
                     return;
                 }
 
@@ -653,7 +660,7 @@ namespace NavisVisualizer.UI
                 MessageBox.Show("데이터를 먼저 로드하고 모델을 열어주세요.");
                 return;
             }
-            if (_main.SpoolTagSearcher.NeedsRebuild(doc))
+            if (_needsIndexRebuild || _main.SpoolTagSearcher.NeedsRebuild(doc))
                 BuildIndex();
 
             var referenceDate = _dtpReference.Value;
@@ -728,7 +735,8 @@ namespace NavisVisualizer.UI
             if (_listView.SelectedItems.Count == 0) return;
 
             var doc = _main.GetDocument();
-            if (doc == null || !_main.SpoolTagSearcher.IsIndexBuilt || _main.SpoolTagSearcher.NeedsRebuild(doc)) return;
+            if (doc == null || !_main.SpoolTagSearcher.IsIndexBuilt
+                || _needsIndexRebuild || _main.SpoolTagSearcher.NeedsRebuild(doc)) return;
 
             var collection = new Autodesk.Navisworks.Api.ModelItemCollection();
             foreach (ListViewItem selected in _listView.SelectedItems)

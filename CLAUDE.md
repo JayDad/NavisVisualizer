@@ -65,6 +65,7 @@ federated 구조에서 `MEBTray1.nwc`(파일명에 digit)가 `/SM/MEB/ELEC` → 
 2만 스풀 기준 general `WalkAndIndex`가 스풀마다 "하강할지" 판단하려고 자식(전부 geometry인 경우 끝까지)을 COM으로 스캔 → 첫 빌드 ~1분. `SpoolTab.BuildIndex`를 `BuildIndex(NwdScope.Spool)`에서 **`BuildIndexForTags(spoolIdSet, NwdScope.Spool)`**(Equipment와 동일 레벨 타겟)로 교체. 스풀 id가 처음 매칭되는 깊이만 `IndexAtDepth`로 인덱싱하고 그 노드의 geometry 자식은 아예 안 건드림 → 자식 스캔 비용 제거.
 - **리스크(수용됨, Windows 검증 대기)**: `BuildIndexForTags`는 첫 매칭 깊이 하나만 인덱싱한다. 스풀이 **여러 깊이에 섞여** 모델링돼 있으면 다른 깊이의 스풀은 미인덱싱 → 그 스풀만 미매칭이 된다(색 안 칠해짐). general walk는 전 깊이를 훑어 이 문제가 없었음 — 속도와 맞바꾼 것. federated 스코프 자체를 못 찾거나 스코프 내 태그 0건이면 기존 3중 fallback(전체 재인덱싱)이 동작하나, **"일부 깊이만 누락"은 fallback이 안 잡는다**(0건이 아니므로). 실측 시 매칭 건수를 general walk 시절과 대조할 것.
 - 되돌리려면 `SpoolTab.BuildIndex`를 `BuildIndex(doc, NwdScope.Spool)` 한 줄로 복귀. Hydrotest/EIT는 아직 general walk 유지(스풀만 건수가 압도적이라 우선 적용).
+- **소스 전환 재빌드 필수**: 레벨 타겟 인덱스는 활성 소스 태그 셋으로 깊이를 찾으므로, Excel↔OASIS 전환 시 재빌드해야 한다. `NeedsRebuild(doc)`는 모델 변경만 감지(소스 바뀌어도 doc 동일) → SpoolTab에 `_needsIndexRebuild` 플래그 추가(Equipment와 동일 패턴): 소스 전환 시 true, BuildIndex 후 false, 전 NeedsRebuild 호출부에 OR. 누락 시 소스 전환 후 옛 소스 깊이 인덱스가 잔존해 신규 소스 스풀 미매칭 위험.
 
 ### 3. Cable Stage 날짜화 (EIT Tray)
 
