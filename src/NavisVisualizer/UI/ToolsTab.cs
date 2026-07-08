@@ -174,6 +174,31 @@ namespace NavisVisualizer.UI
             btnClipDump.Click += BtnClipDump_Click;
             layout.Controls.Add(btnClipDump);
 
+            // --- Cable Vertex 진단 ---
+            layout.Controls.Add(new Label { Height = 10, Dock = DockStyle.Fill });
+            layout.Controls.Add(new Label
+            {
+                Text = "Cable Vertex 진단",
+                Font = new Font(Font, FontStyle.Bold),
+                Dock = DockStyle.Fill,
+                Height = 20
+            });
+            layout.Controls.Add(new Label
+            {
+                Text = "케이블 1개 선택 -> 형상 vertex 추출 (Line/Triangle 종류·좌표·단면 판정 확인)",
+                Dock = DockStyle.Fill,
+                Height = 20,
+                ForeColor = Color.Gray
+            });
+            var btnVertexDump = new Button
+            {
+                Text = "선택 항목 Vertex 덤프",
+                Dock = DockStyle.Fill,
+                Height = 30
+            };
+            btnVertexDump.Click += BtnVertexDump_Click;
+            layout.Controls.Add(btnVertexDump);
+
             Controls.Add(layout);
         }
 
@@ -435,6 +460,46 @@ namespace NavisVisualizer.UI
             catch (Exception ex)
             {
                 MessageBox.Show($"Error: {ex.Message}", "Clip Plane 덤프",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        // -------------------------------------------------------
+        // Cable Vertex dump (clip-vs-cable clash calibration)
+        // -------------------------------------------------------
+        private void BtnVertexDump_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                var doc = _main.GetDocument();
+                if (doc == null)
+                {
+                    MessageBox.Show("No document open.");
+                    return;
+                }
+
+                var selection = doc.CurrentSelection.SelectedItems;
+                if (selection.Count == 0)
+                {
+                    MessageBox.Show("케이블(또는 형상 있는 항목) 1개를 선택하세요.");
+                    return;
+                }
+
+                var item = selection.First();
+                string dump = Services.GeometryProbe.DumpItem(doc, item, _main.SectionSvc);
+
+                string outPath = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
+                    $"VertexDump_{DateTime.Now:yyyyMMdd_HHmmss}.txt");
+                File.WriteAllText(outPath, dump, System.Text.Encoding.UTF8);
+
+                _lblStatus.Text = "Vertex dump saved";
+                MessageBox.Show($"{dump}\n\n저장: {outPath}", "Cable Vertex 진단",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error: {ex.Message}", "Cable Vertex 진단",
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
