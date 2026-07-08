@@ -21,10 +21,14 @@ namespace NavisVisualizer.Visualizers
 
     public class ColorOverrideEngine
     {
-        // Spool / Hydrotest / EIT Tray share the same full-walk index.
+        // Tag 인덱스는 NWD 파일 스코프별로 분리 (MainDockablePanel 참조):
+        //   piping (Spool/Hydrotest — SPL·HYDROPKG) / elec (EIT Tray — EIT) /
+        //   subSystem (MEQ·SPL·HYDROPKG). 매칭 전략은 셋 다 digit full-walk로 동일.
         // Equipment uses its own level-targeted index.
-        // Cable Pull uses a third index keyed on the "{NodeId}-BOX..." prefix.
-        private readonly ModelItemSearcher _tagSearcher;
+        // Cable Pull uses an index keyed on the "{NodeId}-BOX..." prefix.
+        private readonly ModelItemSearcher _pipingTagSearcher;
+        private readonly ModelItemSearcher _elecTagSearcher;
+        private readonly ModelItemSearcher _subSystemSearcher;
         private readonly ModelItemSearcher _equipmentSearcher;
         private readonly ModelItemSearcher _cableBoxSearcher;
 
@@ -43,9 +47,16 @@ namespace NavisVisualizer.Visualizers
         private Dictionary<CableStage, ColorSetting> _cableLastSettings;
         private bool _cableFilterFocusActive;
 
-        public ColorOverrideEngine(ModelItemSearcher tagSearcher, ModelItemSearcher equipmentSearcher, ModelItemSearcher cableBoxSearcher)
+        public ColorOverrideEngine(
+            ModelItemSearcher pipingTagSearcher,
+            ModelItemSearcher elecTagSearcher,
+            ModelItemSearcher subSystemSearcher,
+            ModelItemSearcher equipmentSearcher,
+            ModelItemSearcher cableBoxSearcher)
         {
-            _tagSearcher = tagSearcher;
+            _pipingTagSearcher = pipingTagSearcher;
+            _elecTagSearcher = elecTagSearcher;
+            _subSystemSearcher = subSystemSearcher;
             _equipmentSearcher = equipmentSearcher;
             _cableBoxSearcher = cableBoxSearcher;
         }
@@ -70,7 +81,7 @@ namespace NavisVisualizer.Visualizers
             var stageItems = new Dictionary<HydrotestStage, List<ModelItem>>();
 
             var allPkgIds = packages.Select(p => p.TestPkgId).Distinct();
-            var searchResult = _tagSearcher.FindBySpoolIds(allPkgIds);
+            var searchResult = _pipingTagSearcher.FindBySpoolIds(allPkgIds);
 
             foreach (var pkg in packages)
             {
@@ -118,7 +129,7 @@ namespace NavisVisualizer.Visualizers
             var stageItems = new Dictionary<SpoolStage, List<ModelItem>>();
 
             var allSpoolIds = spools.Select(s => s.SpoolId).Distinct();
-            var searchResult = _tagSearcher.FindBySpoolIds(allSpoolIds);
+            var searchResult = _pipingTagSearcher.FindBySpoolIds(allSpoolIds);
 
             foreach (var spool in spools)
             {
@@ -215,7 +226,7 @@ namespace NavisVisualizer.Visualizers
 
             // Model indexes strip leading '/' — match Excel tray numbers accordingly
             var normalizedIds = trays.Select(t => EitTrayData.NormalizeId(t.TrayNumber)).Distinct();
-            var searchResult = _tagSearcher.FindBySpoolIds(normalizedIds);
+            var searchResult = _elecTagSearcher.FindBySpoolIds(normalizedIds);
 
             foreach (var tray in trays)
             {
@@ -257,8 +268,8 @@ namespace NavisVisualizer.Visualizers
         /// <summary>
         /// Sub-system 탭: 요소를 groupSelector가 주는 키(모드에 따라 sub-system 이름
         /// 또는 ProgressStatus 이름)로 묶어 그룹당 1회 색상을 적용한다. 매칭은
-        /// TagSearcher(전체 워크 인덱스) 기준 — Equipment 태그와 Hydrotest PKG 모두
-        /// digit 포함 DisplayName 정확 일치라 동일 인덱스로 조회된다.
+        /// SubSystemSearcher(digit full-walk 인덱스, 스코프 MEQ·SPL·HYDROPKG) 기준 —
+        /// Equipment 태그와 Hydrotest PKG 모두 digit 포함 DisplayName 정확 일치라 동일 인덱스로 조회된다.
         /// groupSelector가 null을 반환하거나 groupSettings에 없는 키는 색칠하지
         /// 않는다(체크 해제된 단계). 캐시 키는 그룹 키 그대로라 진행 상태 모드에서는
         /// UpdateStageColor(VisualModule.SubSystem, status명)로 증분 색 변경이 된다.
@@ -273,7 +284,7 @@ namespace NavisVisualizer.Visualizers
             var groupItems = new Dictionary<string, List<ModelItem>>(StringComparer.OrdinalIgnoreCase);
 
             var allIds = elements.Select(el => el.ElementId).Distinct();
-            var searchResult = _tagSearcher.FindBySpoolIds(allIds);
+            var searchResult = _subSystemSearcher.FindBySpoolIds(allIds);
 
             foreach (var el in elements)
             {

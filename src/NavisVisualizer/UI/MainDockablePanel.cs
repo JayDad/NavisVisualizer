@@ -8,16 +8,23 @@ namespace NavisVisualizer.UI
 {
     public class MainDockablePanel : UserControl
     {
-        /// <summary>
-        /// Shared full-walk index for Spool / Hydrotest / EIT Tray.
-        /// All three match by "digit-containing DisplayName" in the same tree traversal pattern.
-        /// </summary>
-        public ModelItemSearcher TagSearcher { get; } = new ModelItemSearcher();
+        // Tag 인덱스는 NWD 파일 스코프(NwdScope)별로 분리 — 공유하면 스코프가 다른 탭 간
+        // 재빌드 핑퐁이 생기고, 단일 스코프로는 최적화가 안 되기 때문 (CLAUDE.md 1번).
+        // 매칭 전략(digit 포함 DisplayName full-walk)은 세 인스턴스 모두 동일하다.
 
-        /// <summary>Dedicated level-targeted index for Equipment (different match strategy).</summary>
+        /// <summary>Spool + Hydrotest 공유 — 스코프 SPL·HYDROPKG (SPL 부재 시 스풀은 HYDROPKG 안에 있음).</summary>
+        public ModelItemSearcher PipingTagSearcher { get; } = new ModelItemSearcher();
+
+        /// <summary>EIT Tray 전용 — 스코프 EIT.</summary>
+        public ModelItemSearcher ElecTagSearcher { get; } = new ModelItemSearcher();
+
+        /// <summary>Sub-system 전용 — Equipment TAG + Piping PKG를 모두 찾아야 하므로 스코프 MEQ·SPL·HYDROPKG.</summary>
+        public ModelItemSearcher SubSystemSearcher { get; } = new ModelItemSearcher();
+
+        /// <summary>Dedicated level-targeted index for Equipment (different match strategy) — 스코프 MEQ.</summary>
         public ModelItemSearcher EquipmentSearcher { get; } = new ModelItemSearcher();
 
-        /// <summary>Dedicated index for Cable Pull boxes (key = prefix before "-BOX").</summary>
+        /// <summary>Dedicated index for Cable Pull boxes (key = prefix before "-BOX") — 스코프 CABLE.</summary>
         public ModelItemSearcher CableBoxSearcher { get; } = new ModelItemSearcher();
 
         public ColorOverrideEngine OverrideEngine { get; }
@@ -38,7 +45,8 @@ namespace NavisVisualizer.UI
 
         public MainDockablePanel()
         {
-            OverrideEngine = new ColorOverrideEngine(TagSearcher, EquipmentSearcher, CableBoxSearcher);
+            OverrideEngine = new ColorOverrideEngine(
+                PipingTagSearcher, ElecTagSearcher, SubSystemSearcher, EquipmentSearcher, CableBoxSearcher);
             InitializeComponent();
         }
 

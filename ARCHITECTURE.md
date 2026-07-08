@@ -17,18 +17,32 @@ Excel (.xlsx/.xls/.xlsb)          OASIS SQL Server ([Navis] 스키마)
 
 ## Modules
 
-| 모듈 | Stage 수 | 매칭 키 | 인덱싱 방식 | Searcher |
-|------|---------|---------|------------|----------|
-| **Spool** | 14 (B/V → Welding) | Spool Number (DisplayName) | 재귀 탐색 (WalkAndIndex) | `TagSearcher` 공유 |
-| **Hydrotest** | 6 (Review → Reinstatement) | Test Package No. (DisplayName) | 재귀 탐색 (WalkAndIndex) | `TagSearcher` 공유 |
-| **Equipment** | 4 (Delivery → Inspection) | Tag No. (DisplayName, prefix 지원) | 레벨 타겟 (BuildIndexForTags) | `EquipmentSearcher` 전용 |
-| **EIT Tray** | 4 (Tray 설치 → Cable 완료) | Tray Number (leading `/` 정규화 후) | 재귀 탐색 (WalkAndIndex) | `TagSearcher` 공유 |
-| **Sub-system** | 2모드: 마스터 단계 5 (Walkdown→PCC) / 요소 진행 3단계 | Tag No. + Test Package No. (Sub-system 축 통합) | 재귀 탐색 (WalkAndIndex) | `TagSearcher` 공유 |
+| 모듈 | Stage 수 | 매칭 키 | 인덱싱 방식 | Searcher (NWD 스코프) |
+|------|---------|---------|------------|----------------------|
+| **Spool** | 14 (B/V → Welding) | Spool Number (DisplayName) | 재귀 탐색 (WalkAndIndex) | `PipingTagSearcher` 공유 (SPL·HYDROPKG) |
+| **Hydrotest** | 6 (Review → Reinstatement) | Test Package No. (DisplayName) | 재귀 탐색 (WalkAndIndex) | `PipingTagSearcher` 공유 (SPL·HYDROPKG) |
+| **Equipment** | 4 (Delivery → Inspection) | Tag No. (DisplayName, prefix 지원) | 레벨 타겟 (BuildIndexForTags) | `EquipmentSearcher` 전용 (MEQ) |
+| **EIT Tray** | 4 (Tray 설치 → Cable 완료) | Tray Number (leading `/` 정규화 후) | 재귀 탐색 (WalkAndIndex) | `ElecTagSearcher` 전용 (EIT) |
+| **Sub-system** | 2모드: 마스터 단계 5 (Walkdown→PCC) / 요소 진행 3단계 | Tag No. + Test Package No. (Sub-system 축 통합) | 재귀 탐색 (WalkAndIndex) | `SubSystemSearcher` 전용 (MEQ·SPL·HYDROPKG) |
 
 ### Searcher 분리 근거
-- **TagSearcher**: Spool / Hydrotest / EIT Tray / Sub-system은 *동일* 매칭 전략(`WalkAndIndex` + `FindBySpoolIds`) — 한 번 빌드하면 전부 조회 가능
-- **EquipmentSearcher**: 레벨-타겟 전략으로 인덱스 구조가 근본적으로 달라 충돌 방지 목적의 물리적 분리
-- 단일 Searcher 공유 시: Equipment 먼저 적용 → TagSearcher 탭은 비어 있는 레벨-타겟 인덱스를 재사용 → 0 매칭 (버그)
+- **매칭 전략 축**: `WalkAndIndex`(digit full-walk) 계열과 Equipment 레벨-타겟은 인덱스 구조가
+  근본적으로 달라 물리적 분리 (단일 공유 시: Equipment 먼저 적용 → 다른 탭이 비어 있는
+  레벨-타겟 인덱스를 재사용 → 0 매칭 버그)
+- **NWD 파일 스코프 축** (`Searchers/NwdScope.cs`): full-walk 계열도 탭별 대상 nwd 파일이
+  달라(Spool/Hydro=배관, EIT=전기, Sub-system=배관+장비) 스코프별 인스턴스로 분리 —
+  공유하면 탭 전환마다 재빌드 핑퐁이 생기고, 단일 인덱스로는 스코프 최적화가 불가.
+  Spool과 Hydrotest는 스코프가 같아(SPL∪HYDROPKG — SPL 파일 부재 시 스풀이 HYDROPKG 안에
+  있는 규약까지 자동 커버) 하나를 공유
+
+### NWD 파일 스코핑 (`NwdScope` — federated 모델 성능 최적화)
+인덱스 빌드 시 전체 `doc.Models`가 아니라 공종 대상 nwd 파일만 walk한다.
+- **2단계 매칭**: ① `Model.FileName`/RootItem DisplayName 키워드 매칭 (개별 공종 nwd만 연
+  경우·append 구성) ② federated NWD(묶음 파일을 연 경우 하위 파일이 트리 안 파일 노드로
+  들어옴)는 파일 노드(확장자 보유 DisplayName)만 얕게 따라가며 매칭 — geometry 트리는 안 건드림
+- **3중 fallback** (규약이 깨져도 동작 유지, 속도만 손해): 대상 모델 없음 / (Equipment) 스코프
+  내 태그 미발견 / 스코프 인덱스 0건 → 전체 모델 재인덱싱 + `LastScopeNote`에 fallback 기록
+- 스코프 결과는 각 탭 매칭 Status CSV의 `인덱스 스코프` 행과 Tools 탭 박스 중복 검사에서 확인
 
 ## Data Flow
 

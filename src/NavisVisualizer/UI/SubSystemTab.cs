@@ -6,6 +6,7 @@ using System.Linq;
 using System.Windows.Forms;
 using NavisVisualizer.Loaders;
 using NavisVisualizer.Models;
+using NavisVisualizer.Searchers;
 using NavisVisualizer.Visualizers;
 
 namespace NavisVisualizer.UI
@@ -17,7 +18,8 @@ namespace NavisVisualizer.UI
     /// 요소를 3D에 가시화하고 현황 리포트를 출력한다.
     ///
     /// - 데이터: OASIS 전용. 마스터 미구성 시 요소 파생 목록으로 자동 fallback
-    /// - 매칭: TagSearcher 공유 (digit 포함 DisplayName 정확 일치 — 개발 규칙)
+    /// - 매칭: SubSystemSearcher (digit 포함 DisplayName 정확 일치 — 개발 규칙.
+    ///   Equipment TAG + Piping PKG를 모두 찾아야 해 NWD 스코프 MEQ·SPL·HYDROPKG 전용 인스턴스)
     /// - 가시화 2모드: Sub-system 단계별(Walkdown→PCC 6색, 마스터 필요) /
     ///   요소 진행상태별(미착수·진행중·완료)
     /// - 선택 UI: 좌측 검색+상태 테이블(~400개) ↔ [▶ ◀ ▶▶ ◀◀] ↔ 우측 선택 누적
@@ -654,7 +656,7 @@ namespace NavisVisualizer.UI
         {
             if (_lvSelected.SelectedItems.Count == 0) return;
             var doc = _main.GetDocument();
-            if (doc == null || !_main.TagSearcher.IsIndexBuilt || _main.TagSearcher.NeedsRebuild(doc)) return;
+            if (doc == null || !_main.SubSystemSearcher.IsIndexBuilt || _main.SubSystemSearcher.NeedsRebuild(doc)) return;
 
             var ids = new List<string>();
             foreach (ListViewItem item in _lvSelected.SelectedItems)
@@ -664,7 +666,7 @@ namespace NavisVisualizer.UI
             }
             if (ids.Count == 0) return;
 
-            var found = _main.TagSearcher.FindBySpoolIds(ids.Distinct());
+            var found = _main.SubSystemSearcher.FindBySpoolIds(ids.Distinct());
             var collection = new Autodesk.Navisworks.Api.ModelItemCollection();
             foreach (var items in found.Values)
                 collection.AddRange(items);
@@ -700,7 +702,7 @@ namespace NavisVisualizer.UI
             _progressBar.Style = ProgressBarStyle.Marquee;
             _progressBar.Visible = true;
             Application.DoEvents();
-            _main.TagSearcher.BuildIndex(doc);
+            _main.SubSystemSearcher.BuildIndex(doc, NwdScope.SubSystem);
             _progressBar.Visible = false;
             _progressBar.Style = ProgressBarStyle.Blocks;
         }
@@ -723,7 +725,7 @@ namespace NavisVisualizer.UI
                 MessageBox.Show("Sub-system 마스터가 없어 단계별 가시화를 할 수 없습니다.\n요소 진행상태별 모드를 사용하세요.");
                 return;
             }
-            if (_main.TagSearcher.NeedsRebuild(doc))
+            if (_main.SubSystemSearcher.NeedsRebuild(doc))
                 BuildIndex();
 
             var targets = _elements.Where(el => _selected.Contains(el.SubSystem)).ToList();
@@ -806,6 +808,7 @@ namespace NavisVisualizer.UI
             lines.Add($"MCC 지연,{delayedCount}개 (계획일 경과·P-MCC/MCC 실적 미입력)");
             lines.Add($"집계 대상,{(selectedOnly ? "선택" : "전체")} Sub-system {names.Count}개");
             lines.Add($"매칭 기준,{(_appliedOnce ? "가시화 적용 결과 (적용된 Sub-system만 산정)" : "미적용 — 매칭 미산정")}");
+            lines.Add($"인덱스 스코프,{Csv(_main.SubSystemSearcher.LastScopeNote ?? "-")}");
 
             lines.Add("");
             lines.Add("[Sub-system별 요약]");
@@ -950,8 +953,8 @@ namespace NavisVisualizer.UI
                 if (lv.SelectedItems.Count == 0) return;
                 var el = lv.SelectedItems[0].Tag as SubSystemElement;
                 var doc = _main.GetDocument();
-                if (el == null || doc == null || !_main.TagSearcher.IsIndexBuilt || _main.TagSearcher.NeedsRebuild(doc)) return;
-                var found = _main.TagSearcher.FindBySpoolIds(new[] { el.ElementId });
+                if (el == null || doc == null || !_main.SubSystemSearcher.IsIndexBuilt || _main.SubSystemSearcher.NeedsRebuild(doc)) return;
+                var found = _main.SubSystemSearcher.FindBySpoolIds(new[] { el.ElementId });
                 var collection = new Autodesk.Navisworks.Api.ModelItemCollection();
                 foreach (var items in found.Values) collection.AddRange(items);
                 if (collection.Count == 0) return;

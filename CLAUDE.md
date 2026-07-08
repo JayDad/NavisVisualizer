@@ -4,37 +4,46 @@
 
 ## 향후 고려사항
 
-### 1. Federated NWD 모델 스코핑 (우선순위: 높음)
+### 1. Federated NWD 모델 스코핑 (구현됨 — Windows 검증 대기)
 
-**배경**
-현재 `ModelItemSearcher.BuildIndex`는 `doc.Models` 전체를 순회한다. 실제 현장에서는 Equipment / Piping / ELEC가 **별도 RVM → 개별 NWD**로 추출되어 Navisworks에서 federated 상태로 올라오는 구조가 일반적이다.
+**구현 현황**: 파일명 규약 확정(2026-07)에 따라 `Searchers/NwdScope.cs`(키워드 매칭, Autodesk
+비의존 — `NwdScopeTests` 존재) + `ModelItemSearcher` 스코프 지원(BuildIndex /
+BuildIndexForTags / BuildIndexForBoxes에 `NwdScope` 파라미터, null = 전체 = 기존 동작)으로
+구현. 상세는 ARCHITECTURE.md "NWD 파일 스코핑" 참조.
 
+**확정 파일명 규약과 스코프 배정**
 ```
-Document
-├── Models[0] "Equipment.nwd"   ← Equipment 탐색 대상
-├── Models[1] "Piping.nwd"      ← Spool / Hydrotest 탐색 대상
-└── Models[2] "ELEC.nwd"        ← EIT Tray 탐색 대상
+00-02_Trion_Topsides_Subsystem.nwd     ← federated 컨테이너 (어느 스코프에도 미매칭 — 의도)
+├─ 01-02_Trion_TopsidesLQ_Str.nwc      ← 구조. 플러그인 없음 (추후 block no별 공정 시각화 후보)
+├─ 02-02_Trion_Topsides_HYDROPKG.nwd   ← Hydrotest. SPL 파일 부재 시 스풀도 여기 존재
+├─ (03-..._SPL.nwd — 있으면)           ← 배관 스풀
+├─ 04-02_Trion_Topsides_MEQ.nwd        ← Mechanical Equipment
+├─ 05-02_Trion_Topsides_EIT.nwd        ← EIT 소형기기/Tray/Tray Support
+├─ 07_Trion_All_Cable.nwd              ← 케이블 루트 (cable no.별 모델링)
+└─ 09-02_Trion_Topsides_PIPSupport.nwd ← 배관 서포트. 플러그인 없음
 ```
+- `NwdScope.Piping` = SPL·HYDROPKG (Spool+Hydrotest가 `PipingTagSearcher` 공유 — 합집합
+  스코프라 "SPL 없으면 HYDROPKG에서" 규칙 자동 충족, 탭 전환 재빌드 핑퐁 없음)
+- `NwdScope.Equipment` = MEQ / `NwdScope.EitTray` = EIT (`ElecTagSearcher` 분리) /
+  `NwdScope.Cable` = CABLE / `NwdScope.SubSystem` = MEQ·SPL·HYDROPKG (`SubSystemSearcher` 분리)
+- 구 `TagSearcher` 공유 인스턴스는 `PipingTagSearcher`/`ElecTagSearcher`/`SubSystemSearcher`
+  3개로 분리, `ColorOverrideEngine` 생성자도 5개 searcher를 받도록 변경
 
-이 구조에서는 Spool 인덱싱 시 ELEC·Equipment 트리를 포함해 전체를 walk할 필요가 없다.
+**동작 방식**
+- 2단계 매칭: ① `Model.FileName`/RootItem DisplayName (개별 공종 nwd만 열거나 append 구성)
+  ② federated NWD를 연 경우 트리 안 **파일 노드**(확장자 보유 DisplayName)만 얕게(depth≤3)
+  따라가며 매칭 — geometry 트리는 안 내려감. 디렉터리명 오탐 방지 위해 파일명만 비교
+- 3중 자동 fallback (규약 깨져도 동작 유지): 대상 모델 없음 / Equipment 스코프 내 태그
+  미발견 / 스코프 인덱스 0건 → 전체 모델 재인덱싱. `LastScopeNote`/`LastScopeFellBack`로
+  노출되어 각 탭 매칭 Status CSV `인덱스 스코프` 행 + Tools 탭 박스 중복 검사에서 확인 가능
 
-**개선안**
-- `ModelItemSearcher.BuildIndex(Document doc, Predicate<Model> modelFilter = null)` 시그니처 확장 (null이면 전체 — 기존 동작 유지)
-- 각 탭이 자기 대상 모델을 식별하는 필터 제공:
-  - EquipmentTab: `m => m.FileName에 "EQ" 포함`
-  - Spool / HydrotestTab (TagSearcher 공유 사용): `m => "PIPE"/"PIPING" 포함`
-  - EitTrayTab: `m => "ELEC"/"EIT" 포함`
-- 필터로 한 건도 못 찾으면 **전체 모델로 자동 fallback** + 로그
-
-**기대 효과**
-인덱스 빌드 시간이 N(federated 모델 수)분의 1로 수렴. ELEC 모델이 클 때 Spool/Equipment 작업에 영향 없음.
-
-**트레이드오프**
-- 모델 식별을 파일명 키워드에 의존하면 파일명 규약이 깨질 때 fallback 발동 → 실질적 속도 저하. DisplayName 패턴 기반 자동 감지나 사용자 지정 드롭다운을 선택지로 열어둘 것.
-- TagSearcher를 Spool / Hydrotest / EIT Tray가 공유하는데, 각자 대상 모델이 다르면 단일 인덱스로는 최적화 불가 → TagSearcher를 `PipingTagSearcher` + `ElecTagSearcher`로 한 번 더 분리하는 옵션도 고려.
-
-**결정 보류 이유**
-사용자 측 파일명·모델 구조 규약이 확정되지 않아, 현 시점에서 키워드를 하드코딩하기보다 규약 확정 후 적용하기로 함.
+**잔여 / 주의**
+- **Windows 실측 검증 필요**: federated NWD를 열었을 때 하위 파일이 `doc.Models` 복수로
+  풀리는지, 단일 Model 밑 파일 노드로 오는지 (양쪽 다 대응해 뒀지만 실측 확인).
+  fallback 발동 여부는 매칭 Status CSV의 `인덱스 스코프` 행으로 확인
+- Cable node box nwd 파일명 규약 확정 시 `NwdScope.Cable` 키워드 추가 (현재는 0건 fallback으로 동작)
+- 파일명 규약 변경 시 `NwdScope`의 키워드 + `NwdScopeTests`를 같이 갱신할 것
+- Str(구조)·PIPSupport는 플러그인 신설 시 각자 키워드(STR / PIPSUPPORT)로 스코프 추가
 
 ### 2. WalkAndIndex 조기 정지 (우선순위: 낮음)
 
@@ -382,6 +391,8 @@ CREATE TABLE [Navis].[SubSystem_Master](
   단, Autodesk 비의존 파일(DataModels/SqlLoader/SqlConnectionSettings/SourceComparer/DataSourcePanel)은
   `Microsoft.NETFramework.ReferenceAssemblies` 패키지로 리눅스에서도 net48 컴파일 검증 가능.
 - `oasis.config`(DB 암호 포함)는 커밋 금지(.gitignore 등록) — `oasis.config.sample`만 커밋.
-- 새 탭 추가 시 그룹 결정:
-  - "digit 포함 DisplayName" 매칭 → `TagSearcher` 재사용
-  - 그 외 매칭 전략 → 새 `ModelItemSearcher` 인스턴스 + `ColorOverrideEngine` 생성자에 추가
+- 새 탭 추가 시 그룹 결정 (매칭 전략 × NWD 스코프 2개 축 — 1번 항목 참조):
+  - "digit 포함 DisplayName" 매칭이고 **대상 nwd 스코프도 같으면** 기존 인스턴스 재사용
+    (`PipingTagSearcher`=SPL·HYDROPKG / `ElecTagSearcher`=EIT / `SubSystemSearcher`=MEQ·SPL·HYDROPKG)
+  - 스코프가 다르거나 다른 매칭 전략 → 새 `ModelItemSearcher` 인스턴스 + `NwdScope` 상수 추가
+    + `ColorOverrideEngine` 생성자에 추가

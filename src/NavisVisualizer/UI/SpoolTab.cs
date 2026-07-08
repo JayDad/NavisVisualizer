@@ -6,6 +6,7 @@ using System.Linq;
 using System.Windows.Forms;
 using NavisVisualizer.Loaders;
 using NavisVisualizer.Models;
+using NavisVisualizer.Searchers;
 using NavisVisualizer.Services;
 using NavisVisualizer.Visualizers;
 
@@ -407,6 +408,7 @@ namespace NavisVisualizer.UI
             var referenceDate = _dtpReference.Value;
             var lines = new List<string>();
             lines.Add($"집계 범위,{MatchScopeInfo.Label(_scopePanel.CurrentScope)}");
+            lines.Add($"인덱스 스코프,\"{_main.PipingTagSearcher.LastScopeNote ?? "-"}\"");
             lines.Add("Spool ID,ISO No,Stage,Matched");
             foreach (var sp in _spools)
             {
@@ -429,7 +431,7 @@ namespace NavisVisualizer.UI
             _progressBar.Style = ProgressBarStyle.Marquee;
             _progressBar.Visible = true;
             Application.DoEvents();
-            _main.TagSearcher.BuildIndex(doc);
+            _main.PipingTagSearcher.BuildIndex(doc, NwdScope.Piping);
             _progressBar.Visible = false;
             _progressBar.Style = ProgressBarStyle.Blocks;
         }
@@ -442,7 +444,7 @@ namespace NavisVisualizer.UI
                 MessageBox.Show("데이터를 먼저 로드하고 모델을 열어주세요.");
                 return;
             }
-            if (_main.TagSearcher.NeedsRebuild(doc))
+            if (_main.PipingTagSearcher.NeedsRebuild(doc))
                 BuildIndex();
 
             var activeSettings = new Dictionary<SpoolStage, ColorSetting>();
@@ -498,7 +500,7 @@ namespace NavisVisualizer.UI
                     MessageBox.Show("먼저 적용(가시화)을 실행하세요. 집계 범위는 매칭된 항목에 적용됩니다.");
                     return;
                 }
-                if (_main.TagSearcher.NeedsRebuild(doc))
+                if (_main.PipingTagSearcher.NeedsRebuild(doc))
                 {
                     MessageBox.Show("모델이 변경되었습니다. 적용(가시화)을 다시 실행한 뒤 범위를 선택하세요.");
                     return;
@@ -509,7 +511,7 @@ namespace NavisVisualizer.UI
                 Application.DoEvents();
                 try
                 {
-                    var itemsByKey = _main.TagSearcher.FindBySpoolIds(_matchedSpoolIds);
+                    var itemsByKey = _main.PipingTagSearcher.FindBySpoolIds(_matchedSpoolIds);
                     _scopeKeys = _scopeFilter.Apply(doc, scope, itemsByKey);
                 }
                 finally
@@ -530,7 +532,7 @@ namespace NavisVisualizer.UI
         {
             var scope = _scopePanel.CurrentScope;
             if (scope == MatchScope.FullModel) { _scopeKeys = null; return; }
-            var itemsByKey = _main.TagSearcher.FindBySpoolIds(_matchedSpoolIds);
+            var itemsByKey = _main.PipingTagSearcher.FindBySpoolIds(_matchedSpoolIds);
             _scopeKeys = _scopeFilter.Apply(doc, scope, itemsByKey);
         }
 
@@ -555,7 +557,7 @@ namespace NavisVisualizer.UI
                 MessageBox.Show("데이터를 먼저 로드하고 모델을 열어주세요.");
                 return;
             }
-            if (_main.TagSearcher.NeedsRebuild(doc))
+            if (_main.PipingTagSearcher.NeedsRebuild(doc))
                 BuildIndex();
 
             var referenceDate = _dtpReference.Value;
@@ -570,7 +572,7 @@ namespace NavisVisualizer.UI
                 Application.DoEvents();
 
                 var allSpoolIds = _spools.Select(s => s.SpoolId).Distinct();
-                var searchResult = _main.TagSearcher.FindBySpoolIds(allSpoolIds);
+                var searchResult = _main.PipingTagSearcher.FindBySpoolIds(allSpoolIds);
                 int written = _main.UserDataSvc.WriteSpoolProperties(_spools, searchResult, referenceDate);
 
                 _lblStats.Text += $"\n속성 {written}건 삽입 완료";
@@ -623,14 +625,14 @@ namespace NavisVisualizer.UI
             if (_listView.SelectedItems.Count == 0) return;
 
             var doc = _main.GetDocument();
-            if (doc == null || !_main.TagSearcher.IsIndexBuilt || _main.TagSearcher.NeedsRebuild(doc)) return;
+            if (doc == null || !_main.PipingTagSearcher.IsIndexBuilt || _main.PipingTagSearcher.NeedsRebuild(doc)) return;
 
             var collection = new Autodesk.Navisworks.Api.ModelItemCollection();
             foreach (ListViewItem selected in _listView.SelectedItems)
             {
                 var spool = selected.Tag as SpoolData;
                 if (spool == null) continue;
-                var found = _main.TagSearcher.FindBySpoolIds(new[] { spool.SpoolId });
+                var found = _main.PipingTagSearcher.FindBySpoolIds(new[] { spool.SpoolId });
                 foreach (var items in found.Values)
                     collection.AddRange(items);
             }
