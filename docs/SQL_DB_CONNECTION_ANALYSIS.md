@@ -231,3 +231,47 @@ SQL 조인/뷰가 키당 여러 행을 주면 리스트 중복, 통계 이중 �
 
 *검증 방법: 테이블별 검증 에이전트 6개(주장별 반박 시도, 파일:라인 근거) + 누락 검사 1회.
 전 주장 CONFIRMED (EIT_EQ의 EquipmentSearcher 적용 가능성 1건만 PARTIAL — 깊이 균일성 가정 필요).*
+
+---
+
+## 부록. 2026-07 실제 스키마 확정 (사용자 실측 — 위 6-테이블 분석 갱신)
+
+위 본문은 gist 6개 테이블 기준이었다. 사용자가 실 DB를 조회해 보내온 결과 **`[Navis]` 스키마
+아래 BASE TABLE 총 10개**로 확정됐다. 본 부록이 최신 사실이며, 상충 시 부록 우선.
+
+### 객체명 규칙 (확정)
+- CSV 파일명은 `Navis_XXX`지만 **실제 객체는 `[Navis].[XXX]`** (스키마 `Navis` + 테이블 `XXX`).
+- 기존 `SqlLoader`의 `FROM [Navis].[Piping_Spool]` 등 **스키마.테이블 방식이 정확** — FROM 절 수정 불필요.
+
+### 10개 테이블 인벤토리
+| # | 테이블 | 소비 탭 | 상태 |
+|---|---|---|---|
+| 1 | `All_EQ` | Equipment | 로직 완성 · **컬럼명 미검증**(헤더 수령 대기) |
+| 2 | `All_Support` | (미구현) | 수량기반 진척. 보관만 (사용자: "아직 구현 안 함") |
+| 3 | `EIT_Cable` | Cable | Node 부재 지속 → 보류(대공사) |
+| 4 | `EIT_EQ` | (미정) | `INSTALL DTE`+`SUB-SYSTEM`+AITR/Punch. 단일단계+TagSearcher 유력 |
+| 5 | `EIT_Route` | Cable | ROUTE↔CABLE_NO. 홉순서/NodeId 변환 없음 → 노드매핑 아님 |
+| 6 | `EIT_Tray` | EIT Tray | **테이블 확인**. 날짜 컬럼 없음 → %기반 판정 설계 필요 |
+| 7 | `Mech_EQ` | Equipment | 로직 완성 · **컬럼명 미검증** |
+| 8 | `Piping_HydrotestPKG` | Hydrotest | ✅ 실제 컬럼 = 기존 SELECT 일치. 수정 불필요 |
+| 9 | `Piping_Spool` | Spool | ✅ 일치 + `FIT-UP` 단계 추가 반영(아래) |
+| 10 | `System_Summary` | Sub-system | ★ `SubSystem_Master` 대체 — 컬럼 전면 상이 |
+
+### 3-탭(Spool/Hydrotest/Equipment) 적용 마무리 결과
+- **Spool** ✅: 14 stage + `SPOOL NO`/`ISO NO` + `PRJTNO` 전부 실재. 추가로 실재하는 `FIT-UP`(설치
+  fit-up, `Setting`↔`Welding` 사이)을 `SpoolStage.FitUpInstall`(라벨 "FIT-UP")로 반영하고, `Welding`
+  단계 라벨을 **"Install"**(Welding+Flange Connection)로 변경. `SqlLoader.LoadSpool` SELECT에 `[FIT-UP]`
+  추가·매핑. Excel엔 FIT-UP 없음 → 역순 스캔이 직전 단계로 자동 인식(무해).
+- **Hydrotest** ✅: `PKGNO`/`LINESVC`/`Sub-System` + 6 stage + `PRJTNO` 전부 일치. 코드 수정 불필요.
+  (실 테이블에 `System`·`Sub-System` 병존 — 로더는 세밀한 `Sub-System` 채택, 기존 결정 유지.)
+- **Equipment** ⚠: 태그 `/` 정규화·`Delivered` 날짜화·인덱스 자기일관까지 로직은 완성. 단 `Mech_EQ`/
+  `All_EQ` **실제 컬럼명 미검증**. 위험 신호: 같은 EQ 계열 `EIT_EQ`가 `RFQ_NO`(언더스코어)를 쓰는데
+  로더는 `RFQ NO`(공백) 가정 → 드리프트 시 "Invalid column name"으로 로드 전면 실패(조용한 오류 아님).
+  **두 테이블 헤더 수령 후 SELECT 확정 예정.**
+
+### System_Summary ≠ SubSystem_Master (§11 영향)
+실 DB엔 `SubSystem_Master` 없음. `[Navis].[System_Summary]`가 마스터 역할이나 컬럼명이 §11 계약과
+전면 상이(예: `DESCRIPTION`→`Sub-System Des`, `Walkdown`→`WD Actual`, `MCC`→`MCC Actual`,
+`A-ITR DONE`→`A-ITR Complete`, `PUNCH A TOTAL`→`A Punch Total`). 추가로 `Area`/`System`/`MCC Fcst`/
+`PCC Plan`/`%` 컬럼 신설. Sub-system 탭 적용 시 `LoadSubSystemMaster`의 테이블명+컬럼 재매핑 필요.
+(이번 3-탭 범위 밖 — 별도 진행.)

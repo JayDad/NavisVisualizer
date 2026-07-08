@@ -247,18 +247,37 @@ class DataSourceSlot<T>
 
 ### 9. OASIS(SQL) 연동 잔여 항목
 
-Spool / Hydrotest / Equipment 탭은 OASIS 로드 구현 완료 (`SqlLoader`, 테이블 6개 분석은
-`docs/SQL_DB_CONNECTION_ANALYSIS.md`). 남은 것:
+Spool / Hydrotest / Equipment 탭은 OASIS 로드 구현 완료 (`SqlLoader`). **실제 DB는 `[Navis]`
+스키마 아래 BASE TABLE 10개**로 확정됨 (2026-07 사용자 실측 — 상세는 `docs/SQL_DB_CONNECTION_ANALYSIS.md`
+부록). CSV 파일명이 `Navis_XXX`라 스키마.테이블(`[Navis].[XXX]`)과 헷갈리지만 실객체는 후자 —
+기존 `SqlLoader`의 `FROM [Navis].[Piping_Spool]` 방식이 정확. 10개 = All_EQ, All_Support,
+EIT_Cable, EIT_EQ, EIT_Route, EIT_Tray, Mech_EQ, Piping_HydrotestPKG, Piping_Spool, System_Summary.
+남은 것:
 
-- **EIT Tray**: 트레이 진척 테이블(`Tray Number`/`Install %` 형태)이 DB에 없음 — 확인 대기.
-- **Cable**: `EIT_Cable`에 Node 컬럼 부재. 케이블↔노드 매핑(route detail + 홉 순서 SEQ)
-  테이블이 생겨야 연동 가능. `PULLING LTH` 의미(실적 vs 발주 길이)도 확인 필요
-  (샘플에서 design < pulling인데 Pulling % = 0.0%).
-- **EIT_EQ**: 소비 탭 미정. WRKDTE 단일 단계 + TagSearcher 재사용이 유력.
-- **Spool `FIT-UP`**: 설치 fit-up 단계(Setting↔Welding 사이). SpoolStage 추가 여부 결정 대기 —
-  추가 시 enum/OrderedStages/Labels/ColumnMap/InstallStages/SpoolDefaults 6곳.
+- **Spool `FIT-UP`**: **[해결됨]** 설치 fit-up 단계(`Setting`↔`Welding` 사이)를 `SpoolStage.FitUpInstall`로
+  추가(라벨 "FIT-UP"). 제작 `FitUp`("F/up")과 별개. 동시에 `Welding`의 **표시 라벨을 "Install"로** 변경
+  (Welding+Flange Connection = 설치 완료 의미 — enum 멤버명 `Welding`은 DB 컬럼·캐시키 안정성 위해 유지).
+  적용: enum/OrderedStages/Labels/ColumnMap/InstallStages/SpoolDefaults + `SqlLoader.LoadSpool`
+  SELECT(`[FIT-UP]`)·매핑 + 테스트 count(15→16). Excel엔 FIT-UP 컬럼 없음 → 역순 스캔이 직전 단계로 자동 인식(무해).
+- **Spool/Hydrotest 로더**: 실제 컬럼과 대조 완료 — 기존 SELECT 그대로 일치(수정 불필요).
+  Hydrotest는 `System`/`Sub-System` 둘 다 있고 로더는 세밀한 `Sub-System` 사용(기존 결정 유지).
+- **Equipment (Mech_EQ/All_EQ)**: 로직 완성·견고(태그 `/` 정규화, `Delivered` 날짜화, 인덱스 자기일관)
+  이나 **두 테이블 실제 컬럼명 미검증**. EIT_EQ가 `RFQ_NO`(언더스코어)를 쓰는 반면 로더는 `RFQ NO`(공백)를
+  가정 → 명명 드리프트 시 "Invalid column name"으로 로드 전면 실패(조용한 오류는 아님). Mech_EQ/All_EQ
+  헤더 수령 후 SELECT 확정 필요.
 - **Equipment 병합 정책**: 현재 Mech_EQ 우선 + All_EQ 보충(dedupe). 정책 바뀌면
   `SqlLoader.LoadEquipment`의 테이블 순회 순서만 조정.
+- **EIT Tray**: 진척 테이블 `[Navis].[EIT_Tray]` **존재 확인**(`BRANCH NO.`/`TRAY Install %`/`PJTNO`).
+  단 **날짜 컬럼 없음**(`Tray install date` 부재) → 기준일 필터 불가, %기반 현재상태 판정으로 로더 설계 필요.
+  `BRANCH NO.` 선행 `/` → `NormalizeId` 적용. (이번 3-탭 범위 밖.)
+- **Cable**: `[Navis].[EIT_Cable]`에 여전히 Node 컬럼 부재. `[Navis].[EIT_Route]`(ROUTE↔CABLE_NO)가
+  생겼으나 홉 순서(SEQ) + ROUTE→트레이NodeId 변환이 없어 노드단위 집계 불가 — CableTab 대공사 필요(보류).
+  날짜(`PULLING START/END`, `FROM/TO CONN`)는 신설됨. `PULLING LTH` 의미(실적 vs 발주)도 확인 필요.
+- **EIT_EQ**: `[Navis].[EIT_EQ]` 컬럼 확장됨 — `WRKDTE`→`INSTALL DTE`(설치 실적일), `SUB-SYSTEM` +
+  AITR/Punch 수치 보유. 단일 단계(미착수/설치완료) + TagSearcher 재사용 유력. Sub-system 요소 편입도 가능.
+- **System_Summary = SubSystem_Master 대체**: 실 DB엔 `SubSystem_Master` 없음. `[Navis].[System_Summary]`가
+  마스터 역할이나 컬럼명 전면 상이(§11 계약과 불일치) → 현 `LoadSubSystemMaster`는 예외. Sub-system 탭
+  적용 시 테이블명+컬럼 재매핑 필요(부록 참조).
 
 ### 10. 공종(모듈)별 초기화 — 아이디어 기록 (미구현)
 

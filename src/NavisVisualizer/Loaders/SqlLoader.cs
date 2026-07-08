@@ -28,7 +28,7 @@ namespace NavisVisualizer.Loaders
 SELECT [SPOOL NO],[ISO NO],
        [B/V],[F/up],[W/D],[NDE],[PWHT],[S/out],
        [G-후공정인계],[Galv2],[Pnt1],[Pnt2],[Stock],[H/O일자],
-       [Setting],[Welding]
+       [Setting],[FIT-UP],[Welding]
 FROM [Navis].[Piping_Spool]";
 
             var spools = new List<SpoolData>();
@@ -56,9 +56,10 @@ FROM [Navis].[Piping_Spool]";
                 spool.StageDates[SpoolStage.Paint2]      = GetDate(r, "Pnt2");
                 spool.StageDates[SpoolStage.Stock]       = GetDate(r, "Stock");
                 spool.StageDates[SpoolStage.HandOver]    = GetDate(r, "H/O일자");
-                spool.StageDates[SpoolStage.Setting]     = GetDate(r, "Setting");
-                spool.StageDates[SpoolStage.Welding]     = GetDate(r, "Welding");
-                // DB의 [FIT-UP](설치 fit-up)은 SpoolStage에 대응 단계가 없어 아직 미사용.
+                spool.StageDates[SpoolStage.Setting]      = GetDate(r, "Setting");
+                // 설치 fit-up (제작 F/up과 별개). Welding 단계는 라벨상 "Install"(Welding+Flange).
+                spool.StageDates[SpoolStage.FitUpInstall] = GetDate(r, "FIT-UP");
+                spool.StageDates[SpoolStage.Welding]      = GetDate(r, "Welding");
                 spools.Add(spool);
             });
 

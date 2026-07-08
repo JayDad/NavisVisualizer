@@ -52,7 +52,9 @@ namespace NavisVisualizer.Models
         NotStarted,
         BV, FitUp, WeldDone, NDE, PWHT, ShipOut, PostProcess,
         Galvanizing, Paint1, Paint2, Stock, HandOver,
-        Setting, Welding,
+        // 설치 단계: Setting → FitUpInstall(설치 fit-up) → Welding.
+        // FitUp(제작 fit-up, "F/up")과 FitUpInstall(설치 fit-up, "FIT-UP")은 별개 단계.
+        Setting, FitUpInstall, Welding,
     }
 
     public static class SpoolStageInfo
@@ -62,7 +64,7 @@ namespace NavisVisualizer.Models
             SpoolStage.BV, SpoolStage.FitUp, SpoolStage.WeldDone, SpoolStage.NDE,
             SpoolStage.PWHT, SpoolStage.ShipOut, SpoolStage.PostProcess, SpoolStage.Galvanizing,
             SpoolStage.Paint1, SpoolStage.Paint2, SpoolStage.Stock, SpoolStage.HandOver,
-            SpoolStage.Setting, SpoolStage.Welding
+            SpoolStage.Setting, SpoolStage.FitUpInstall, SpoolStage.Welding
         };
 
         public static readonly Dictionary<SpoolStage, string> Labels = new Dictionary<SpoolStage, string>
@@ -80,8 +82,9 @@ namespace NavisVisualizer.Models
             [SpoolStage.Paint2]      = "Pnt2",
             [SpoolStage.Stock]       = "Stock",
             [SpoolStage.HandOver]    = "H/O",
-            [SpoolStage.Setting]     = "Setting",
-            [SpoolStage.Welding]     = "Welding",
+            [SpoolStage.Setting]      = "Setting",
+            [SpoolStage.FitUpInstall] = "FIT-UP",
+            [SpoolStage.Welding]      = "Install",   // Welding + Flange Connection 조합 = 설치 완료
         };
 
         public static readonly Dictionary<string, SpoolStage> ColumnMap = new Dictionary<string, SpoolStage>(StringComparer.OrdinalIgnoreCase)
@@ -91,7 +94,8 @@ namespace NavisVisualizer.Models
             ["G-후공정인계"] = SpoolStage.PostProcess, ["Galv2"] = SpoolStage.Galvanizing,
             ["Pnt1"] = SpoolStage.Paint1, ["Pnt2"] = SpoolStage.Paint2,
             ["Stock"] = SpoolStage.Stock, ["H/O일자"] = SpoolStage.HandOver,
-            ["Setting"] = SpoolStage.Setting, ["Welding"] = SpoolStage.Welding,
+            ["Setting"] = SpoolStage.Setting, ["FIT-UP"] = SpoolStage.FitUpInstall,
+            ["Welding"] = SpoolStage.Welding,
         };
 
         public static readonly SpoolStage[] FabricationStages =
@@ -103,7 +107,7 @@ namespace NavisVisualizer.Models
 
         public static readonly SpoolStage[] InstallStages =
         {
-            SpoolStage.Setting, SpoolStage.Welding,
+            SpoolStage.Setting, SpoolStage.FitUpInstall, SpoolStage.Welding,
         };
     }
 
@@ -144,6 +148,7 @@ namespace NavisVisualizer.Models
                 [SpoolStage.Stock]        = new ColorSetting { DisplayColor = Color.FromArgb(65, 105, 225),  Transparency = 0.0  },
                 [SpoolStage.HandOver]     = new ColorSetting { DisplayColor = Color.FromArgb(30, 144, 255),  Transparency = 0.0  },
                 [SpoolStage.Setting]      = new ColorSetting { DisplayColor = Color.FromArgb(138, 43, 226),  Transparency = 0.0  },
+                [SpoolStage.FitUpInstall] = new ColorSetting { DisplayColor = Color.FromArgb(186, 85, 211),  Transparency = 0.0  },
                 [SpoolStage.Welding]      = new ColorSetting { DisplayColor = Color.FromArgb(0, 128, 0),     Transparency = 0.0  },
             };
 

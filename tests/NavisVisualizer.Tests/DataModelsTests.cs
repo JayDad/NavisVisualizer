@@ -22,7 +22,7 @@ namespace NavisVisualizer.Tests
         public void ColorSetting_SpoolDefaults_HasAllStages()
         {
             var defaults = ColorSetting.SpoolDefaults;
-            Assert.AreEqual(15, defaults.Count);
+            Assert.AreEqual(16, defaults.Count); // NotStarted + 15 stages (설치 FitUpInstall 포함)
             foreach (SpoolStage stage in Enum.GetValues(typeof(SpoolStage)))
                 Assert.IsTrue(defaults.ContainsKey(stage), $"Missing color for {stage}");
         }
