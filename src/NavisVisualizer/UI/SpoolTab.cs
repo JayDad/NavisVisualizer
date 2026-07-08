@@ -178,7 +178,7 @@ namespace NavisVisualizer.UI
             // 1행(핵심): 적용 · 체크 단계만 남김 · 전체 초기화
             var btnPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 34, AutoSize = true };
             _btnApply      = new Button { Text = "적용",             Width = 80  };
-            _btnHideOthers = new Button { Text = "체크 단계만 남김", Width = 140 };
+            _btnHideOthers = new Button { Text = "체크 단계 외 숨김", Width = 140 };
             _btnReset      = new Button { Text = "전체 초기화",      Width = 90  };
             _btnApply.Click      += BtnApply_Click;
             _btnHideOthers.Click += BtnHideOthers_Click;
@@ -533,7 +533,7 @@ namespace NavisVisualizer.UI
             {
                 doc.Models.SetHidden(_spoolHiddenByStage, false);
                 _spoolHiddenByStage = null;
-                _btnHideOthers.Text = "체크 단계만 남김";
+                _btnHideOthers.Text = "체크 단계 외 숨김";
                 return;
             }
 
@@ -701,7 +701,7 @@ namespace NavisVisualizer.UI
             {
                 doc.Models.SetHidden(_spoolHiddenByStage, false);
                 _spoolHiddenByStage = null;
-                _btnHideOthers.Text = "체크 단계만 남김";
+                _btnHideOthers.Text = "체크 단계 외 숨김";
             }
             _main.OverrideEngine.Reset(doc);
             _lblStats.Text = "전체 초기화 완료";

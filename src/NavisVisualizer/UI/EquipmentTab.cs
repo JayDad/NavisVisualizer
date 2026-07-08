@@ -39,9 +39,11 @@ namespace NavisVisualizer.UI
         private ListView _listView;
         private Button _btnApply;
         private Button _btnReset;
+        private Button _btnHideOthers;    // 체크된 단계 장비만 남기고 나머지 3D 숨김 (토글)
         private Button _btnWriteProps;
         private Button _btnViewpoint;
         private Button _btnNwd;
+        private Autodesk.Navisworks.Api.ModelItemCollection _tagHiddenByStage; // 숨긴 것 복원용
         private Label _lblStats;
         private Label _lblUnmatched;   // fixed 미매칭(모델 없음) count, pinned to the corner
         private ProgressBar _progressBar;
@@ -153,23 +155,25 @@ namespace NavisVisualizer.UI
             _listView.ColumnClick += ListView_ColumnClick;
             tabAll.Controls.Add(_listView);
 
-            // 1행(핵심): 적용 · 전체 초기화 · 속성 쓰기
+            // 1행(핵심): 적용 · 체크 단계 외 숨김 · 전체 초기화
             var btnPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 34, AutoSize = true };
-            _btnApply      = new Button { Text = "적용",        Width = 80 };
-            _btnReset      = new Button { Text = "전체 초기화", Width = 90 };
-            _btnWriteProps = new Button { Text = "속성 쓰기",   Width = 80 };
+            _btnApply      = new Button { Text = "적용",           Width = 80  };
+            _btnHideOthers = new Button { Text = "체크 단계 외 숨김", Width = 140 };
+            _btnReset      = new Button { Text = "전체 초기화",    Width = 90  };
             _btnApply.Click      += BtnApply_Click;
+            _btnHideOthers.Click += BtnHideOthers_Click;
             _btnReset.Click      += BtnReset_Click;
-            _btnWriteProps.Click += BtnWriteProps_Click;
-            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnReset, _btnWriteProps });
+            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnHideOthers, _btnReset });
 
-            // 2행(덜 쓰임): Viewpoint 저장 · NWD Export
+            // 2행(덜 쓰임): 속성 쓰기 · Viewpoint 저장 · NWD Export
             var btnPanel2 = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 34, AutoSize = true };
+            _btnWriteProps = new Button { Text = "속성 쓰기",      Width = 80  };
             _btnViewpoint  = new Button { Text = "Viewpoint 저장", Width = 120 };
             _btnNwd        = new Button { Text = "NWD Export",     Width = 110 };
+            _btnWriteProps.Click += BtnWriteProps_Click;
             _btnViewpoint.Click  += BtnViewpoint_Click;
             _btnNwd.Click        += BtnNwd_Click;
-            btnPanel2.Controls.AddRange(new Control[] { _btnViewpoint, _btnNwd });
+            btnPanel2.Controls.AddRange(new Control[] { _btnWriteProps, _btnViewpoint, _btnNwd });
 
             _progressBar = new ProgressBar { Dock = DockStyle.Fill, Height = 12, Visible = false };
 
@@ -608,10 +612,68 @@ namespace NavisVisualizer.UI
             }
         }
 
+        private void BtnHideOthers_Click(object sender, EventArgs e)
+        {
+            var doc = _main.GetDocument();
+            if (doc == null) return;
+
+            if (_tagHiddenByStage != null)
+            {
+                doc.Models.SetHidden(_tagHiddenByStage, false);
+                _tagHiddenByStage = null;
+                _btnHideOthers.Text = "체크 단계 외 숨김";
+                return;
+            }
+
+            if (_matchedTagNos.Count == 0)
+            {
+                MessageBox.Show("먼저 적용(가시화)을 실행하세요. 숨김은 매칭된 항목에 적용됩니다.");
+                return;
+            }
+            if (_needsIndexRebuild || _main.EquipmentSearcher.NeedsRebuild(doc))
+            {
+                MessageBox.Show("모델 또는 데이터 소스가 변경되었습니다. 적용(가시화)을 다시 실행한 뒤 사용하세요.");
+                return;
+            }
+
+            var checkedStages = new HashSet<EquipmentStage>(
+                _colorRows.Where(kv => kv.Value.check.Checked).Select(kv => kv.Key));
+
+            var referenceDate = _dtpReference.Value;
+            var itemsByKey = _main.EquipmentSearcher.FindByTagPrefix(_matchedTagNos);
+            var toHide = new Autodesk.Navisworks.Api.ModelItemCollection();
+
+            foreach (var eq in _equipments)
+            {
+                if (!_matchedTagNos.Contains(eq.TagNo)) continue;
+                var stage = eq.GetStageAtDate(referenceDate);
+                if (checkedStages.Contains(stage)) continue;
+                if (itemsByKey.TryGetValue(eq.TagNo, out var items))
+                    toHide.AddRange(items);
+            }
+
+            if (toHide.Count == 0)
+            {
+                MessageBox.Show("숨길 대상이 없습니다 (모든 매칭 항목이 체크된 단계입니다).");
+                return;
+            }
+
+            doc.Models.SetHidden(toHide, true);
+            _tagHiddenByStage = toHide;
+            _btnHideOthers.Text = "전체 보기";
+        }
+
         private void BtnReset_Click(object sender, EventArgs e)
         {
             var doc = _main.GetDocument();
             if (doc == null) return;
+            // 숨김(체크 단계 외 숨김)도 함께 복원 — 초기화는 완전 원상복구여야 함
+            if (_tagHiddenByStage != null)
+            {
+                doc.Models.SetHidden(_tagHiddenByStage, false);
+                _tagHiddenByStage = null;
+                _btnHideOthers.Text = "체크 단계 외 숨김";
+            }
             _main.OverrideEngine.Reset(doc);
             _lblStats.Text = "전체 초기화 완료";
             _lblUnmatched.Text = "";

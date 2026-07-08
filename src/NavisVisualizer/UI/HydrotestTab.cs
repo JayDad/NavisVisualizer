@@ -37,8 +37,10 @@ namespace NavisVisualizer.UI
         private ListView _listView;
         private Button _btnApply;
         private Button _btnReset;
+        private Button _btnHideOthers;    // 체크된 단계 PKG만 남기고 나머지 3D 숨김 (토글)
         private Button _btnViewpoint;
         private Button _btnNwd;
+        private Autodesk.Navisworks.Api.ModelItemCollection _pkgHiddenByStage; // 숨긴 것 복원용
         private Label _lblStats;
         private Label _lblUnmatched;   // fixed 미매칭(모델 없음) count, pinned to the corner
         private ProgressBar _progressBar;
@@ -151,13 +153,15 @@ namespace NavisVisualizer.UI
             _listView.ColumnClick += ListView_ColumnClick;
             tabAll.Controls.Add(_listView);
 
-            // 1행(핵심): 적용 · 전체 초기화
+            // 1행(핵심): 적용 · 체크 단계 외 숨김 · 전체 초기화
             var btnPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 34, AutoSize = true };
-            _btnApply     = new Button { Text = "적용",        Width = 80 };
-            _btnReset     = new Button { Text = "전체 초기화", Width = 90 };
-            _btnApply.Click += BtnApply_Click;
-            _btnReset.Click += BtnReset_Click;
-            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnReset });
+            _btnApply      = new Button { Text = "적용",           Width = 80  };
+            _btnHideOthers = new Button { Text = "체크 단계 외 숨김", Width = 140 };
+            _btnReset      = new Button { Text = "전체 초기화",    Width = 90  };
+            _btnApply.Click      += BtnApply_Click;
+            _btnHideOthers.Click += BtnHideOthers_Click;
+            _btnReset.Click      += BtnReset_Click;
+            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnHideOthers, _btnReset });
 
             // 2행(덜 쓰임): Viewpoint 저장 · NWD Export
             var btnPanel2 = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 34, AutoSize = true };
@@ -535,9 +539,71 @@ namespace NavisVisualizer.UI
         {
             var doc = _main.GetDocument();
             if (doc == null) return;
+            // 숨김(체크 단계 외 숨김)도 함께 복원 — 초기화는 완전 원상복구여야 함
+            if (_pkgHiddenByStage != null)
+            {
+                doc.Models.SetHidden(_pkgHiddenByStage, false);
+                _pkgHiddenByStage = null;
+                _btnHideOthers.Text = "체크 단계 외 숨김";
+            }
             _main.OverrideEngine.Reset(doc);
             _lblStats.Text = "전체 초기화 완료";
             _lblUnmatched.Text = "";
+        }
+
+        /// <summary>
+        /// 체크된 단계(기준일)에 해당하는 매칭 PKG만 남기고 나머지 매칭 PKG를 3D에서 숨긴다.
+        /// 토글: 이미 숨긴 상태면 복원. 색상과 독립(숨김은 렌더링 제외라 투명보다 가벼움).
+        /// </summary>
+        private void BtnHideOthers_Click(object sender, EventArgs e)
+        {
+            var doc = _main.GetDocument();
+            if (doc == null) return;
+
+            if (_pkgHiddenByStage != null)
+            {
+                doc.Models.SetHidden(_pkgHiddenByStage, false);
+                _pkgHiddenByStage = null;
+                _btnHideOthers.Text = "체크 단계 외 숨김";
+                return;
+            }
+
+            if (_matchedPkgIds.Count == 0)
+            {
+                MessageBox.Show("먼저 적용(가시화)을 실행하세요. 숨김은 매칭된 항목에 적용됩니다.");
+                return;
+            }
+            if (_main.HydroTagSearcher.NeedsRebuild(doc))
+            {
+                MessageBox.Show("모델이 변경되었습니다. 적용(가시화)을 다시 실행한 뒤 사용하세요.");
+                return;
+            }
+
+            var checkedStages = new HashSet<HydrotestStage>(
+                _colorRows.Where(kv => kv.Value.check.Checked).Select(kv => kv.Key));
+
+            var referenceDate = _dtpReference.Value;
+            var itemsByKey = _main.HydroTagSearcher.FindBySpoolIds(_matchedPkgIds);
+            var toHide = new Autodesk.Navisworks.Api.ModelItemCollection();
+
+            foreach (var pkg in _packages)
+            {
+                if (!_matchedPkgIds.Contains(pkg.TestPkgId)) continue;
+                var stage = pkg.GetStageAtDate(referenceDate);
+                if (checkedStages.Contains(stage)) continue;
+                if (itemsByKey.TryGetValue(pkg.TestPkgId, out var items))
+                    toHide.AddRange(items);
+            }
+
+            if (toHide.Count == 0)
+            {
+                MessageBox.Show("숨길 대상이 없습니다 (모든 매칭 항목이 체크된 단계입니다).");
+                return;
+            }
+
+            doc.Models.SetHidden(toHide, true);
+            _pkgHiddenByStage = toHide;
+            _btnHideOthers.Text = "전체 보기";
         }
 
         private void BtnViewpoint_Click(object sender, EventArgs e)
