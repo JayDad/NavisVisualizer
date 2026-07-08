@@ -476,7 +476,23 @@ namespace NavisVisualizer.UI
                     activeSettings[kv.Key] = _colorSettings[kv.Key];
 
             var referenceDate = _dtpReference.Value;
-            var result = _main.OverrideEngine.ApplySpool(doc, _spools, activeSettings, referenceDate);
+            // 색칠은 수만 스풀 permanent override라 수 초 걸릴 수 있음 — 인덱스 빌드처럼
+            // 진행바를 감싸 UI 프리즈("뻗은 느낌")를 없앤다.
+            OverrideResult result = null;
+            _btnApply.Enabled = false;
+            _progressBar.Style = ProgressBarStyle.Marquee;
+            _progressBar.Visible = true;
+            Application.DoEvents();
+            try
+            {
+                result = _main.OverrideEngine.ApplySpool(doc, _spools, activeSettings, referenceDate);
+            }
+            finally
+            {
+                _progressBar.Visible = false;
+                _progressBar.Style = ProgressBarStyle.Blocks;
+                _btnApply.Enabled = true;
+            }
             // Update match tracking
             _unmatchedSpoolIds = result.UnmatchedIds;
             var unmatchedSet = new HashSet<string>(result.UnmatchedIds, StringComparer.OrdinalIgnoreCase);

@@ -39,6 +39,11 @@ namespace NavisVisualizer.Visualizers
         private readonly Dictionary<VisualModule, Dictionary<string, ModelItemCollection>> _stageCollectionsByModule
             = new Dictionary<VisualModule, Dictionary<string, ModelItemCollection>>();
 
+        // 모듈이 지금까지 칠한 아이템의 누적 합집합. 재적용 전에 이것만 리셋하면 (최신 캐시가
+        // 아니라) 이전 적용들의 잔존까지 정확히 원복된다 — 다른 공종 색은 유지. (CLAUDE.md §10)
+        private readonly Dictionary<VisualModule, ModelItemCollection> _paintedByModule
+            = new Dictionary<VisualModule, ModelItemCollection>();
+
         // Cable-specific caches (per-node items, per-node stage, hidden, last settings)
         private Dictionary<string, ModelItemCollection> _cableNodeItems
             = new Dictionary<string, ModelItemCollection>(StringComparer.OrdinalIgnoreCase);
@@ -154,8 +159,10 @@ namespace NavisVisualizer.Visualizers
                 list.AddRange(items);
             }
 
+            // 이전 적용에서 칠한 누적 집합을 먼저 리셋 — 잔존(체크 해제 단계 등) 제거 +
+            // override 누적(투명 재처리)으로 인한 재적용 성능 저하 방지. 다른 공종 색은 유지.
+            ResetModule(doc, VisualModule.Spool);
             var cache = ModuleCache(VisualModule.Spool);
-            cache.Clear();
 
             foreach (var kv in stageItems)
             {
@@ -164,7 +171,10 @@ namespace NavisVisualizer.Visualizers
                 cache[key] = collection;
 
                 if (colorSettings.TryGetValue(kv.Key, out var setting))
+                {
                     ApplyOverride(doc, collection, setting);
+                    AccumulatePainted(VisualModule.Spool, collection);
+                }
             }
 
             return result;
@@ -499,11 +509,39 @@ namespace NavisVisualizer.Visualizers
         public bool HasCachedData(VisualModule module) =>
             _stageCollectionsByModule.TryGetValue(module, out var cache) && cache.Count > 0;
 
+        /// <summary>
+        /// 한 공종(모듈)이 지금까지 칠한 누적 아이템의 permanent material만 리셋한다.
+        /// ResetAllPermanentMaterials와 달리 다른 공종 색은 건드리지 않는다.
+        /// 재적용 시작 시 호출 → 이전 적용의 잔존(체크 해제된 단계·기준일 변경으로 빠진 스풀 등)
+        /// 까지 정확히 원복하고, 이어서 현재 활성 집합만 다시 칠한다. (CLAUDE.md §10)
+        /// </summary>
+        public void ResetModule(Document doc, VisualModule module)
+        {
+            if (_paintedByModule.TryGetValue(module, out var painted) && painted.Count > 0)
+                doc.Models.ResetPermanentMaterials(painted);
+            _paintedByModule.Remove(module);
+            if (_stageCollectionsByModule.TryGetValue(module, out var cache))
+                cache.Clear();
+        }
+
+        /// <summary>ApplyOverride로 칠한 컬렉션을 모듈 누적 painted 셋에 합친다.</summary>
+        private void AccumulatePainted(VisualModule module, ModelItemCollection collection)
+        {
+            if (collection == null || collection.Count == 0) return;
+            if (!_paintedByModule.TryGetValue(module, out var painted))
+            {
+                painted = new ModelItemCollection();
+                _paintedByModule[module] = painted;
+            }
+            painted.AddRange(collection);
+        }
+
         public void Reset(Document doc)
         {
             doc.Models.ResetAllPermanentMaterials();
             RestoreHiddenCableBoxes(doc);
             _stageCollectionsByModule.Clear();
+            _paintedByModule.Clear();
             _cableNodeItems.Clear();
             _cableNodeStages.Clear();
             _cableLastSettings = null;

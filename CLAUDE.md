@@ -300,21 +300,28 @@ EIT_Cable, EIT_EQ, EIT_Route, EIT_Tray, Mech_EQ, Piping_HydrotestPKG, Piping_Spo
   마스터 역할이나 컬럼명 전면 상이(§11 계약과 불일치) → 현 `LoadSubSystemMaster`는 예외. Sub-system 탭
   적용 시 테이블명+컬럼 재매핑 필요(부록 참조).
 
-### 10. 공종(모듈)별 초기화 — 아이디어 기록 (미구현)
+### 10. 공종(모듈)별 초기화 — 메커니즘 구현됨 (Spool 배선, 나머지 탭 잔여)
 
-현재 "전체 초기화"는 어느 탭에서 눌러도 `ResetAllPermanentMaterials()` — 모든 공종 색이
-같이 사라진다. 공종별 초기화(`ResetModule`)를 넣으려면:
+**구현 현황(2026-07)**: `ColorOverrideEngine`에 `_paintedByModule`(모듈별 누적 painted 합집합) +
+`ResetModule(doc, module)`(그 누적분만 `ResetPermanentMaterials` — 다른 공종 색 유지) +
+`AccumulatePainted` 추가. **`ApplySpool`이 색칠 전 `ResetModule(Spool)` 호출** → 재적용 시
+이전 적용 잔존(체크 해제 단계·기준일 변경으로 빠진 스풀)까지 정확히 원복 후 현재 활성 집합만
+재도색. 이로써 **재적용 성능 저하(override 누적 → 투명 재처리)와 "체크 해제 stage 색 잔존"
+버그 동시 해결**. SpoolTab `BtnApply_Click`에 색칠 진행바(marquee)도 추가(색칠 수 초간 UI 프리즈
+"뻗은 느낌" 제거).
 
-- API는 지원됨: `DocumentModels.ResetPermanentMaterials(ModelItemCollection)` (아이템 단위 리셋)
-- **최신 캐시가 아니라 "누적 painted 셋"을 리셋해야 함** — 같은 탭에서 적용을 여러 번 하면
-  (기준일 변경, 단계 체크 해제) 이전 적용에서 칠했지만 최신 캐시에 없는 아이템이 생김.
-  모듈별로 `ApplyOverride`에 넘긴 컬렉션을 합집합으로 누적했다가 그걸 리셋.
-- Cable 모듈 리셋은 색 + `RestoreHiddenCableBoxes` + 필터 포커스 상태 + cable 전용 캐시 정리까지.
-- Spool↔Hydrotest 겹침은 유리하게 동작: Spool(하위 노드)만 리셋하면 상위 PKG 오버라이드가
-  다시 드러남 (레이어 벗기기).
-- UI: 각 탭 `[적용] [공종 초기화] [전체 초기화]` 3버튼.
-- 기반은 이미 있음: stage 캐시가 `VisualModule`별로 분리되어 있어 (ColorOverrideEngine)
-  누적 painted 셋만 추가하면 됨.
+**잔여**:
+- Hydrotest/Equipment/Cable/Sub-system 탭 `Apply*`에도 같은 2줄(`ResetModule` + `AccumulatePainted`)
+  이식 필요 — 현재는 Spool만. (같은 재적용 누적 문제가 그 탭들엔 아직 남음.)
+- UI: 각 탭 `[적용] [공종 초기화] [전체 초기화]` 3버튼 안(별도 "공종 초기화" 버튼)은 미구현 —
+  현재 `ResetModule`은 `ApplySpool` 내부에서만 자동 호출. 명시적 버튼이 필요하면 추가.
+
+**설계 메모(유지)**:
+- API: `DocumentModels.ResetPermanentMaterials(ModelItemCollection)` (아이템 단위 리셋).
+- **최신 캐시가 아니라 누적 painted 셋을 리셋** — 각 Apply는 활성 stage 전체를 재도색하므로,
+  직전 Apply의 누적 painted 전체를 리셋하면 체크 해제/기준일 변경 잔존이 정확히 제거됨.
+- Cable 모듈 리셋은 색 + `RestoreHiddenCableBoxes` + 필터 포커스 + cable 전용 캐시까지 필요(별도).
+- Spool↔Hydrotest 겹침은 유리: Spool(하위 노드)만 리셋하면 상위 PKG 오버라이드가 다시 드러남.
 
 ### 11. Sub-system 탭 — 구현됨 (Windows 검증 대기) + 확장 잔여
 
