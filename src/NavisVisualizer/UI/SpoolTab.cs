@@ -431,7 +431,13 @@ namespace NavisVisualizer.UI
             _progressBar.Style = ProgressBarStyle.Marquee;
             _progressBar.Visible = true;
             Application.DoEvents();
-            _main.SpoolTagSearcher.BuildIndex(doc, NwdScope.Spool);
+
+            // 레벨 타겟 인덱싱 (Equipment와 동일): 스풀 id가 처음 매칭되는 트리 깊이만
+            // 인덱싱하고 그 노드의 geometry 자식은 walk하지 않는다 → 2만 스풀에서 자식 스캔
+            // 비용 제거. 리스크: 스풀이 여러 깊이에 섞여 있으면 첫 깊이만 잡음(CLAUDE.md §2).
+            var spoolIdSet = new HashSet<string>(_spools.Select(s => s.SpoolId));
+            _main.SpoolTagSearcher.BuildIndexForTags(doc, spoolIdSet, NwdScope.Spool);
+
             _progressBar.Visible = false;
             _progressBar.Style = ProgressBarStyle.Blocks;
         }

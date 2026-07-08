@@ -61,6 +61,11 @@ federated 구조에서 `MEBTray1.nwc`(파일명에 digit)가 `/SM/MEB/ELEC` → 
 **[잔여] 과다 방문**
 `/CM/PDA/ELEC/PCVTRAY-STW`처럼 digit 없는 범주 노드 바로 아래에 geometry가 직접 붙으면, 그 노드는 애초에 tag-like가 아니라 정지 로직을 안 타고 geometry까지 방문. 단일 NWD에서 최적화가 필요하면 `BuildIndexForTrayIds`(Equipment의 `BuildIndexForTags`와 동일 방식)를 추가하는 방안 검토.
 
+**[변경됨] Spool 인덱스 = 레벨 타겟으로 전환 (2026-07 — 성능 극대화)**
+2만 스풀 기준 general `WalkAndIndex`가 스풀마다 "하강할지" 판단하려고 자식(전부 geometry인 경우 끝까지)을 COM으로 스캔 → 첫 빌드 ~1분. `SpoolTab.BuildIndex`를 `BuildIndex(NwdScope.Spool)`에서 **`BuildIndexForTags(spoolIdSet, NwdScope.Spool)`**(Equipment와 동일 레벨 타겟)로 교체. 스풀 id가 처음 매칭되는 깊이만 `IndexAtDepth`로 인덱싱하고 그 노드의 geometry 자식은 아예 안 건드림 → 자식 스캔 비용 제거.
+- **리스크(수용됨, Windows 검증 대기)**: `BuildIndexForTags`는 첫 매칭 깊이 하나만 인덱싱한다. 스풀이 **여러 깊이에 섞여** 모델링돼 있으면 다른 깊이의 스풀은 미인덱싱 → 그 스풀만 미매칭이 된다(색 안 칠해짐). general walk는 전 깊이를 훑어 이 문제가 없었음 — 속도와 맞바꾼 것. federated 스코프 자체를 못 찾거나 스코프 내 태그 0건이면 기존 3중 fallback(전체 재인덱싱)이 동작하나, **"일부 깊이만 누락"은 fallback이 안 잡는다**(0건이 아니므로). 실측 시 매칭 건수를 general walk 시절과 대조할 것.
+- 되돌리려면 `SpoolTab.BuildIndex`를 `BuildIndex(doc, NwdScope.Spool)` 한 줄로 복귀. Hydrotest/EIT는 아직 general walk 유지(스풀만 건수가 압도적이라 우선 적용).
+
 ### 3. Cable Stage 날짜화 (EIT Tray)
 
 현재 `EitTrayData.GetStageAtDate`는 Tray install date만 날짜로 쓰고 Cable Pulling / Completed는 *현재 상태*로 판정한다. 입력 데이터에 `Cable Pull date` / `Cable Complete date` 컬럼이 추가되면 `Dictionary<EitStage, DateTime?> StageDates` 패턴으로 교체 (Spool/Hydrotest와 동일 구조).
