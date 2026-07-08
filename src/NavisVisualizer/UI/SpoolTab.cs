@@ -34,8 +34,11 @@ namespace NavisVisualizer.UI
         private DataSourcePanel _srcPanel;
         private DateTimePicker _dtpReference;
         private TextBox  _txtSearch;
+        private ComboBox _cmbStageFilter;   // 리스트를 특정 단계로 좁히는 필터 (index 0 = 전체 단계)
         private TabControl _tabFilter;
         private ListView _listView;
+        private Button   _btnHideOthers;    // 체크된 단계 스풀만 남기고 나머지 3D 숨김 (토글)
+        private Autodesk.Navisworks.Api.ModelItemCollection _spoolHiddenByStage; // 숨긴 것 복원용
         private Button   _btnApply;
         private Button   _btnReset;
         private Button   _btnWriteProps;
@@ -101,9 +104,20 @@ namespace NavisVisualizer.UI
             // Search box
             var searchPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 28, AutoSize = false };
             searchPanel.Controls.Add(new Label { Text = "검색:", AutoSize = true, Padding = new Padding(0, 4, 0, 0) });
-            _txtSearch = new TextBox { Width = 210, Text = "" };
+            _txtSearch = new TextBox { Width = 160, Text = "" };
             _txtSearch.TextChanged += (s, e) => FilterList();
             searchPanel.Controls.Add(_txtSearch);
+
+            // 단계 필터: index 0 = 전체 단계, 이후 OrderedStages 순서
+            searchPanel.Controls.Add(new Label { Text = "단계:", AutoSize = true, Padding = new Padding(8, 4, 0, 0) });
+            _cmbStageFilter = new ComboBox { Width = 110, DropDownStyle = ComboBoxStyle.DropDownList };
+            _cmbStageFilter.Items.Add("전체 단계");
+            foreach (var st in SpoolStageInfo.OrderedStages)
+                _cmbStageFilter.Items.Add(SpoolStageInfo.Labels[st]);
+            _cmbStageFilter.SelectedIndex = 0;
+            _cmbStageFilter.SelectedIndexChanged += (s, e) => FilterList();
+            searchPanel.Controls.Add(_cmbStageFilter);
+
             var btnExport = new Button { Text = "매칭 Status 출력", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(8, 1, 8, 1) };
             btnExport.Click += BtnExport_Click;
             searchPanel.Controls.Add(btnExport);
@@ -147,6 +161,7 @@ namespace NavisVisualizer.UI
                 GridLines = true,
                 View = View.Details,
             };
+            _listView.Columns.Add("#", 44);   // 자동 행번호 (표시 순서, 정렬 후 재부여)
             _listView.Columns.Add("Spool ID", 140);
             _listView.Columns.Add("ISO No", 120);
             _listView.Columns.Add("단계", 80);
@@ -169,15 +184,17 @@ namespace NavisVisualizer.UI
             var btnPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 65, AutoSize = true };
             _btnApply      = new Button { Text = "적용",              Width = 80  };
             _btnReset      = new Button { Text = "전체 초기화",       Width = 90  };
+            _btnHideOthers = new Button { Text = "체크 단계만 보기",  Width = 120 };
             _btnWriteProps = new Button { Text = "속성 쓰기",         Width = 80  };
             _btnViewpoint  = new Button { Text = "Viewpoint 저장",    Width = 120 };
             _btnNwd        = new Button { Text = "NWD Export",        Width = 110 };
             _btnApply.Click      += BtnApply_Click;
             _btnReset.Click      += BtnReset_Click;
+            _btnHideOthers.Click += BtnHideOthers_Click;
             _btnWriteProps.Click += BtnWriteProps_Click;
             _btnViewpoint.Click  += BtnViewpoint_Click;
             _btnNwd.Click        += BtnNwd_Click;
-            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnReset, _btnWriteProps, _btnViewpoint, _btnNwd });
+            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnReset, _btnHideOthers, _btnWriteProps, _btnViewpoint, _btnNwd });
 
             _progressBar = new ProgressBar { Dock = DockStyle.Fill, Height = 12, Visible = false };
 
@@ -477,6 +494,63 @@ namespace NavisVisualizer.UI
             FilterList();
         }
 
+        /// <summary>
+        /// 체크된 단계에 해당하는(기준일 기준) 매칭 스풀만 남기고 나머지 매칭 스풀을 3D에서 숨긴다.
+        /// 토글: 이미 숨긴 상태면 복원. 색상 override와 독립 — 숨김은 렌더링에서 제외되므로
+        /// 투명 처리보다 가볍다(투명 geometry는 Navisworks에서 무거움).
+        /// </summary>
+        private void BtnHideOthers_Click(object sender, EventArgs e)
+        {
+            var doc = _main.GetDocument();
+            if (doc == null) return;
+
+            // 토글 OFF — 이전에 숨긴 것 복원
+            if (_spoolHiddenByStage != null)
+            {
+                doc.Models.SetHidden(_spoolHiddenByStage, false);
+                _spoolHiddenByStage = null;
+                _btnHideOthers.Text = "체크 단계만 보기";
+                return;
+            }
+
+            if (_matchedSpoolIds.Count == 0)
+            {
+                MessageBox.Show("먼저 적용(가시화)을 실행하세요. 숨김은 매칭된 스풀에 적용됩니다.");
+                return;
+            }
+            if (_main.SpoolTagSearcher.NeedsRebuild(doc))
+            {
+                MessageBox.Show("모델이 변경되었습니다. 적용(가시화)을 다시 실행한 뒤 사용하세요.");
+                return;
+            }
+
+            var checkedStages = new HashSet<SpoolStage>(
+                _colorRows.Where(kv => kv.Value.check.Checked).Select(kv => kv.Key));
+
+            var referenceDate = _dtpReference.Value;
+            var itemsByKey = _main.SpoolTagSearcher.FindBySpoolIds(_matchedSpoolIds);
+            var toHide = new Autodesk.Navisworks.Api.ModelItemCollection();
+
+            foreach (var sp in _spools)
+            {
+                if (!_matchedSpoolIds.Contains(sp.SpoolId)) continue;
+                var stage = sp.GetStageAtDate(referenceDate);
+                if (checkedStages.Contains(stage)) continue;   // 체크된 단계는 남김
+                if (itemsByKey.TryGetValue(sp.SpoolId, out var items))
+                    toHide.AddRange(items);
+            }
+
+            if (toHide.Count == 0)
+            {
+                MessageBox.Show("숨길 대상이 없습니다 (모든 매칭 스풀이 체크된 단계입니다).");
+                return;
+            }
+
+            doc.Models.SetHidden(toHide, true);
+            _spoolHiddenByStage = toHide;
+            _btnHideOthers.Text = "전체 보기";
+        }
+
         // ----- 현황 집계 범위 (aggregation scope) -----
 
         /// <summary>
@@ -598,6 +672,13 @@ namespace NavisVisualizer.UI
         {
             var doc = _main.GetDocument();
             if (doc == null) return;
+            // 숨김(체크 단계만 보기)도 함께 복원 — 초기화는 완전 원상복구여야 함
+            if (_spoolHiddenByStage != null)
+            {
+                doc.Models.SetHidden(_spoolHiddenByStage, false);
+                _spoolHiddenByStage = null;
+                _btnHideOthers.Text = "체크 단계만 보기";
+            }
             _main.OverrideEngine.Reset(doc);
             _lblStats.Text = "전체 초기화 완료";
             _lblUnmatched.Text = "";
@@ -650,6 +731,7 @@ namespace NavisVisualizer.UI
 
         private void ListView_ColumnClick(object sender, ColumnClickEventArgs e)
         {
+            if (e.Column == 0) return;   // # 열은 표시번호일 뿐 — 정렬 대상 아님
             if (e.Column == _sortColumn)
                 _sortAscending = !_sortAscending;
             else
@@ -659,6 +741,7 @@ namespace NavisVisualizer.UI
             }
             _listView.ListViewItemSorter = new ListViewItemComparer(_sortColumn, _sortAscending);
             _listView.Sort();
+            RenumberRows();   // 정렬 후 표시 순서대로 # 재부여
         }
 
         private class ListViewItemComparer : System.Collections.IComparer
@@ -692,11 +775,19 @@ namespace NavisVisualizer.UI
             if (_scopeKeys != null)
                 filtered = filtered.Where(s => InScope(s.SpoolId));
 
+            // Stage filter (index 0 = 전체 단계, 이후 OrderedStages 순)
+            if (_cmbStageFilter != null && _cmbStageFilter.SelectedIndex > 0)
+            {
+                var wantStage = SpoolStageInfo.OrderedStages[_cmbStageFilter.SelectedIndex - 1];
+                filtered = filtered.Where(s => s.GetStageAtDate(referenceDate) == wantStage);
+            }
+
             // Text search filter
             if (!string.IsNullOrEmpty(keyword))
                 filtered = filtered.Where(s => s.SpoolId.ToUpperInvariant().Contains(keyword)
                     || (s.IsoNo ?? "").ToUpperInvariant().Contains(keyword));
 
+            _listView.BeginUpdate();
             _listView.Items.Clear();
 
             foreach (var spool in filtered)
@@ -706,8 +797,9 @@ namespace NavisVisualizer.UI
                 bool hasApplied = _matchedSpoolIds.Count > 0 || _unmatchedSpoolIds.Count > 0;
                 string matchLabel = !hasApplied ? "-" : (_matchedSpoolIds.Contains(spool.SpoolId) ? "O" : "X");
 
-                var item = new ListViewItem(spool.SpoolId);
+                var item = new ListViewItem("");   // col 0 = # (RenumberRows에서 채움)
                 item.UseItemStyleForSubItems = false;
+                item.SubItems.Add(spool.SpoolId);
                 item.SubItems.Add(spool.IsoNo ?? "");
                 var stageSubItem = item.SubItems.Add(stageLabel);
                 if (_colorSettings.TryGetValue(stage, out var setting))
@@ -718,6 +810,16 @@ namespace NavisVisualizer.UI
                 item.Tag = spool;
                 _listView.Items.Add(item);
             }
+
+            _listView.EndUpdate();   // 대기 중이던 정렬을 먼저 반영
+            RenumberRows();          // 그 뒤 표시 순서대로 # 부여
+        }
+
+        /// <summary>표시 순서(정렬 반영) 기준으로 # 열을 1..N으로 재부여. Add/Sort 이후 호출.</summary>
+        private void RenumberRows()
+        {
+            for (int i = 0; i < _listView.Items.Count; i++)
+                _listView.Items[i].SubItems[0].Text = (i + 1).ToString();
         }
 
         private void UpdateStats(OverrideResult result = null)
