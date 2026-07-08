@@ -61,11 +61,14 @@ namespace NavisVisualizer.Searchers
         }
 
         /// <summary>
-        /// 스코프에 맞는 walk 시작점을 결정한다. 2단계 매칭:
+        /// 스코프에 맞는 walk 시작점을 결정한다.
+        /// 우선순위 체인(scope → scope.Fallback → …)을 앞에서부터 시도해 처음으로 대상 모델이
+        /// 잡히는 스코프만 쓴다 — 예: Spool은 SPL 파일이 있으면 SPL만, 없으면 HYDROPKG만.
+        /// 각 스코프의 매칭은 2단계:
         /// ① Model.FileName / RootItem.DisplayName 키워드 매칭 (개별 공종 nwd·append 구성),
         /// ② federated NWD(전체 묶음 파일을 연 경우 하위 파일이 트리 안 파일 노드로 들어옴)는
         ///    파일 노드만 얕게 따라 내려가며 매칭 — geometry 트리는 건드리지 않는다.
-        /// 한 건도 못 찾으면 전체 모델 루트 반환 + fallback 표시.
+        /// 체인 전부에서 한 건도 못 찾으면 전체 모델 루트 반환 + fallback 표시.
         /// </summary>
         private List<ModelItem> ResolveScopeRoots(Document doc, NwdScope scope)
         {
@@ -81,14 +84,38 @@ namespace NavisVisualizer.Searchers
                 return roots;
             }
 
-            var names = new List<string>();
+            var chainNotes = new List<string>();
+            for (var tier = scope; tier != null; tier = tier.Fallback)
+            {
+                var names = new List<string>();
+                if (TryCollectScopeRoots(doc, tier, roots, names))
+                {
+                    chainNotes.Add($"{tier.Label}: {string.Join(", ", names)}");
+                    LastScopeNote = "스코프 " + string.Join(" → ", chainNotes);
+                    return roots;
+                }
+                chainNotes.Add($"{tier.Label} 없음");
+            }
+
+            foreach (var model in doc.Models)
+                roots.Add(model.RootItem);
+            LastScopeFellBack = true;
+            _lastScopeNarrowed = false;
+            LastScopeNote = $"스코프 {string.Join(" → ", chainNotes)} → 전체 모델 fallback";
+            return roots;
+        }
+
+        /// <summary>단일 스코프(체인의 한 단계)로 대상 루트를 수집. 한 건도 없으면 false.</summary>
+        private bool TryCollectScopeRoots(Document doc, NwdScope tier, List<ModelItem> roots, List<string> names)
+        {
+            bool narrowed = false;
             foreach (var model in doc.Models)
             {
                 string fileName = null;
                 try { fileName = model.FileName; } catch { /* 일부 모델은 FileName 조회 실패 가능 */ }
                 string rootName = model.RootItem?.DisplayName;
 
-                if (scope.MatchesFileName(fileName) || scope.MatchesFileName(rootName))
+                if (tier.MatchesFileName(fileName) || tier.MatchesFileName(rootName))
                 {
                     roots.Add(model.RootItem);
                     names.Add(NwdScope.StripDirectory(fileName ?? rootName ?? "?"));
@@ -97,23 +124,13 @@ namespace NavisVisualizer.Searchers
 
                 // 모델 단위 매칭 실패 — 하위 파일 노드 일부만 들어가든 통째로 빠지든
                 // 결과는 전체보다 좁으므로 0건 fallback 재시도 대상이 된다.
-                _lastScopeNarrowed = true;
-                CollectFileNodeRoots(model.RootItem, scope, 0, roots, names);
+                narrowed = true;
+                CollectFileNodeRoots(model.RootItem, tier, 0, roots, names);
             }
 
-            if (roots.Count == 0)
-            {
-                foreach (var model in doc.Models)
-                    roots.Add(model.RootItem);
-                LastScopeFellBack = true;
-                _lastScopeNarrowed = false;
-                LastScopeNote = $"스코프 {scope.Label}: 대상 모델 없음 → 전체 모델 fallback";
-            }
-            else
-            {
-                LastScopeNote = $"스코프 {scope.Label}: {string.Join(", ", names)}";
-            }
-            return roots;
+            if (roots.Count == 0) return false;
+            _lastScopeNarrowed = narrowed;
+            return true;
         }
 
         /// <summary>

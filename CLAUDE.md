@@ -22,19 +22,27 @@ BuildIndexForTags / BuildIndexForBoxes에 `NwdScope` 파라미터, null = 전체
 ├─ 07_Trion_All_Cable.nwd              ← 케이블 루트 (cable no.별 모델링)
 └─ 09-02_Trion_Topsides_PIPSupport.nwd ← 배관 서포트. 플러그인 없음
 ```
-- `NwdScope.Piping` = SPL·HYDROPKG (Spool+Hydrotest가 `PipingTagSearcher` 공유 — 합집합
-  스코프라 "SPL 없으면 HYDROPKG에서" 규칙 자동 충족, 탭 전환 재빌드 핑퐁 없음)
+- `NwdScope.Spool` = SPL, **없으면 HYDROPKG로 체인 fallback** (`NwdScope.Fallback` —
+  "SPL 있으면 스풀은 SPL에만, 없으면 HYDROPKG 안에" 규약의 코드화. SPL 존재 시 HYDROPKG는
+  walk 안 함) / `NwdScope.Hydrotest` = HYDROPKG. 초기 구현의 SPL∪HYDROPKG 합집합 공유는
+  "SPL이 있어도 둘 다 walk"라 의미가 흐려 우선순위 체인으로 교체 (2026-07 사용자 결정).
+  대신 Spool/Hydrotest searcher가 분리되어, SPL 없는 문서에선 같은 HYDROPKG 인덱스를
+  탭별로 각각 빌드 (파일 단위 walk + lazy 빌드라 비용 미미)
 - `NwdScope.Equipment` = MEQ / `NwdScope.EitTray` = EIT (`ElecTagSearcher` 분리) /
-  `NwdScope.Cable` = CABLE / `NwdScope.SubSystem` = MEQ·SPL·HYDROPKG (`SubSystemSearcher` 분리)
-- 구 `TagSearcher` 공유 인스턴스는 `PipingTagSearcher`/`ElecTagSearcher`/`SubSystemSearcher`
-  3개로 분리, `ColorOverrideEngine` 생성자도 5개 searcher를 받도록 변경
+  `NwdScope.Cable` = CABLE / `NwdScope.SubSystem` = MEQ·SPL·HYDROPKG (`SubSystemSearcher` 분리
+  — 요소인 Equipment TAG·Piping PKG가 어느 배관 파일에 있든 커버하는 합집합 유지)
+- 구 `TagSearcher` 공유 인스턴스는 `SpoolTagSearcher`/`HydroTagSearcher`/`ElecTagSearcher`/
+  `SubSystemSearcher` 4개로 분리, `ColorOverrideEngine` 생성자도 6개 searcher를 받도록 변경
 
 **동작 방식**
+- 우선순위 체인 (`NwdScope.Fallback`): 앞 스코프로 대상 모델을 못 찾을 때만 다음 스코프
+  시도 (Spool = SPL → HYDROPKG). 어느 단계가 잡혔는지는 `LastScopeNote`에
+  "스코프 SPL 없음 → HYDROPKG: 02-02_..." 형식으로 기록
 - 2단계 매칭: ① `Model.FileName`/RootItem DisplayName (개별 공종 nwd만 열거나 append 구성)
   ② federated NWD를 연 경우 트리 안 **파일 노드**(확장자 보유 DisplayName)만 얕게(depth≤3)
   따라가며 매칭 — geometry 트리는 안 내려감. 디렉터리명 오탐 방지 위해 파일명만 비교
-- 3중 자동 fallback (규약 깨져도 동작 유지): 대상 모델 없음 / Equipment 스코프 내 태그
-  미발견 / 스코프 인덱스 0건 → 전체 모델 재인덱싱. `LastScopeNote`/`LastScopeFellBack`로
+- 3중 자동 fallback (규약 깨져도 동작 유지): 체인 전체 대상 모델 없음 / Equipment 스코프 내
+  태그 미발견 / 스코프 인덱스 0건 → 전체 모델 재인덱싱. `LastScopeNote`/`LastScopeFellBack`로
   노출되어 각 탭 매칭 Status CSV `인덱스 스코프` 행 + Tools 탭 박스 중복 검사에서 확인 가능
 
 **잔여 / 주의**
@@ -393,6 +401,7 @@ CREATE TABLE [Navis].[SubSystem_Master](
 - `oasis.config`(DB 암호 포함)는 커밋 금지(.gitignore 등록) — `oasis.config.sample`만 커밋.
 - 새 탭 추가 시 그룹 결정 (매칭 전략 × NWD 스코프 2개 축 — 1번 항목 참조):
   - "digit 포함 DisplayName" 매칭이고 **대상 nwd 스코프도 같으면** 기존 인스턴스 재사용
-    (`PipingTagSearcher`=SPL·HYDROPKG / `ElecTagSearcher`=EIT / `SubSystemSearcher`=MEQ·SPL·HYDROPKG)
+    (`SpoolTagSearcher`=SPL→HYDROPKG / `HydroTagSearcher`=HYDROPKG / `ElecTagSearcher`=EIT /
+    `SubSystemSearcher`=MEQ·SPL·HYDROPKG)
   - 스코프가 다르거나 다른 매칭 전략 → 새 `ModelItemSearcher` 인스턴스 + `NwdScope` 상수 추가
     + `ColorOverrideEngine` 생성자에 추가

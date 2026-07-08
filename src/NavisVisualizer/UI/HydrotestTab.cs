@@ -379,7 +379,7 @@ namespace NavisVisualizer.UI
             var referenceDate = _dtpReference.Value;
             var lines = new List<string>();
             lines.Add($"집계 범위,{MatchScopeInfo.Label(_scopePanel.CurrentScope)}");
-            lines.Add($"인덱스 스코프,\"{_main.PipingTagSearcher.LastScopeNote ?? "-"}\"");
+            lines.Add($"인덱스 스코프,\"{_main.HydroTagSearcher.LastScopeNote ?? "-"}\"");
             lines.Add("Test Pkg No.,System No.,Line Service,Stage,Matched");
             foreach (var pkg in _packages)
             {
@@ -402,7 +402,7 @@ namespace NavisVisualizer.UI
             _progressBar.Style = ProgressBarStyle.Marquee;
             _progressBar.Visible = true;
             Application.DoEvents();
-            _main.PipingTagSearcher.BuildIndex(doc, NwdScope.Piping);
+            _main.HydroTagSearcher.BuildIndex(doc, NwdScope.Hydrotest);
             _progressBar.Visible = false;
             _progressBar.Style = ProgressBarStyle.Blocks;
         }
@@ -415,7 +415,7 @@ namespace NavisVisualizer.UI
                 MessageBox.Show("데이터를 먼저 로드하고 모델을 열어주세요.");
                 return;
             }
-            if (_main.PipingTagSearcher.NeedsRebuild(doc))
+            if (_main.HydroTagSearcher.NeedsRebuild(doc))
                 BuildIndex();
 
             var activeSettings = new Dictionary<HydrotestStage, ColorSetting>();
@@ -471,7 +471,7 @@ namespace NavisVisualizer.UI
                     MessageBox.Show("먼저 적용(가시화)을 실행하세요. 집계 범위는 매칭된 항목에 적용됩니다.");
                     return;
                 }
-                if (_main.PipingTagSearcher.NeedsRebuild(doc))
+                if (_main.HydroTagSearcher.NeedsRebuild(doc))
                 {
                     MessageBox.Show("모델이 변경되었습니다. 적용(가시화)을 다시 실행한 뒤 범위를 선택하세요.");
                     return;
@@ -482,7 +482,7 @@ namespace NavisVisualizer.UI
                 Application.DoEvents();
                 try
                 {
-                    var itemsByKey = _main.PipingTagSearcher.FindBySpoolIds(_matchedPkgIds);
+                    var itemsByKey = _main.HydroTagSearcher.FindBySpoolIds(_matchedPkgIds);
                     _scopeKeys = _scopeFilter.Apply(doc, scope, itemsByKey);
                 }
                 finally
@@ -503,7 +503,7 @@ namespace NavisVisualizer.UI
         {
             var scope = _scopePanel.CurrentScope;
             if (scope == MatchScope.FullModel) { _scopeKeys = null; return; }
-            var itemsByKey = _main.PipingTagSearcher.FindBySpoolIds(_matchedPkgIds);
+            var itemsByKey = _main.HydroTagSearcher.FindBySpoolIds(_matchedPkgIds);
             _scopeKeys = _scopeFilter.Apply(doc, scope, itemsByKey);
         }
 
@@ -557,14 +557,14 @@ namespace NavisVisualizer.UI
             if (_listView.SelectedItems.Count == 0) return;
 
             var doc = _main.GetDocument();
-            if (doc == null || !_main.PipingTagSearcher.IsIndexBuilt || _main.PipingTagSearcher.NeedsRebuild(doc)) return;
+            if (doc == null || !_main.HydroTagSearcher.IsIndexBuilt || _main.HydroTagSearcher.NeedsRebuild(doc)) return;
 
             var collection = new Autodesk.Navisworks.Api.ModelItemCollection();
             foreach (ListViewItem selected in _listView.SelectedItems)
             {
                 var pkg = selected.Tag as TestPackageData;
                 if (pkg == null) continue;
-                var found = _main.PipingTagSearcher.FindBySpoolIds(new[] { pkg.TestPkgId });
+                var found = _main.HydroTagSearcher.FindBySpoolIds(new[] { pkg.TestPkgId });
                 foreach (var items in found.Values)
                     collection.AddRange(items);
             }

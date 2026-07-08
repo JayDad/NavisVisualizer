@@ -27,23 +27,34 @@ namespace NavisVisualizer.Searchers
 
         public IReadOnlyList<string> Keywords { get; }
 
+        /// <summary>
+        /// 우선순위 체인: 이 스코프로 대상 모델을 한 건도 못 찾을 때 대신 시도할 다음 스코프.
+        /// null이면 체인 끝 — 그래도 없으면 ModelItemSearcher가 전체 모델로 fallback.
+        /// </summary>
+        public NwdScope Fallback { get; }
+
         public NwdScope(string label, params string[] keywords)
+            : this(label, null, keywords)
+        {
+        }
+
+        public NwdScope(string label, NwdScope fallback, params string[] keywords)
         {
             if (keywords == null || keywords.Length == 0)
                 throw new ArgumentException("스코프 키워드가 비어 있습니다.", nameof(keywords));
             Label = label;
+            Fallback = fallback;
             Keywords = keywords;
         }
 
-        // Spool은 SPL 우선이지만 SPL 파일이 없는 문서에선 HYDROPKG 안에 스풀이 있으므로
-        // 두 키워드의 합집합 스코프 하나를 Spool/Hydrotest가 공유한다 (양쪽 규칙 모두 충족,
-        // 탭 전환 시 재빌드 핑퐁 없음).
-        public static readonly NwdScope Piping = new NwdScope("SPL·HYDROPKG", "SPL", "HYDROPKG");
+        public static readonly NwdScope Hydrotest = new NwdScope("HYDROPKG", "HYDROPKG");
+        /// <summary>스풀은 SPL 파일 우선 — SPL 파일이 없는 문서에선 스풀이 HYDROPKG 안에 있으므로 체인 fallback.</summary>
+        public static readonly NwdScope Spool = new NwdScope("SPL", Hydrotest, "SPL");
         public static readonly NwdScope Equipment = new NwdScope("MEQ", "MEQ");
         public static readonly NwdScope EitTray = new NwdScope("EIT", "EIT");
         /// <summary>node box nwd 파일명 규약 확정 시 키워드 추가 (미매칭 시 전체 fallback으로 동작은 유지).</summary>
         public static readonly NwdScope Cable = new NwdScope("CABLE", "CABLE");
-        /// <summary>Sub-system 요소 = Equipment TAG + Piping PKG — 두 공종 파일 합집합.</summary>
+        /// <summary>Sub-system 요소 = Equipment TAG + Piping PKG — PKG·스풀이 어느 배관 파일에 있든 커버하는 합집합.</summary>
         public static readonly NwdScope SubSystem = new NwdScope("MEQ·SPL·HYDROPKG", "MEQ", "SPL", "HYDROPKG");
 
         /// <summary>

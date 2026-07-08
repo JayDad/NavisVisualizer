@@ -22,11 +22,12 @@ namespace NavisVisualizer.Visualizers
     public class ColorOverrideEngine
     {
         // Tag 인덱스는 NWD 파일 스코프별로 분리 (MainDockablePanel 참조):
-        //   piping (Spool/Hydrotest — SPL·HYDROPKG) / elec (EIT Tray — EIT) /
-        //   subSystem (MEQ·SPL·HYDROPKG). 매칭 전략은 셋 다 digit full-walk로 동일.
+        //   spool (SPL → 없으면 HYDROPKG 체인) / hydro (HYDROPKG) / elec (EIT) /
+        //   subSystem (MEQ·SPL·HYDROPKG). 매칭 전략은 전부 digit full-walk로 동일.
         // Equipment uses its own level-targeted index.
         // Cable Pull uses an index keyed on the "{NodeId}-BOX..." prefix.
-        private readonly ModelItemSearcher _pipingTagSearcher;
+        private readonly ModelItemSearcher _spoolTagSearcher;
+        private readonly ModelItemSearcher _hydroTagSearcher;
         private readonly ModelItemSearcher _elecTagSearcher;
         private readonly ModelItemSearcher _subSystemSearcher;
         private readonly ModelItemSearcher _equipmentSearcher;
@@ -48,13 +49,15 @@ namespace NavisVisualizer.Visualizers
         private bool _cableFilterFocusActive;
 
         public ColorOverrideEngine(
-            ModelItemSearcher pipingTagSearcher,
+            ModelItemSearcher spoolTagSearcher,
+            ModelItemSearcher hydroTagSearcher,
             ModelItemSearcher elecTagSearcher,
             ModelItemSearcher subSystemSearcher,
             ModelItemSearcher equipmentSearcher,
             ModelItemSearcher cableBoxSearcher)
         {
-            _pipingTagSearcher = pipingTagSearcher;
+            _spoolTagSearcher = spoolTagSearcher;
+            _hydroTagSearcher = hydroTagSearcher;
             _elecTagSearcher = elecTagSearcher;
             _subSystemSearcher = subSystemSearcher;
             _equipmentSearcher = equipmentSearcher;
@@ -81,7 +84,7 @@ namespace NavisVisualizer.Visualizers
             var stageItems = new Dictionary<HydrotestStage, List<ModelItem>>();
 
             var allPkgIds = packages.Select(p => p.TestPkgId).Distinct();
-            var searchResult = _pipingTagSearcher.FindBySpoolIds(allPkgIds);
+            var searchResult = _hydroTagSearcher.FindBySpoolIds(allPkgIds);
 
             foreach (var pkg in packages)
             {
@@ -129,7 +132,7 @@ namespace NavisVisualizer.Visualizers
             var stageItems = new Dictionary<SpoolStage, List<ModelItem>>();
 
             var allSpoolIds = spools.Select(s => s.SpoolId).Distinct();
-            var searchResult = _pipingTagSearcher.FindBySpoolIds(allSpoolIds);
+            var searchResult = _spoolTagSearcher.FindBySpoolIds(allSpoolIds);
 
             foreach (var spool in spools)
             {

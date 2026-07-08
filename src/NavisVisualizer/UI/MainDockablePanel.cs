@@ -10,10 +10,13 @@ namespace NavisVisualizer.UI
     {
         // Tag 인덱스는 NWD 파일 스코프(NwdScope)별로 분리 — 공유하면 스코프가 다른 탭 간
         // 재빌드 핑퐁이 생기고, 단일 스코프로는 최적화가 안 되기 때문 (CLAUDE.md 1번).
-        // 매칭 전략(digit 포함 DisplayName full-walk)은 세 인스턴스 모두 동일하다.
+        // 매칭 전략(digit 포함 DisplayName full-walk)은 인스턴스 전부 동일하다.
 
-        /// <summary>Spool + Hydrotest 공유 — 스코프 SPL·HYDROPKG (SPL 부재 시 스풀은 HYDROPKG 안에 있음).</summary>
-        public ModelItemSearcher PipingTagSearcher { get; } = new ModelItemSearcher();
+        /// <summary>Spool 전용 — 스코프 SPL, SPL 파일이 없으면 HYDROPKG로 체인 fallback (스풀이 그 안에 있음).</summary>
+        public ModelItemSearcher SpoolTagSearcher { get; } = new ModelItemSearcher();
+
+        /// <summary>Hydrotest 전용 — 스코프 HYDROPKG.</summary>
+        public ModelItemSearcher HydroTagSearcher { get; } = new ModelItemSearcher();
 
         /// <summary>EIT Tray 전용 — 스코프 EIT.</summary>
         public ModelItemSearcher ElecTagSearcher { get; } = new ModelItemSearcher();
@@ -46,7 +49,8 @@ namespace NavisVisualizer.UI
         public MainDockablePanel()
         {
             OverrideEngine = new ColorOverrideEngine(
-                PipingTagSearcher, ElecTagSearcher, SubSystemSearcher, EquipmentSearcher, CableBoxSearcher);
+                SpoolTagSearcher, HydroTagSearcher, ElecTagSearcher, SubSystemSearcher,
+                EquipmentSearcher, CableBoxSearcher);
             InitializeComponent();
         }
 

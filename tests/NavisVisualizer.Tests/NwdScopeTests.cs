@@ -21,18 +21,37 @@ namespace NavisVisualizer.Tests
         private const string Spl = "03-02_Trion_Topsides_SPL.nwd"; // 규약상 존재 가능 (스풀 별도 추출 시)
 
         [TestMethod]
-        public void Piping_Matches_Spl_And_HydroPkg_Only()
+        public void Spool_Matches_Spl_Only_And_Chains_To_Hydrotest()
         {
-            Assert.IsTrue(NwdScope.Piping.MatchesFileName(Spl));
-            Assert.IsTrue(NwdScope.Piping.MatchesFileName(HydroPkg));
+            // 1순위: SPL 파일만 — HYDROPKG는 직접 매칭 안 됨 (SPL 부재 시에만 체인으로 넘어감)
+            Assert.IsTrue(NwdScope.Spool.MatchesFileName(Spl));
+            Assert.IsFalse(NwdScope.Spool.MatchesFileName(HydroPkg));
 
-            Assert.IsFalse(NwdScope.Piping.MatchesFileName(Container));
-            Assert.IsFalse(NwdScope.Piping.MatchesFileName(Str));
-            Assert.IsFalse(NwdScope.Piping.MatchesFileName(Meq));
-            Assert.IsFalse(NwdScope.Piping.MatchesFileName(Eit));
-            Assert.IsFalse(NwdScope.Piping.MatchesFileName(Cable));
+            Assert.IsFalse(NwdScope.Spool.MatchesFileName(Container));
+            Assert.IsFalse(NwdScope.Spool.MatchesFileName(Str));
+            Assert.IsFalse(NwdScope.Spool.MatchesFileName(Meq));
+            Assert.IsFalse(NwdScope.Spool.MatchesFileName(Eit));
+            Assert.IsFalse(NwdScope.Spool.MatchesFileName(Cable));
             // "PIPSupport"에 SPL이 없음을 고정 — 배관 서포트는 스풀 스코프 밖
-            Assert.IsFalse(NwdScope.Piping.MatchesFileName(PipSupport));
+            Assert.IsFalse(NwdScope.Spool.MatchesFileName(PipSupport));
+
+            // SPL 없으면 HYDROPKG에서 스풀을 찾는 규약 = 체인 fallback으로 고정
+            Assert.AreSame(NwdScope.Hydrotest, NwdScope.Spool.Fallback);
+            Assert.IsNull(NwdScope.Hydrotest.Fallback);
+        }
+
+        [TestMethod]
+        public void Hydrotest_Matches_HydroPkg_Only()
+        {
+            Assert.IsTrue(NwdScope.Hydrotest.MatchesFileName(HydroPkg));
+
+            Assert.IsFalse(NwdScope.Hydrotest.MatchesFileName(Spl));
+            Assert.IsFalse(NwdScope.Hydrotest.MatchesFileName(Container));
+            Assert.IsFalse(NwdScope.Hydrotest.MatchesFileName(Str));
+            Assert.IsFalse(NwdScope.Hydrotest.MatchesFileName(Meq));
+            Assert.IsFalse(NwdScope.Hydrotest.MatchesFileName(Eit));
+            Assert.IsFalse(NwdScope.Hydrotest.MatchesFileName(Cable));
+            Assert.IsFalse(NwdScope.Hydrotest.MatchesFileName(PipSupport));
         }
 
         [TestMethod]
@@ -91,7 +110,7 @@ namespace NavisVisualizer.Tests
         public void Match_Is_CaseInsensitive()
         {
             Assert.IsTrue(NwdScope.Equipment.MatchesFileName("04-02_trion_topsides_meq.nwd"));
-            Assert.IsTrue(NwdScope.Piping.MatchesFileName("02-02_TRION_TOPSIDES_hydropkg.NWD"));
+            Assert.IsTrue(NwdScope.Hydrotest.MatchesFileName("02-02_TRION_TOPSIDES_hydropkg.NWD"));
         }
 
         [TestMethod]
@@ -106,8 +125,8 @@ namespace NavisVisualizer.Tests
         [TestMethod]
         public void Match_Handles_Null_And_Empty()
         {
-            Assert.IsFalse(NwdScope.Piping.MatchesFileName(null));
-            Assert.IsFalse(NwdScope.Piping.MatchesFileName(""));
+            Assert.IsFalse(NwdScope.Spool.MatchesFileName(null));
+            Assert.IsFalse(NwdScope.Spool.MatchesFileName(""));
         }
 
         [TestMethod]
