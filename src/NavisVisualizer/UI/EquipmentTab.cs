@@ -6,6 +6,7 @@ using System.Linq;
 using System.Windows.Forms;
 using NavisVisualizer.Loaders;
 using NavisVisualizer.Models;
+using NavisVisualizer.Searchers;
 using NavisVisualizer.Services;
 using NavisVisualizer.Visualizers;
 
@@ -397,6 +398,7 @@ namespace NavisVisualizer.UI
 
             var lines = new List<string>();
             lines.Add($"집계 범위,{MatchScopeInfo.Label(_scopePanel.CurrentScope)}");
+            lines.Add($"인덱스 스코프,\"{_main.EquipmentSearcher.LastScopeNote ?? "-"}\"");
             lines.Add("Tag No.,Description,Sub System,RFQ No.,Delivery,ETA,Stage,Matched,ModelItems,MatchedDisplayName");
             foreach (var eq in _equipments)
             {
@@ -439,7 +441,7 @@ namespace NavisVisualizer.UI
 
             // Use level-targeted indexing with known tags from the active source
             var tagSet = new HashSet<string>(_equipments.Select(eq => eq.TagNo));
-            _main.EquipmentSearcher.BuildIndexForTags(doc, tagSet);
+            _main.EquipmentSearcher.BuildIndexForTags(doc, tagSet, NwdScope.Equipment);
             _needsIndexRebuild = false;
 
             _progressBar.Visible = false;

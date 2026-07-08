@@ -6,6 +6,7 @@ using System.Linq;
 using System.Windows.Forms;
 using NavisVisualizer.Loaders;
 using NavisVisualizer.Models;
+using NavisVisualizer.Searchers;
 using NavisVisualizer.Services;
 using NavisVisualizer.Visualizers;
 
@@ -297,6 +298,7 @@ namespace NavisVisualizer.UI
             if (_trays.Count == 0) { MessageBox.Show("Excel을 먼저 로드하세요."); return; }
             var lines = new List<string>();
             lines.Add($"집계 범위,{MatchScopeInfo.Label(_scopePanel.CurrentScope)}");
+            lines.Add($"인덱스 스코프,\"{_main.ElecTagSearcher.LastScopeNote ?? "-"}\"");
             lines.Add("Tray No.,Tray Lth,Tray Installed,Install %,Stage,Matched");
             foreach (var t in _trays)
             {
@@ -322,7 +324,7 @@ namespace NavisVisualizer.UI
             _progressBar.Style = ProgressBarStyle.Marquee;
             _progressBar.Visible = true;
             Application.DoEvents();
-            _main.TagSearcher.BuildIndex(doc);
+            _main.ElecTagSearcher.BuildIndex(doc, NwdScope.EitTray);
             _progressBar.Visible = false;
             _progressBar.Style = ProgressBarStyle.Blocks;
         }
@@ -335,7 +337,7 @@ namespace NavisVisualizer.UI
                 MessageBox.Show("Excel을 먼저 로드하고 모델을 열어주세요.");
                 return;
             }
-            if (_main.TagSearcher.NeedsRebuild(doc))
+            if (_main.ElecTagSearcher.NeedsRebuild(doc))
                 BuildIndex();
 
             var activeSettings = new Dictionary<EitStage, ColorSetting>();
@@ -378,7 +380,7 @@ namespace NavisVisualizer.UI
         /// </summary>
         private Dictionary<string, List<Autodesk.Navisworks.Api.ModelItem>> BuildScopeItemsByKey()
         {
-            var found = _main.TagSearcher.FindBySpoolIds(
+            var found = _main.ElecTagSearcher.FindBySpoolIds(
                 _matchedTrayNos.Select(EitTrayData.NormalizeId).Distinct(StringComparer.OrdinalIgnoreCase));
             var itemsByKey = new Dictionary<string, List<Autodesk.Navisworks.Api.ModelItem>>(StringComparer.OrdinalIgnoreCase);
             foreach (var id in _matchedTrayNos)
@@ -407,7 +409,7 @@ namespace NavisVisualizer.UI
                     MessageBox.Show("먼저 적용(가시화)을 실행하세요. 집계 범위는 매칭된 항목에 적용됩니다.");
                     return;
                 }
-                if (_main.TagSearcher.NeedsRebuild(doc))
+                if (_main.ElecTagSearcher.NeedsRebuild(doc))
                 {
                     MessageBox.Show("모델이 변경되었습니다. 적용(가시화)을 다시 실행한 뒤 범위를 선택하세요.");
                     return;
@@ -491,14 +493,14 @@ namespace NavisVisualizer.UI
             if (_listView.SelectedItems.Count == 0) return;
 
             var doc = _main.GetDocument();
-            if (doc == null || !_main.TagSearcher.IsIndexBuilt || _main.TagSearcher.NeedsRebuild(doc)) return;
+            if (doc == null || !_main.ElecTagSearcher.IsIndexBuilt || _main.ElecTagSearcher.NeedsRebuild(doc)) return;
 
             var collection = new Autodesk.Navisworks.Api.ModelItemCollection();
             foreach (ListViewItem selected in _listView.SelectedItems)
             {
                 var tray = selected.Tag as EitTrayData;
                 if (tray == null) continue;
-                var found = _main.TagSearcher.FindBySpoolIds(new[] { EitTrayData.NormalizeId(tray.TrayNumber) });
+                var found = _main.ElecTagSearcher.FindBySpoolIds(new[] { EitTrayData.NormalizeId(tray.TrayNumber) });
                 foreach (var items in found.Values)
                     collection.AddRange(items);
             }

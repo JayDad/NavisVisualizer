@@ -7,6 +7,7 @@ using System.Windows.Forms;
 using Autodesk.Navisworks.Api;
 using NavisVisualizer.Loaders;
 using NavisVisualizer.Models;
+using NavisVisualizer.Searchers;
 using NavisVisualizer.Services;
 using NavisVisualizer.Visualizers;
 using Color = System.Drawing.Color;
@@ -343,6 +344,7 @@ namespace NavisVisualizer.UI
             if (_nodes.Count == 0) { MessageBox.Show("Excel을 먼저 로드하세요."); return; }
             var lines = new List<string>();
             lines.Add($"집계 범위,{MatchScopeInfo.Label(_scopePanel.CurrentScope)}");
+            lines.Add($"인덱스 스코프,\"{_main.CableBoxSearcher.LastScopeNote ?? "-"}\"");
             lines.Add("Node ID,Cable Count,Total Design,Total Pulled,Overall %,Stage,Matched");
             foreach (var n in _nodes)
             {
@@ -385,7 +387,7 @@ namespace NavisVisualizer.UI
             _progressBar.Style = ProgressBarStyle.Marquee;
             _progressBar.Visible = true;
             Application.DoEvents();
-            _main.CableBoxSearcher.BuildIndexForBoxes(doc);
+            _main.CableBoxSearcher.BuildIndexForBoxes(doc, NwdScope.Cable);
             _progressBar.Visible = false;
             _progressBar.Style = ProgressBarStyle.Blocks;
         }

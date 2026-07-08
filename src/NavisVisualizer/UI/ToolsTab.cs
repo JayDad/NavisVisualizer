@@ -4,6 +4,7 @@ using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Windows.Forms;
+using NavisVisualizer.Searchers;
 
 namespace NavisVisualizer.UI
 {
@@ -397,16 +398,17 @@ namespace NavisVisualizer.UI
                 _lblStatus.Text = "Building box index...";
                 Application.DoEvents();
                 if (_main.CableBoxSearcher.NeedsRebuild(doc))
-                    _main.CableBoxSearcher.BuildIndexForBoxes(doc);
+                    _main.CableBoxSearcher.BuildIndexForBoxes(doc, NwdScope.Cable);
 
                 var dups = _main.CableBoxSearcher.GetEntriesWithMultipleItems();
                 int totalNodes = _main.CableBoxSearcher.IndexedCount;
+                string scopeNote = _main.CableBoxSearcher.LastScopeNote ?? "-";
 
                 if (dups.Count == 0)
                 {
                     _lblStatus.Text = $"Box nodes: {totalNodes}, duplicates: 0";
                     MessageBox.Show(
-                        $"중복 없음.\n\n인덱싱된 Node Box: {totalNodes}개\n노드당 박스는 모두 1개입니다.",
+                        $"중복 없음.\n\n인덱싱된 Node Box: {totalNodes}개\n노드당 박스는 모두 1개입니다.\n\n{scopeNote}",
                         "Node Box 중복 검사", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     return;
                 }
