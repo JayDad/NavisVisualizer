@@ -106,58 +106,55 @@ FROM [Navis].[Piping_HydrotestPKG]";
         }
 
         // ------------------------------------------------------------
-        // Equipment  ←  [Navis].[Mech_EQ] + [Navis].[All_EQ]
+        // Equipment  ←  [Navis].[Mech_EQ]
         // ------------------------------------------------------------
 
         /// <summary>
-        /// Mech_EQ를 먼저 읽고 All_EQ를 병합한다(TAG NO 중복 시 Mech_EQ 우선 —
-        /// Mech_EQ가 stage 실적을 더 풍부하게 보유). 병합 정책이 바뀌면 이 순서만 조정.
+        /// Mech_EQ 단독 로드. All_EQ는 사용자 결정으로 제외(2026-07) —
+        /// Mech_EQ가 stage 실적을 보유한 기계 장비 마스터. 컬럼은 실 스키마 대조 완료.
         /// </summary>
         public static List<EquipmentData> LoadEquipment(SqlConnectionSettings settings)
         {
-            const string columns = @"[RFQ NO],[SUB-SYSTEM],[TAG NO],[TAG DESCRIPTION],
-       [Delivered],[Confirmed ETA],[Loading],[Setting],[Inspection]";
+            const string baseSql = @"
+SELECT [RFQ NO],[SUB-SYSTEM],[TAG NO],[TAG DESCRIPTION],
+       [Delivered],[Confirmed ETA],[Loading],[Setting],[Inspection]
+FROM [Navis].[Mech_EQ]";
 
             var items = new List<EquipmentData>();
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            foreach (var table in new[] { "[Navis].[Mech_EQ]", "[Navis].[All_EQ]" })
+            ExecuteReader(settings, baseSql, "PJTNO", r =>
             {
-                string baseSql = $"SELECT {columns}\nFROM {table}";
-                ExecuteReader(settings, baseSql, "PJTNO", r =>
+                // 모델 인덱스 키는 선행 '/' 제거 형태 — 방어적으로 동일 정규화 유지.
+                string tagNo = GetString(r, "TAG NO").TrimStart('/').Trim();
+                if (string.IsNullOrEmpty(tagNo) || !seen.Add(tagNo)) return;
+
+                DateTime? delivered = GetDate(r, "Delivered");
+
+                var equip = new EquipmentData
                 {
-                    // All_EQ 태그는 "/101560-SP-70035"처럼 선행 '/'를 가진다.
-                    // 모델 인덱스 키는 '/' 제거 형태이므로 여기서 정규화해야 매칭된다.
-                    string tagNo = GetString(r, "TAG NO").TrimStart('/').Trim();
-                    if (string.IsNullOrEmpty(tagNo) || !seen.Add(tagNo)) return;
-
-                    DateTime? delivered = GetDate(r, "Delivered");
-
-                    var equip = new EquipmentData
-                    {
-                        TagNo = tagNo,
-                        RfqNo = GetString(r, "RFQ NO"),
-                        SubSystem = GetString(r, "SUB-SYSTEM"),
-                        Description = GetString(r, "TAG DESCRIPTION"),
-                        // Excel 경로의 상태 텍스트("Delivered") 관례를 유지 — 속성 쓰기 등
-                        // 기존 소비처가 이 문자열을 그대로 출력한다.
-                        DeliveryStatus = delivered.HasValue ? "Delivered" : "",
-                        ConfirmedEta = GetDate(r, "Confirmed ETA"),
-                    };
-                    // Excel 경로와 달리 DB의 Delivered는 날짜이므로 stage에 직접 매핑.
-                    equip.StageDates[EquipmentStage.Delivery]   = delivered;
-                    equip.StageDates[EquipmentStage.Loading]    = GetDate(r, "Loading");
-                    equip.StageDates[EquipmentStage.Setting]    = GetDate(r, "Setting");
-                    equip.StageDates[EquipmentStage.Inspection] = GetDate(r, "Inspection");
-                    items.Add(equip);
-                });
-            }
+                    TagNo = tagNo,
+                    RfqNo = GetString(r, "RFQ NO"),
+                    SubSystem = GetString(r, "SUB-SYSTEM"),
+                    Description = GetString(r, "TAG DESCRIPTION"),
+                    // Excel 경로의 상태 텍스트("Delivered") 관례를 유지 — 속성 쓰기 등
+                    // 기존 소비처가 이 문자열을 그대로 출력한다.
+                    DeliveryStatus = delivered.HasValue ? "Delivered" : "",
+                    ConfirmedEta = GetDate(r, "Confirmed ETA"),
+                };
+                // Excel 경로와 달리 DB의 Delivered는 날짜이므로 stage에 직접 매핑.
+                equip.StageDates[EquipmentStage.Delivery]   = delivered;
+                equip.StageDates[EquipmentStage.Loading]    = GetDate(r, "Loading");
+                equip.StageDates[EquipmentStage.Setting]    = GetDate(r, "Setting");
+                equip.StageDates[EquipmentStage.Inspection] = GetDate(r, "Inspection");
+                items.Add(equip);
+            });
 
             return items;
         }
 
         // ------------------------------------------------------------
-        // Sub-system  ←  Mech_EQ/All_EQ (Equipment) + Piping_HydrotestPKG (Piping)
+        // Sub-system  ←  Mech_EQ (Equipment) + Piping_HydrotestPKG (Piping)
         // ------------------------------------------------------------
 
         /// <summary>

@@ -261,12 +261,11 @@ EIT_Cable, EIT_EQ, EIT_Route, EIT_Tray, Mech_EQ, Piping_HydrotestPKG, Piping_Spo
   SELECT(`[FIT-UP]`)·매핑 + 테스트 count(15→16). Excel엔 FIT-UP 컬럼 없음 → 역순 스캔이 직전 단계로 자동 인식(무해).
 - **Spool/Hydrotest 로더**: 실제 컬럼과 대조 완료 — 기존 SELECT 그대로 일치(수정 불필요).
   Hydrotest는 `System`/`Sub-System` 둘 다 있고 로더는 세밀한 `Sub-System` 사용(기존 결정 유지).
-- **Equipment (Mech_EQ/All_EQ)**: 로직 완성·견고(태그 `/` 정규화, `Delivered` 날짜화, 인덱스 자기일관)
-  이나 **두 테이블 실제 컬럼명 미검증**. EIT_EQ가 `RFQ_NO`(언더스코어)를 쓰는 반면 로더는 `RFQ NO`(공백)를
-  가정 → 명명 드리프트 시 "Invalid column name"으로 로드 전면 실패(조용한 오류는 아님). Mech_EQ/All_EQ
-  헤더 수령 후 SELECT 확정 필요.
-- **Equipment 병합 정책**: 현재 Mech_EQ 우선 + All_EQ 보충(dedupe). 정책 바뀌면
-  `SqlLoader.LoadEquipment`의 테이블 순회 순서만 조정.
+- **Equipment**: **[해결됨]** Mech_EQ 실제 컬럼 대조 완료 — 로더 기대 컬럼(`RFQ NO` 공백 형식 포함)
+  전부 일치. **All_EQ는 사용자 결정으로 제외**(2026-07) → `LoadEquipment`는 `[Navis].[Mech_EQ]` 단독
+  조회로 단순화(병합 루프 제거, 선행 `/` 정규화는 방어적으로 유지). All_EQ를 다시 살리려면 테이블 순회
+  복원 + All_EQ 컬럼명 검증 필요. Mech_EQ 신규 컬럼(RFQ DES/L·W·H/Weight/SYSTEM/AITR·Punch 수치)은
+  미사용 — 표시 확장 기회.
 - **EIT Tray**: 진척 테이블 `[Navis].[EIT_Tray]` **존재 확인**(`BRANCH NO.`/`TRAY Install %`/`PJTNO`).
   단 **날짜 컬럼 없음**(`Tray install date` 부재) → 기준일 필터 불가, %기반 현재상태 판정으로 로더 설계 필요.
   `BRANCH NO.` 선행 `/` → `NormalizeId` 적용. (이번 3-탭 범위 밖.)

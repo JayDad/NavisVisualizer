@@ -246,13 +246,13 @@ SQL 조인/뷰가 키당 여러 행을 주면 리스트 중복, 통계 이중 �
 ### 10개 테이블 인벤토리
 | # | 테이블 | 소비 탭 | 상태 |
 |---|---|---|---|
-| 1 | `All_EQ` | Equipment | 로직 완성 · **컬럼명 미검증**(헤더 수령 대기) |
+| 1 | `All_EQ` | (사용 안 함) | **사용자 결정으로 제외**(2026-07) — Equipment는 Mech_EQ 단독 |
 | 2 | `All_Support` | (미구현) | 수량기반 진척. 보관만 (사용자: "아직 구현 안 함") |
 | 3 | `EIT_Cable` | Cable | Node 부재 지속 → 보류(대공사) |
 | 4 | `EIT_EQ` | (미정) | `INSTALL DTE`+`SUB-SYSTEM`+AITR/Punch. 단일단계+TagSearcher 유력 |
 | 5 | `EIT_Route` | Cable | ROUTE↔CABLE_NO. 홉순서/NodeId 변환 없음 → 노드매핑 아님 |
 | 6 | `EIT_Tray` | EIT Tray | **테이블 확인**. 날짜 컬럼 없음 → %기반 판정 설계 필요 |
-| 7 | `Mech_EQ` | Equipment | 로직 완성 · **컬럼명 미검증** |
+| 7 | `Mech_EQ` | Equipment | ✅ 실제 컬럼 = 기존 SELECT 일치. Equipment 단독 소스로 확정 |
 | 8 | `Piping_HydrotestPKG` | Hydrotest | ✅ 실제 컬럼 = 기존 SELECT 일치. 수정 불필요 |
 | 9 | `Piping_Spool` | Spool | ✅ 일치 + `FIT-UP` 단계 추가 반영(아래) |
 | 10 | `System_Summary` | Sub-system | ★ `SubSystem_Master` 대체 — 컬럼 전면 상이 |
@@ -264,10 +264,12 @@ SQL 조인/뷰가 키당 여러 행을 주면 리스트 중복, 통계 이중 �
   추가·매핑. Excel엔 FIT-UP 없음 → 역순 스캔이 직전 단계로 자동 인식(무해).
 - **Hydrotest** ✅: `PKGNO`/`LINESVC`/`Sub-System` + 6 stage + `PRJTNO` 전부 일치. 코드 수정 불필요.
   (실 테이블에 `System`·`Sub-System` 병존 — 로더는 세밀한 `Sub-System` 채택, 기존 결정 유지.)
-- **Equipment** ⚠: 태그 `/` 정규화·`Delivered` 날짜화·인덱스 자기일관까지 로직은 완성. 단 `Mech_EQ`/
-  `All_EQ` **실제 컬럼명 미검증**. 위험 신호: 같은 EQ 계열 `EIT_EQ`가 `RFQ_NO`(언더스코어)를 쓰는데
-  로더는 `RFQ NO`(공백) 가정 → 드리프트 시 "Invalid column name"으로 로드 전면 실패(조용한 오류 아님).
-  **두 테이블 헤더 수령 후 SELECT 확정 예정.**
+- **Equipment** ✅: `Mech_EQ` 실제 컬럼 대조 완료 — 로더 기대 10개 컬럼(`RFQ NO` 공백 형식,
+  `Delivered`/`Confirmed ETA`, 3 stage, `PJTNO`) 전부 일치. **All_EQ는 사용자 결정으로 제외** →
+  `LoadEquipment`를 `[Navis].[Mech_EQ]` 단독 조회로 단순화(병합 루프 제거, `/` 정규화는 방어 유지).
+  본문 1.3의 All_EQ 이슈(선행 `/` 태그 전멸, Delivery 이중 사망)는 Mech_EQ 단독 + Delivered 날짜
+  직접 매핑으로 무관해짐. Mech_EQ 신규 컬럼(RFQ DES, L/W/H, Weight, SYSTEM/DES, SUB-SYSTEM DES,
+  AITR·Punch 수치)은 미사용 — 표시 확장 기회.
 
 ### System_Summary ≠ SubSystem_Master (§11 영향)
 실 DB엔 `SubSystem_Master` 없음. `[Navis].[System_Summary]`가 마스터 역할이나 컬럼명이 §11 계약과

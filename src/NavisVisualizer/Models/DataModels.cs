@@ -428,7 +428,7 @@ namespace NavisVisualizer.Models
 
     public enum SubSystemDiscipline
     {
-        Equipment,   // Mech_EQ / All_EQ — TAG NO 매칭
+        Equipment,   // Mech_EQ — TAG NO 매칭
         Piping,      // Piping_HydrotestPKG — PKGNO 매칭 (PKG 노드 색칠이 하위 스풀/배관을 커버)
     }
 
