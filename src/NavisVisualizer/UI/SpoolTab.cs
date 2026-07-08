@@ -79,7 +79,9 @@ namespace NavisVisualizer.UI
             _srcPanel.ExcelLoadClicked    += (s, e) => LoadExcel();
             _srcPanel.TemplateClicked     += (s, e) => ExportInputTemplate();
             _srcPanel.OasisLoadClicked    += (s, e) => LoadOasis();
-            _srcPanel.ActiveSourceChanged += (s, e) => ApplyActiveSourceData(reapply: _appliedOnce);
+            // 라디오 전환은 절대 자동 재적용하지 않는다(§6) — 대형 모델에서 수 초 블로킹 방지.
+            // 리스트/통계만 새 소스로 즉시 갱신하고, 색상이 이전 소스 기준이면 경고만 띄운다.
+            _srcPanel.ActiveSourceChanged += (s, e) => ApplyActiveSourceData(reapply: false);
             _srcPanel.CompareClicked      += (s, e) => ExportComparison();
 
             // Reference date picker
@@ -377,6 +379,10 @@ namespace NavisVisualizer.UI
             _tabFilter.TabPages[2].Text = "미매칭";
             FilterList();
             UpdateStats();
+
+            // 색상이 이전 소스 기준으로 화면에 남아 있으면 경고 — 자동 재색칠은 안 함(§6).
+            if (!willReapply && _appliedOnce && _spools.Count > 0)
+                _lblStats.Text = "⚠ 화면 색상은 이전 소스 기준 — [적용]을 눌러 새 소스로 갱신하세요";
 
             if (willReapply)
                 BtnApply_Click(null, EventArgs.Empty);
