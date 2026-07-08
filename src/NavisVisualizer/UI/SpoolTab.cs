@@ -37,7 +37,6 @@ namespace NavisVisualizer.UI
         private DataSourcePanel _srcPanel;
         private DateTimePicker _dtpReference;
         private TextBox  _txtSearch;
-        private ComboBox _cmbStageFilter;   // 리스트를 특정 단계로 좁히는 필터 (index 0 = 전체 단계)
         private TabControl _tabFilter;
         private ListView _listView;
         private Button   _btnHideOthers;    // 체크된 단계 스풀만 남기고 나머지 3D 숨김 (토글)
@@ -109,19 +108,9 @@ namespace NavisVisualizer.UI
             // Search box
             var searchPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 28, AutoSize = false };
             searchPanel.Controls.Add(new Label { Text = "검색:", AutoSize = true, Padding = new Padding(0, 4, 0, 0) });
-            _txtSearch = new TextBox { Width = 160, Text = "" };
+            _txtSearch = new TextBox { Width = 210, Text = "" };
             _txtSearch.TextChanged += (s, e) => FilterList();
             searchPanel.Controls.Add(_txtSearch);
-
-            // 단계 필터: index 0 = 전체 단계, 이후 OrderedStages 순서
-            searchPanel.Controls.Add(new Label { Text = "단계:", AutoSize = true, Padding = new Padding(8, 4, 0, 0) });
-            _cmbStageFilter = new ComboBox { Width = 110, DropDownStyle = ComboBoxStyle.DropDownList };
-            _cmbStageFilter.Items.Add("전체 단계");
-            foreach (var st in SpoolStageInfo.OrderedStages)
-                _cmbStageFilter.Items.Add(SpoolStageInfo.Labels[st]);
-            _cmbStageFilter.SelectedIndex = 0;
-            _cmbStageFilter.SelectedIndexChanged += (s, e) => FilterList();
-            searchPanel.Controls.Add(_cmbStageFilter);
 
             var btnExport = new Button { Text = "매칭 Status 출력", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(8, 1, 8, 1) };
             btnExport.Click += BtnExport_Click;
@@ -186,20 +175,25 @@ namespace NavisVisualizer.UI
                 }
             };
 
-            var btnPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 65, AutoSize = true };
-            _btnApply      = new Button { Text = "적용",              Width = 80  };
-            _btnReset      = new Button { Text = "전체 초기화",       Width = 90  };
-            _btnHideOthers = new Button { Text = "체크 단계만 보기",  Width = 120 };
-            _btnWriteProps = new Button { Text = "속성 쓰기",         Width = 80  };
-            _btnViewpoint  = new Button { Text = "Viewpoint 저장",    Width = 120 };
-            _btnNwd        = new Button { Text = "NWD Export",        Width = 110 };
+            // 1행(핵심): 적용 · 체크 단계만 남김 · 전체 초기화
+            var btnPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 34, AutoSize = true };
+            _btnApply      = new Button { Text = "적용",             Width = 80  };
+            _btnHideOthers = new Button { Text = "체크 단계만 남김", Width = 140 };
+            _btnReset      = new Button { Text = "전체 초기화",      Width = 90  };
             _btnApply.Click      += BtnApply_Click;
-            _btnReset.Click      += BtnReset_Click;
             _btnHideOthers.Click += BtnHideOthers_Click;
+            _btnReset.Click      += BtnReset_Click;
+            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnHideOthers, _btnReset });
+
+            // 2행(보조): 속성 쓰기 · Viewpoint 저장 · NWD Export
+            var btnPanel2 = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 34, AutoSize = true };
+            _btnWriteProps = new Button { Text = "속성 쓰기",      Width = 80  };
+            _btnViewpoint  = new Button { Text = "Viewpoint 저장", Width = 120 };
+            _btnNwd        = new Button { Text = "NWD Export",     Width = 110 };
             _btnWriteProps.Click += BtnWriteProps_Click;
             _btnViewpoint.Click  += BtnViewpoint_Click;
             _btnNwd.Click        += BtnNwd_Click;
-            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnReset, _btnHideOthers, _btnWriteProps, _btnViewpoint, _btnNwd });
+            btnPanel2.Controls.AddRange(new Control[] { _btnWriteProps, _btnViewpoint, _btnNwd });
 
             _progressBar = new ProgressBar { Dock = DockStyle.Fill, Height = 12, Visible = false };
 
@@ -210,6 +204,7 @@ namespace NavisVisualizer.UI
             layout.Controls.Add(new Label { Text = "Install", Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 18 });
             layout.Controls.Add(colorPanels.instPanel);
             layout.Controls.Add(btnPanel);
+            layout.Controls.Add(btnPanel2);
             layout.Controls.Add(_progressBar);
             layout.Controls.Add(statsRow);
             layout.Controls.Add(searchPanel);
@@ -538,7 +533,7 @@ namespace NavisVisualizer.UI
             {
                 doc.Models.SetHidden(_spoolHiddenByStage, false);
                 _spoolHiddenByStage = null;
-                _btnHideOthers.Text = "체크 단계만 보기";
+                _btnHideOthers.Text = "체크 단계만 남김";
                 return;
             }
 
@@ -706,7 +701,7 @@ namespace NavisVisualizer.UI
             {
                 doc.Models.SetHidden(_spoolHiddenByStage, false);
                 _spoolHiddenByStage = null;
-                _btnHideOthers.Text = "체크 단계만 보기";
+                _btnHideOthers.Text = "체크 단계만 남김";
             }
             _main.OverrideEngine.Reset(doc);
             _lblStats.Text = "전체 초기화 완료";
@@ -804,13 +799,6 @@ namespace NavisVisualizer.UI
             // Aggregation scope (matched rows only; unmatched rows are unjudgeable)
             if (_scopeKeys != null)
                 filtered = filtered.Where(s => InScope(s.SpoolId));
-
-            // Stage filter (index 0 = 전체 단계, 이후 OrderedStages 순)
-            if (_cmbStageFilter != null && _cmbStageFilter.SelectedIndex > 0)
-            {
-                var wantStage = SpoolStageInfo.OrderedStages[_cmbStageFilter.SelectedIndex - 1];
-                filtered = filtered.Where(s => s.GetStageAtDate(referenceDate) == wantStage);
-            }
 
             // Text search filter
             if (!string.IsNullOrEmpty(keyword))

@@ -7,7 +7,7 @@ namespace NavisVisualizer
 {
     [Plugin("NavisVisualizer.DockPane", "HDHHI_OE",
         DisplayName = "Navis Visualizer")]
-    [DockPanePlugin(320, 700, FixedSize = false)]
+    [DockPanePlugin(320, 820, FixedSize = false)]
     public class MainDockPanePlugin : DockPanePlugin
     {
         public override Control CreateControlPane()
@@ -64,7 +64,7 @@ namespace NavisVisualizer
             {
                 Text = "Navis Visualizer",
                 Width = 380,
-                Height = 750,
+                Height = 870,
                 FormBorderStyle = FormBorderStyle.SizableToolWindow,
                 StartPosition = FormStartPosition.CenterScreen,
                 TopMost = true
