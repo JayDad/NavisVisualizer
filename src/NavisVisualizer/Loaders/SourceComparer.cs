@@ -35,6 +35,8 @@ namespace NavisVisualizer.Loaders
             var onlyExcel = excel.Keys.Where(k => !oasis.ContainsKey(k)).OrderBy(k => k).ToList();
             var onlyOasis = oasis.Keys.Where(k => !excel.ContainsKey(k)).OrderBy(k => k).ToList();
 
+            // 한 키(스풀/PKG/장비) 한 줄. 차이 나는 필드만 "항목: Excel | OASIS"로 한 셀에 요약.
+            // (구 포맷은 필드 하나당 한 줄이라 한 스풀이 여러 줄로 흩어져 가독성이 떨어졌음.)
             var diffLines = new List<string>();
             int mismatchKeys = 0, matchKeys = 0;
 
@@ -42,18 +44,20 @@ namespace NavisVisualizer.Loaders
             {
                 var e = excel[key];
                 var o = oasis[key];
-                bool any = false;
+                var diffs = new List<string>();
                 foreach (var f in fields)
                 {
                     string ev = f.Get(e) ?? "";
                     string ov = f.Get(o) ?? "";
                     if (!string.Equals(ev, ov, StringComparison.OrdinalIgnoreCase))
-                    {
-                        diffLines.Add(Row("불일치", key, f.Name, ev, ov));
-                        any = true;
-                    }
+                        diffs.Add($"{f.Name}: {Blank(ev)} | {Blank(ov)}");
                 }
-                if (any) mismatchKeys++; else matchKeys++;
+                if (diffs.Count > 0)
+                {
+                    mismatchKeys++;
+                    diffLines.Add(Row("불일치", key, diffs.Count.ToString(), string.Join("  ·  ", diffs)));
+                }
+                else matchKeys++;
             }
 
             var lines = new List<string>
@@ -61,10 +65,10 @@ namespace NavisVisualizer.Loaders
                 $"# Excel {excel.Count}건 / OASIS {oasis.Count}건 / " +
                 $"일치 {matchKeys} / 불일치 {mismatchKeys} / " +
                 $"Excel에만 {onlyExcel.Count} / OASIS에만 {onlyOasis.Count}",
-                Row("구분", keyHeader, "항목", "Excel", "OASIS"),
+                Row("구분", keyHeader, "불일치 수", "불일치 상세 (항목: Excel | OASIS)"),
             };
-            lines.AddRange(onlyExcel.Select(k => Row("Excel에만", k, "", "", "")));
-            lines.AddRange(onlyOasis.Select(k => Row("OASIS에만", k, "", "", "")));
+            lines.AddRange(onlyExcel.Select(k => Row("Excel에만", k, "-", "-")));
+            lines.AddRange(onlyOasis.Select(k => Row("OASIS에만", k, "-", "-")));
             lines.AddRange(diffLines);
             return lines;
         }
@@ -87,6 +91,8 @@ namespace NavisVisualizer.Loaders
             if (string.IsNullOrEmpty(key)) return "";
             return key.Trim().TrimStart('/').ToUpperInvariant();
         }
+
+        private static string Blank(string v) => string.IsNullOrEmpty(v) ? "(없음)" : v;
 
         private static string Row(params string[] cells)
         {
