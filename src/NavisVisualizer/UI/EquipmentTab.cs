@@ -153,18 +153,23 @@ namespace NavisVisualizer.UI
             _listView.ColumnClick += ListView_ColumnClick;
             tabAll.Controls.Add(_listView);
 
-            var btnPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 65, AutoSize = true };
-            _btnApply      = new Button { Text = "적용",           Width = 80  };
-            _btnReset      = new Button { Text = "전체 초기화",    Width = 90  };
-            _btnWriteProps = new Button { Text = "속성 쓰기",      Width = 80  };
-            _btnViewpoint  = new Button { Text = "Viewpoint 저장", Width = 120 };
-            _btnNwd        = new Button { Text = "NWD Export",     Width = 110 };
+            // 1행(핵심): 적용 · 전체 초기화 · 속성 쓰기
+            var btnPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 34, AutoSize = true };
+            _btnApply      = new Button { Text = "적용",        Width = 80 };
+            _btnReset      = new Button { Text = "전체 초기화", Width = 90 };
+            _btnWriteProps = new Button { Text = "속성 쓰기",   Width = 80 };
             _btnApply.Click      += BtnApply_Click;
             _btnReset.Click      += BtnReset_Click;
             _btnWriteProps.Click += BtnWriteProps_Click;
+            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnReset, _btnWriteProps });
+
+            // 2행(덜 쓰임): Viewpoint 저장 · NWD Export
+            var btnPanel2 = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 34, AutoSize = true };
+            _btnViewpoint  = new Button { Text = "Viewpoint 저장", Width = 120 };
+            _btnNwd        = new Button { Text = "NWD Export",     Width = 110 };
             _btnViewpoint.Click  += BtnViewpoint_Click;
             _btnNwd.Click        += BtnNwd_Click;
-            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnReset, _btnWriteProps, _btnViewpoint, _btnNwd });
+            btnPanel2.Controls.AddRange(new Control[] { _btnViewpoint, _btnNwd });
 
             _progressBar = new ProgressBar { Dock = DockStyle.Fill, Height = 12, Visible = false };
 
@@ -173,6 +178,7 @@ namespace NavisVisualizer.UI
             layout.Controls.Add(new Label { Text = "단계 & 색상", Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 18 });
             layout.Controls.Add(colorPanel);
             layout.Controls.Add(btnPanel);
+            layout.Controls.Add(btnPanel2);
             layout.Controls.Add(_progressBar);
             layout.Controls.Add(statsRow);
             layout.Controls.Add(searchPanel);
