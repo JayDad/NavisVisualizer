@@ -352,6 +352,73 @@ CREATE TABLE [Navis].[SubSystem_Master](
 - 우측 테이블 `매칭` 열과 리포트의 매칭 O/X는 **마지막 [적용] 스냅샷** 기준 — 적용에
   포함되지 않았던 sub-system은 "-" 표시 (미적용 상태에서 O로 찍히는 기존 탭 결함을 답습하지 않음).
 
+### 12. Cable 경로 추출 + Clipping 볼륨 통과 판정 (clash) — 설계 기록 (진단만 구현됨)
+
+**목표**
+특정 clipping 볼륨(단면 박스/영역)을 **지나가는 케이블 리스트 추출**. 케이블 한 가닥이
+**하나의 component**로 구불구불 모델링된 경우, 중심점 1개(`BoundingBox().Center`)로는
+판정 불가 → **실제 형상을 볼륨과 대봐야** 함.
+
+**구현 현황**: `Services/GeometryProbe.cs` + Tools 탭 `Cable Vertex 진단`(선분 CSV/txt
+덤프)까지 구현·머지됨(읽기 전용 진단). 실제 clash 배선(ScopeFilter 연결)은 **미구현** —
+아래 설계대로 착수.
+
+#### (A) 경로(형상) 추출 로직 — 실측 확정
+- COM 경로: `ComApiBridge.ToInwOaPath(item)` → `path.Fragments()` → 프래그먼트마다
+  `InwOaFragment3.GenerateSimplePrimitives(nwEVertexProperty.eNORMAL, cb)`
+- 콜백 `cb` = `InwSimplePrimitivesCB` 구현(Line/Triangle/Point/SnapPoint 4개 — COM 콜백
+  인터페이스라 시그니처 정확히 일치해야 바인딩됨). CCW 노출 위해 클래스는 `public`.
+- **별도 index 버퍼 없음** — de-indexed 명시 정점을 그대로 줌.
+- **케이블은 Line 프리미티브**(스윕 튜브 wireframe), Triangle 아님. 케이블당 ~79–88 선분 실측.
+- **각 Line은 독립 선분(pair)** — 연속 폴리라인 아님. 순차로 이으면(v1→v2, v2→v3…)
+  **가짜 선분** 생겨 형상 깨짐.
+- wireframe = 단면 모서리(짧은 선분) + **route 레일(긴 선분)**. **route 중심선 아님** —
+  하지만 clash엔 route 복원 불필요.
+- **정점은 프래그먼트 로컬 좌표** → `frag.GetLocalToWorldMatrix()` 곱해 월드로(병진 실측
+  ~수십 m). 규약: `world.k = Σ_j local_j·m[j*4+k] + m[12+k]` (row-vector×row-major).
+  축정렬(회전≈0) **확정**, 회전 프래그먼트 규약 미확인.
+- `InwSimpleVertex.coord` = float SAFEARRAY, 0/1-based는 lowerBound로 방어적 처리.
+- 빌드별 시그니처 리스크 회피 위해 프래그먼트 순회는 `dynamic`(없으면 컴파일이 아닌
+  런타임 예외로 degrade — L4).
+
+#### (B) 볼륨 통과 판정 로직 (직육면체 = AABB)
+**볼륨을 AABB/반평면으로 받아 각 케이블 선분과 교차 검사. 하나라도 교차 = 통과.**
+- 선분 vs AABB **slab test**(Liang–Barsky, t∈[0,1]): 축마다 `d==0`이면 슬래브 밖일 때
+  false, 아니면 `t1,t2=(min/max−p)/d` 정렬→`tMin=max(tMin,t1)`,`tMax=min(tMax,t2)`,
+  `tMin>tMax`면 false. 끝까지 통과=교차. **정확 + 쌈(~30 float ops/선분), 점 샘플링 아님**
+  (해석적이라 중간 관통도 잡음).
+- **wireframe로 판정해도 정확한 이유**: route를 따라 달리는 **긴 세로 레일**이 볼륨을 반드시
+  가로지름. (예외: 볼륨이 케이블 단면 ~0.4×0.5보다 작을 때 — 실무 clip은 구역 크기라 없음.)
+
+#### (C) 비-직육면체(임의 형상) 볼륨 일반화 ← 핵심
+볼륨이 박스가 아니어도 판정 **가능**. **선분-vs-볼륨 술어만 교체**(케이블 추출·캐시는 동일):
+- **볼록(convex) 임의 볼륨** — 회전 박스(OBB) · Planes 모드 단면 · 절두체 · 임의 반평면
+  집합: **Cyrus–Beck**(= slab의 일반화). 선분 t를 각 반평면으로 클리핑, 살아남는 t구간
+  있으면 통과. `SectionService.GetActiveClipPlanes`가 이미 반평면 집합을 주므로 Planes/박스
+  모두 이 경로로 흡수. 회전 박스는 선분 끝점을 **박스 로컬로 변환 후 slab**로도 가능.
+- **비볼록(concave) 임의 볼륨** — L자 영역·임의 solid: 반평면 "모두 안쪽" 논리 깨짐. 두 방법:
+  1. **볼록 분해**: 볼륨을 볼록 조각들로 나눠 각 조각에 Cyrus–Beck, 하나라도 통과=통과.
+  2. **닫힌 메시 교차**: 볼륨이 닫힌 삼각형 메시면 **선분 vs 삼각형 교차**(경계 관통) +
+     **내부점 판정**(ray cast/winding)으로 "선분이 solid와 교차" 완전 일반 판정. 비싸지만 범용.
+- **Manage 가용 시**: 임의 메시 볼륨을 요소로 넣고 Clash Detective — 엔진이 임의 형상
+  네이티브 처리. 단 **Manage 전용**(Simulate 불가, 4번·이전 논의).
+- **아키텍처 분리(중요)**: ① 케이블→선분(고정, 1회 추출·캐시) ↔ ② 선분-vs-볼륨 술어
+  (pluggable: **AABB=slab / convex=Cyrus–Beck / arbitrary=메시교차**). **볼륨 모양이 바뀌어도
+  ①은 불변** — 술어 인터페이스 하나(`bool Intersects(seg, volume)`)로 두면 볼륨 종류 확장 자유.
+
+#### (D) 성능
+- **산술은 병목 아님**: 2만 케이블 × ~80선분 = 160만 선분 × slab ~30ops → 수십 ms.
+- **병목 = COM 추출**(`GenerateSimplePrimitives` 마샬링, 케이블당 왕복 → 초 단위 가능).
+- **형상은 정적**: 케이블 선분을 **1회 추출·캐시**, `[적용]`마다 캐시 선분에 볼륨 술어만
+  재계산. **캐시하는 건 형상이지 판정 결과 아님**(L2 준수 — 판정은 라이브 볼륨으로 매번).
+- **AABB 사전 배제**: 케이블 `BoundingBox`가 볼륨과 안 겹치면 선분 루프 스킵.
+
+#### (E) 통합 지점 / Windows 검증
+- `ScopeFilter` 케이블 분기의 `BoundingBox().Center` 판정을 **선분-vs-볼륨 clash로 교체**.
+  통과 케이블 → 리스트/CSV/코너 카운트 반영.
+- 검증: 좌표/단위 일치(COM 정점 ↔ 볼륨 공간), 회전 프래그먼트 행렬 규약, coord 0/1-based,
+  wireframe 세로 레일 존재 가정.
+
 ## 레슨런 (하드 트러블슈팅 기록 — 다시 헤매지 말 것)
 
 ### L1. 단면(Clipping): **Section Box는 COM `ClippingPlanes()`에 없다** (가장 값진 교훈)
@@ -374,6 +441,15 @@ CREATE TABLE [Navis].[SubSystem_Master](
 
 ### L6. 미확정 규약은 **부분 지원 + 안전 fallback**
 - 관리형 박스 JSON에서 축정렬 박스(Rotation≈0)만 확정 처리하고, **회전 박스는 규약 미확정이라 null 반환(→ COM fallback)**. 잘못된 볼륨을 확신 없이 배포하지 않는다. 회전 포맷은 덤프 원본 JSON 확보 후 마무리.
+
+### L7. 케이블 형상 추출 — GenerateSimplePrimitives 실측 교훈
+- 케이블(`lcldrvm_container`)은 **Line 프리미티브**(스윕 튜브 wireframe), Triangle 아님.
+  **index 버퍼 없음**(de-indexed 명시 정점). 각 Line은 **독립 선분** — 순차로 이으면 형상
+  깨짐(가짜 선분). route 중심선 아니지만 clash엔 무관(긴 세로 레일이 볼륨 가로지름).
+- 정점은 **프래그먼트 로컬 좌표** — `GetLocalToWorldMatrix()`(병진 ~수십 m) 안 곱하면
+  원점 근처로 쏠림. 첫 덤프가 로컬이라 "형상이 route와 안 맞음"으로 드러남 → 변환 적용 후 해결.
+- L5 그대로: `Cable Vertex 진단`(선분 CSV 덤프)이 "Line vs Triangle · 좌표계 · index 유무"를
+  한 번에 확정. 추측 코드 대신 덤프 먼저.
 
 ## 개발 규칙
 
