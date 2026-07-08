@@ -74,7 +74,8 @@ namespace NavisVisualizer.UI
             _srcPanel.ExcelLoadClicked    += (s, e) => LoadExcel();
             _srcPanel.TemplateClicked     += (s, e) => ExportInputTemplate();
             _srcPanel.OasisLoadClicked    += (s, e) => LoadOasis();
-            _srcPanel.ActiveSourceChanged += (s, e) => ApplyActiveSourceData(reapply: _appliedOnce);
+            // 라디오 전환은 자동 재적용 안 함(§6) — 대형 모델 수 초 블로킹 방지. 색칠은 [적용] 시에만.
+            _srcPanel.ActiveSourceChanged += (s, e) => ApplyActiveSourceData(reapply: false);
             _srcPanel.CompareClicked      += (s, e) => ExportComparison();
 
             var datePanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 28, AutoSize = false };
@@ -340,6 +341,10 @@ namespace NavisVisualizer.UI
             _needsIndexRebuild = true;
             FilterList();
             UpdateStats();
+
+            // 색상이 이전 소스 기준으로 화면에 남아 있으면 경고 — 자동 재색칠은 안 함(§6).
+            if (!willReapply && _appliedOnce && _equipments.Count > 0)
+                _lblStats.Text = "⚠ 화면 색상은 이전 소스 기준 — [적용]을 눌러 새 소스로 갱신하세요";
 
             if (willReapply)
                 BtnApply_Click(null, EventArgs.Empty);
