@@ -108,13 +108,26 @@ namespace NavisVisualizer.Services
     /// </summary>
     public static class GeometryProbe
     {
-        public static string DumpItem(Document doc, ModelItem item, SectionService sec)
+        /// <summary>Result of probing one item — a human-readable summary plus the raw segments.</summary>
+        public class ProbeResult
         {
+            public string Summary = "";
+            public readonly List<double[]> Segments = new List<double[]>();  // {x1,y1,z1,x2,y2,z2}
+            public List<ClipPlane> Planes;                                   // active clip planes (may be null/empty)
+            public SectionService Sec;
+            public int LineCount, TriangleCount, PointCount, SnapCount, FragCount;
+            public string DisplayName = "";
+        }
+
+        public static ProbeResult Probe(Document doc, ModelItem item, SectionService sec)
+        {
+            var r = new ProbeResult { Sec = sec };
             var sb = new StringBuilder();
             sb.AppendLine("=== 선택 항목 형상(선분) 진단 — 월드 좌표 ===");
-            if (item == null) { sb.AppendLine("항목 없음."); return sb.ToString(); }
+            if (item == null) { sb.AppendLine("항목 없음."); r.Summary = sb.ToString(); return r; }
 
-            sb.AppendLine($"DisplayName : {item.DisplayName ?? "(none)"}");
+            r.DisplayName = item.DisplayName ?? "(none)";
+            sb.AppendLine($"DisplayName : {r.DisplayName}");
             sb.AppendLine($"ClassName   : {item.ClassName}");
             sb.AppendLine($"HasGeometry : {item.HasGeometry}");
 
@@ -149,6 +162,13 @@ namespace NavisVisualizer.Services
                 sb.AppendLine($"형상 추출 EXCEPTION: {inner.GetType().Name}: {inner.Message}");
             }
 
+            r.Segments.AddRange(collector.Segments);
+            r.LineCount = collector.LineCount;
+            r.TriangleCount = collector.TriangleCount;
+            r.PointCount = collector.PointCount;
+            r.SnapCount = collector.SnapCount;
+            r.FragCount = fragCount;
+
             sb.AppendLine();
             sb.AppendLine($"Fragments          : {fragCount}");
             sb.AppendLine($"Line(선분)         : {collector.LineCount}  → 확보 세그먼트 {collector.Segments.Count}");
@@ -157,33 +177,67 @@ namespace NavisVisualizer.Services
             sb.AppendLine($"coord 배열 len={collector.VertexArrayLen}, lowerBound={collector.VertexLowerBound}");
             sb.AppendLine();
             sb.AppendLine("※ 각 줄은 '독립 선분(pair)' — 연속 폴리라인으로 잇지 말 것 (스윕 튜브 wireframe).");
-            sb.AppendLine("※ clash엔 route 복원 불필요 — 아래 각 선분을 clip 박스와 slab test하면 됨.");
+            sb.AppendLine("※ clash엔 route 복원 불필요 — 각 선분을 clip 박스와 slab test하면 됨.");
+            sb.AppendLine("※ 전체 선분은 CSV 파일 참조 (팝업은 요약만).");
             sb.AppendLine();
 
-            List<ClipPlane> planes = null;
-            try { planes = sec?.GetActiveClipPlanes(doc); }
+            try { r.Planes = sec?.GetActiveClipPlanes(doc); }
             catch (Exception ex) { sb.AppendLine($"clip 평면 읽기 실패: {ex.Message}"); }
-            sb.AppendLine($"활성 clip 평면 수   : {(planes?.Count ?? 0)} (0이면 단면 없음/미인식)");
+            sb.AppendLine($"활성 clip 평면 수   : {(r.Planes?.Count ?? 0)} (0이면 단면 없음/미인식)");
             sb.AppendLine();
 
-            int cap = Math.Min(40, collector.Segments.Count);
-            sb.AppendLine($"[월드 좌표 선분 샘플 (최대 {cap} / 전체 {collector.Segments.Count})]");
+            int cap = Math.Min(40, r.Segments.Count);
+            sb.AppendLine($"[월드 좌표 선분 샘플 (최대 {cap} / 전체 {r.Segments.Count}) — 전체는 CSV]");
             for (int i = 0; i < cap; i++)
             {
-                var s = collector.Segments[i];
+                var s = r.Segments[i];
                 string mid = "";
-                if (planes != null && planes.Count > 0)
+                if (r.Planes != null && r.Planes.Count > 0)
                 {
                     var c = new Point3D((s[0] + s[3]) / 2, (s[1] + s[4]) / 2, (s[2] + s[5]) / 2);
-                    mid = sec.IsPointVisible(c, planes) ? "  [중점 clip 내부]" : "  [중점 clip 외부]";
+                    mid = sec.IsPointVisible(c, r.Planes) ? "  [중점 clip 내부]" : "  [중점 clip 외부]";
                 }
                 sb.AppendLine($"  seg{i,-3}: ({s[0]:0.###}, {s[1]:0.###}, {s[2]:0.###}) → ({s[3]:0.###}, {s[4]:0.###}, {s[5]:0.###}){mid}");
             }
-            if (collector.Segments.Count == 0)
+            if (r.Segments.Count == 0)
                 sb.AppendLine("  (세그먼트 0개 — geometry 없는 노드이거나 추출 실패. leaf를 선택했는지 확인)");
 
-            return sb.ToString();
+            r.Summary = sb.ToString();
+            return r;
         }
+
+        /// <summary>
+        /// One row per world-space segment (opens in Excel). Endpoints + segment length +
+        /// whether the segment's midpoint is inside the active clip volume.
+        /// </summary>
+        public static List<string> BuildSegmentCsv(ProbeResult r)
+        {
+            var lines = new List<string>();
+            bool hasClip = r?.Planes != null && r.Planes.Count > 0;
+            lines.Add("SegIndex,X1,Y1,Z1,X2,Y2,Z2,Length,MidInsideClip");
+            if (r == null) return lines;
+
+            for (int i = 0; i < r.Segments.Count; i++)
+            {
+                var s = r.Segments[i];
+                double dx = s[3] - s[0], dy = s[4] - s[1], dz = s[5] - s[2];
+                double len = Math.Sqrt(dx * dx + dy * dy + dz * dz);
+                string mid = "";
+                if (hasClip)
+                {
+                    var c = new Point3D((s[0] + s[3]) / 2, (s[1] + s[4]) / 2, (s[2] + s[5]) / 2);
+                    mid = r.Sec.IsPointVisible(c, r.Planes) ? "IN" : "OUT";
+                }
+                lines.Add(string.Format(
+                    "{0},{1:0.####},{2:0.####},{3:0.####},{4:0.####},{5:0.####},{6:0.####},{7:0.####},{8}",
+                    i, s[0], s[1], s[2], s[3], s[4], s[5], len, mid));
+            }
+            return lines;
+        }
+
+        /// <summary>Kept for callers that only want the text dump.</summary>
+        public static string DumpItem(Document doc, ModelItem item, SectionService sec)
+            => Probe(doc, item, sec).Summary;
 
         private static string F(Point3D p) => $"{p.X:0.###}, {p.Y:0.###}, {p.Z:0.###}";
 

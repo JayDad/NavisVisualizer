@@ -486,15 +486,28 @@ namespace NavisVisualizer.UI
                 }
 
                 var item = selection.First();
-                string dump = Services.GeometryProbe.DumpItem(doc, item, _main.SectionSvc);
+                var probe = Services.GeometryProbe.Probe(doc, item, _main.SectionSvc);
 
-                string outPath = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
-                    $"VertexDump_{DateTime.Now:yyyyMMdd_HHmmss}.txt");
-                File.WriteAllText(outPath, dump, System.Text.Encoding.UTF8);
+                string stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                string desktop = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
 
-                _lblStatus.Text = "Vertex dump saved";
-                MessageBox.Show($"{dump}\n\n저장: {outPath}", "Cable Vertex 진단",
+                // 전체 데이터는 파일로 (팝업은 스크롤이 없어 잘림).
+                string txtPath = Path.Combine(desktop, $"VertexDump_{stamp}.txt");
+                File.WriteAllText(txtPath, probe.Summary, System.Text.Encoding.UTF8);
+
+                string csvPath = Path.Combine(desktop, $"VertexDump_{stamp}.csv");
+                File.WriteAllLines(csvPath, Services.GeometryProbe.BuildSegmentCsv(probe),
+                    System.Text.Encoding.UTF8);
+
+                _lblStatus.Text = $"Vertex: seg {probe.Segments.Count}, CSV 저장";
+                MessageBox.Show(
+                    $"항목: {probe.DisplayName}\n"
+                    + $"Line {probe.LineCount} / Triangle {probe.TriangleCount} / "
+                    + $"Point {probe.PointCount}\n"
+                    + $"세그먼트 {probe.Segments.Count}개, 활성 clip 평면 {(probe.Planes?.Count ?? 0)}\n\n"
+                    + $"전체 선분 CSV:\n{csvPath}\n\n"
+                    + $"요약 TXT:\n{txtPath}",
+                    "Cable Vertex 진단",
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
