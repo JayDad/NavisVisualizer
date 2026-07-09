@@ -394,6 +394,100 @@ namespace NavisVisualizer.Loaders
             return result;
         }
 
+        /// <summary>
+        /// Cable(형상) 탭용 로드 — 한 행 = 한 케이블 (Cable Pull의 노드 다대다와 별개).
+        /// 헤더에 "Cable No"만 있으면 되고 "Node"는 필요 없다. stage 날짜(Pulling Start/End,
+        /// From/To Conn)가 있으면 날짜 기반 4단계, 전무하면 탭이 하이라이트 전용 모드로 전환한다.
+        /// 길이/%는 표시 전용 (§13-6 — PULLING LTH 의미 미확정이라 색에 안 씀).
+        /// </summary>
+        public static List<CableLineData> LoadCable(string filePath)
+        {
+            var cableHeaders = new[] { "Cable No", "Cable No.", "CableNo", "CABLE NO" };
+            var byCable = new Dictionary<string, CableLineData>(StringComparer.OrdinalIgnoreCase);
+            var order = new List<string>();
+
+            using (var stream = File.Open(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            using (var reader = ExcelReaderFactory.CreateReader(stream))
+            {
+                var dataSet = reader.AsDataSet();
+
+                System.Data.DataTable table = null;
+                int headerRowIdx = -1;
+                foreach (System.Data.DataTable dt in dataSet.Tables)
+                {
+                    int row = FindHeaderRowInTable(dt, cableHeaders);
+                    if (row >= 0) { table = dt; headerRowIdx = row; break; }
+                }
+
+                if (table == null || headerRowIdx < 0)
+                    throw new Exception("'Cable No' 헤더를 포함한 시트를 찾을 수 없습니다. (Cable 형상 입력 파일이 맞는지 확인하세요)");
+
+                var cols = BuildColumnMap(table, headerRowIdx);
+
+                int cableNoCol   = FindColumn(cols, cableHeaders);
+                int pullStartCol = FindColumn(cols, "Pulling Start", "PULLING START", "Pull Start", "Pulling Start Date");
+                int pullEndCol   = FindColumn(cols, "Pulling End", "PULLING END", "Pull End", "Pulling End Date");
+                int fromConnCol  = FindColumn(cols, "From Conn", "FROM CONN", "From Connection", "From Conn Date");
+                int toConnCol    = FindColumn(cols, "To Conn", "TO CONN", "To Connection", "To Conn Date");
+                int designLthCol = FindColumn(cols, "Cable Design Lth", "CableDesignLth", "Design Lth", "DESIGN LTH");
+                int pulledLthCol = FindColumn(cols, "Cable Pulled Lth", "CablePulledLth", "Pulling Lth", "PULLING LTH");
+                int pullingPctCol = FindColumn(cols, "Pulling %", "Pulling Percent", "PullingPercent", "Pulling Progress");
+                int fromModCol   = FindColumn(cols, "From Module", "FromModule", "FROM MODULE");
+                int fromEquipCol = FindColumn(cols, "From Equip", "FromEquip", "FROM EQUIP", "From Equipment");
+                int toModCol     = FindColumn(cols, "To Module", "ToModule", "TO MODULE");
+                int toEquipCol   = FindColumn(cols, "To Equip", "ToEquip", "TO EQUIP", "To Equipment");
+                int systemCol    = FindColumn(cols, "System", "SYSTEM", "Route Sys", "RouteSys");
+                int typeCol      = FindColumn(cols, "Type", "Cable Type", "CABLE_TYPE", "CableType");
+                int coreCol      = FindColumn(cols, "Core", "Cable Core", "CABLE_CORE", "CableCore");
+                int sizeCol      = FindColumn(cols, "Size", "Cable Size", "CABLE_SIZE", "CableSize");
+                int outDiaCol    = FindColumn(cols, "Out Dia", "OutDia", "OUT DIA", "Outer Dia");
+                int traySysCol   = FindColumn(cols, "Tray Sys", "TraySys", "TRAY SYS");
+                int routeCol     = FindColumn(cols, "Route", "ROUTE", "Route No");
+
+                if (cableNoCol < 0)
+                    throw new Exception("'Cable No' 컬럼을 찾을 수 없습니다.");
+
+                for (int r = headerRowIdx + 1; r < table.Rows.Count; r++)
+                {
+                    var row = table.Rows[r];
+                    string cableNo = row[cableNoCol]?.ToString()?.Trim();
+                    if (string.IsNullOrEmpty(cableNo)) continue;
+                    if (byCable.ContainsKey(cableNo)) continue;
+
+                    var c = new CableLineData
+                    {
+                        CableNo = cableNo,
+                        FromConnDate = fromConnCol >= 0 ? ParseCellValue(row[fromConnCol]) : null,
+                        ToConnDate   = toConnCol   >= 0 ? ParseCellValue(row[toConnCol]) : null,
+                        DesignLth       = designLthCol  >= 0 ? ParseDouble(row[designLthCol]) : null,
+                        PulledLth       = pulledLthCol  >= 0 ? ParseDouble(row[pulledLthCol]) : null,
+                        PullingProgress = pullingPctCol >= 0 ? ParsePercentage(row[pullingPctCol]) : null,
+                        FromModule = fromModCol   >= 0 ? row[fromModCol]?.ToString()?.Trim() ?? "" : "",
+                        FromEquip  = fromEquipCol >= 0 ? row[fromEquipCol]?.ToString()?.Trim() ?? "" : "",
+                        ToModule   = toModCol     >= 0 ? row[toModCol]?.ToString()?.Trim() ?? "" : "",
+                        ToEquip    = toEquipCol   >= 0 ? row[toEquipCol]?.ToString()?.Trim() ?? "" : "",
+                        System     = systemCol    >= 0 ? row[systemCol]?.ToString()?.Trim() ?? "" : "",
+                        Type       = typeCol      >= 0 ? row[typeCol]?.ToString()?.Trim() ?? "" : "",
+                        Core       = coreCol      >= 0 ? row[coreCol]?.ToString()?.Trim() ?? "" : "",
+                        Size       = sizeCol      >= 0 ? row[sizeCol]?.ToString()?.Trim() ?? "" : "",
+                        OutDia     = outDiaCol    >= 0 ? row[outDiaCol]?.ToString()?.Trim() ?? "" : "",
+                        TraySys    = traySysCol   >= 0 ? row[traySysCol]?.ToString()?.Trim() ?? "" : "",
+                        Route      = routeCol     >= 0 ? row[routeCol]?.ToString()?.Trim() ?? "" : "",
+                    };
+                    c.StageDates[CableLineStage.Pulling] = pullStartCol >= 0 ? ParseCellValue(row[pullStartCol]) : null;
+                    c.StageDates[CableLineStage.Pulled]  = pullEndCol   >= 0 ? ParseCellValue(row[pullEndCol]) : null;
+                    c.ComputeTerminated();
+
+                    byCable[cableNo] = c;
+                    order.Add(cableNo);
+                }
+            }
+
+            var result = new List<CableLineData>(order.Count);
+            foreach (var k in order) result.Add(byCable[k]);
+            return result;
+        }
+
         #region Shared helpers
 
         private static Dictionary<string, int> BuildColumnMap(System.Data.DataTable table, int headerRowIdx)

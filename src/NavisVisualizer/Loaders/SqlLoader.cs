@@ -234,18 +234,97 @@ FROM [Navis].[SubSystem_Master]";
             return masters;
         }
 
+        // ------------------------------------------------------------
+        // EIT Tray  ←  [Navis].[EIT_Tray]
+        // ------------------------------------------------------------
+
+        /// <summary>
+        /// EIT Tray 진척 로드 ([Navis].[EIT_Tray] — BRANCH NO./TRAY Install %/PJTNO).
+        /// 이 테이블엔 날짜 컬럼이 없어(§9) 기준일 필터 불가 — % 기반 현재상태 판정
+        /// (EitTrayData.GetStage가 InstallProgress만 씀). BRANCH NO.의 선행 '/'는
+        /// 매칭 시 NormalizeId가 제거하므로 원시 그대로 보관. 프로젝트 컬럼 = PJTNO.
+        /// </summary>
+        public static List<EitTrayData> LoadEitTray(SqlConnectionSettings settings)
+        {
+            const string baseSql = @"
+SELECT [BRANCH NO.],[TRAY Install %]
+FROM [Navis].[EIT_Tray]";
+
+            var trays = new List<EitTrayData>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            ExecuteReader(settings, baseSql, "PJTNO", r =>
+            {
+                string trayNo = GetString(r, "BRANCH NO.");
+                if (string.IsNullOrEmpty(trayNo) || !seen.Add(trayNo)) return;
+
+                trays.Add(new EitTrayData
+                {
+                    TrayNumber = trayNo,
+                    InstallProgress = GetPercentage(r, "TRAY Install %"),
+                });
+            });
+
+            return trays;
+        }
+
+        // ------------------------------------------------------------
+        // Cable(형상)  ←  [Navis].[EIT_Cable]   (Phase 2 — 컬럼 철자 실측 검증 후 활성)
+        // ------------------------------------------------------------
+
+        /// <summary>
+        /// Cable(형상) 탭용 OASIS 로드. **주의**: 아래 컬럼 브래킷 철자는 docs가 못 박지 않았다
+        /// (§13-Phase2). explicit SELECT는 컬럼명이 틀리면 SQL Server가 throw하므로, 실 스키마로
+        /// 철자를 확인하기 전에는 이 메서드를 UI에 배선하지 말 것. EIT_Cable엔 프로젝트 컬럼이
+        /// 없어(§9) projectColumn=null → WHERE 생략. PULLING LTH 의미(실적/발주) 미확정이라
+        /// 길이·%는 표시 전용, stage 색엔 안 씀(§13-6). 날짜(PULLING START/END, FROM/TO CONN)만 stage.
+        /// </summary>
+        public static List<CableLineData> LoadCable(SqlConnectionSettings settings)
+        {
+            const string baseSql = @"
+SELECT [CABLE NO],[PULLING START],[PULLING END],[FROM CONN],[TO CONN],
+       [DESIGN LTH],[PULLING LTH]
+FROM [Navis].[EIT_Cable]";
+
+            var cables = new List<CableLineData>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            ExecuteReader(settings, baseSql, null, r =>
+            {
+                string cableNo = GetString(r, "CABLE NO");
+                if (string.IsNullOrEmpty(cableNo) || !seen.Add(cableNo)) return;
+
+                var c = new CableLineData
+                {
+                    CableNo = cableNo,
+                    FromConnDate = GetDate(r, "FROM CONN"),
+                    ToConnDate   = GetDate(r, "TO CONN"),
+                    DesignLth    = GetDouble(r, "DESIGN LTH"),
+                    PulledLth    = GetDouble(r, "PULLING LTH"),   // 표시 전용 (의미 미확정)
+                };
+                c.StageDates[CableLineStage.Pulling] = GetDate(r, "PULLING START");
+                c.StageDates[CableLineStage.Pulled]  = GetDate(r, "PULLING END");
+                c.ComputeTerminated();
+                cables.Add(c);
+            });
+
+            return cables;
+        }
+
         #region Shared helpers
 
         /// <summary>
         /// baseSql에 프로젝트 필터(WHERE [projectColumn] = @prj)를 조건부로 붙여 실행하고
         /// 행마다 rowHandler를 호출한다. projectColumn은 테이블마다 다르다
-        /// (EQ 계열 PJTNO / Piping 계열 PRJTNO).
+        /// (EQ 계열 PJTNO / Piping 계열 PRJTNO). projectColumn이 null/빈 문자열이면
+        /// (EIT_Cable처럼 프로젝트 컬럼이 없는 테이블) ProjectNo가 설정돼 있어도 WHERE를 생략한다.
         /// </summary>
         private static void ExecuteReader(SqlConnectionSettings settings, string baseSql,
             string projectColumn, Action<IDataRecord> rowHandler)
         {
             string sql = baseSql;
-            bool filter = !string.IsNullOrWhiteSpace(settings.ProjectNo);
+            bool filter = !string.IsNullOrWhiteSpace(settings.ProjectNo)
+                && !string.IsNullOrWhiteSpace(projectColumn);
             if (filter)
                 sql += $"\nWHERE [{projectColumn}] = @prj";
 
@@ -282,6 +361,42 @@ FROM [Navis].[SubSystem_Master]";
                 return int.TryParse(v.ToString().Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out int parsed)
                     ? parsed : (int?)null;
             }
+        }
+
+        /// <summary>실수 컬럼. typed 숫자는 그대로, varchar는 InvariantCulture 파싱. 실패 시 null.</summary>
+        private static double? GetDouble(IDataRecord r, string column)
+        {
+            object v = r[column];
+            if (v == null || v == DBNull.Value) return null;
+            if (v is double d) return d;
+            if (v is float f) return f;
+            if (v is int i) return i;
+            if (v is long l) return l;
+            if (v is decimal m) return (double)m;
+            return double.TryParse(v.ToString().Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out double parsed)
+                ? parsed : (double?)null;
+        }
+
+        /// <summary>
+        /// 퍼센트 컬럼 → 0.0~1.0. ExcelLoader.ParsePercentage와 동일 휴리스틱:
+        /// 숫자 0~100 스케일(85)이면 /100, 0~1 스케일(0.85)이면 그대로, "85%" 문자열도 처리(§2.2).
+        /// 스케일 오판 시 전 트레이가 설치완료/미착수로 오도되므로 전 분기를 명시.
+        /// </summary>
+        private static double? GetPercentage(IDataRecord r, string column)
+        {
+            object v = r[column];
+            if (v == null || v == DBNull.Value) return null;
+            if (v is double d) return d > 1.0 ? d / 100.0 : d;
+            if (v is float f) return f > 1.0f ? f / 100.0 : f;
+            if (v is int i) return i > 1 ? i / 100.0 : i;
+            if (v is long l) return l > 1 ? l / 100.0 : l;
+            if (v is decimal m) { double dv = (double)m; return dv > 1.0 ? dv / 100.0 : dv; }
+            string s = v.ToString().Trim();
+            if (string.IsNullOrEmpty(s)) return null;
+            bool hasPct = s.EndsWith("%");
+            if (hasPct) s = s.Substring(0, s.Length - 1).Trim();
+            if (!double.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out double parsed)) return null;
+            return hasPct || parsed > 1.0 ? parsed / 100.0 : parsed;
         }
 
         /// <summary>

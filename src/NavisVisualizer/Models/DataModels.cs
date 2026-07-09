@@ -178,6 +178,19 @@ namespace NavisVisualizer.Models
                 [CableStage.Completed]  = new ColorSetting { DisplayColor = Color.FromArgb(0, 128, 0),     Transparency = 0.0 },
             };
 
+        public static Dictionary<CableLineStage, ColorSetting> CableLineDefaults =>
+            new Dictionary<CableLineStage, ColorSetting>
+            {
+                [CableLineStage.NotStarted] = new ColorSetting { DisplayColor = Color.FromArgb(169, 169, 169), Transparency = 0.7 },
+                [CableLineStage.Pulling]    = new ColorSetting { DisplayColor = Color.FromArgb(255, 215, 0),   Transparency = 0.0 },
+                [CableLineStage.Pulled]     = new ColorSetting { DisplayColor = Color.FromArgb(65, 105, 225),  Transparency = 0.0 },
+                [CableLineStage.Terminated] = new ColorSetting { DisplayColor = Color.FromArgb(0, 128, 0),     Transparency = 0.0 },
+            };
+
+        /// <summary>'하이라이트 우선' 모드(stage 날짜 없는 맨 목록)에서 매칭 케이블을 칠하는 단색.</summary>
+        public static ColorSetting CableLineHighlight =>
+            new ColorSetting { DisplayColor = Color.FromArgb(255, 90, 0), Transparency = 0.0 };
+
         public static Dictionary<ProgressStatus, ColorSetting> ProgressDefaults =>
             new Dictionary<ProgressStatus, ColorSetting>
             {
@@ -661,5 +674,110 @@ namespace NavisVisualizer.Models
         public string TraySys { get; set; }
         public double? RouteDesignLth { get; set; } // separate "Design Lth" col
         public string LayerCode { get; set; }
+    }
+
+    // ============================================================
+    // Cable (형상 중심 — 07_Trion_All_Cable.nwd의 cable-no 컴포넌트를 직접 매칭)
+    // 기존 Cable Pull(노드/박스 집계)과 별개. 한 행 = 한 케이블.
+    // ============================================================
+
+    /// <summary>
+    /// 케이블 1가닥의 진척 단계. 날짜 역순 스캔(GetStageAtDate) — 다른 공종과 동일.
+    /// Terminated(결선완료) = FROM CONN·TO CONN 둘 다 있을 때 (부분 결선을 완료로 안 찍음).
+    /// </summary>
+    public enum CableLineStage
+    {
+        NotStarted, // 0  착수 전
+        Pulling,    // 1  포설중 (PULLING START)
+        Pulled,     // 2  포설완료 (PULLING END)
+        Terminated, // 3  결선완료 (FROM CONN AND TO CONN)
+    }
+
+    public static class CableLineStageInfo
+    {
+        public static readonly CableLineStage[] OrderedStages =
+        {
+            CableLineStage.Pulling, CableLineStage.Pulled, CableLineStage.Terminated
+        };
+
+        public static readonly Dictionary<CableLineStage, string> Labels = new Dictionary<CableLineStage, string>
+        {
+            [CableLineStage.NotStarted] = "미착수",
+            [CableLineStage.Pulling]    = "포설중",
+            [CableLineStage.Pulled]     = "포설완료",
+            [CableLineStage.Terminated] = "결선완료",
+        };
+    }
+
+    /// <summary>
+    /// 케이블 1가닥 (형상 탭). 매칭 키 = Cable No (컴포넌트 DisplayName). 진척은 stage 날짜
+    /// 역순 스캔. 길이/%는 표시 전용(§13-6 — PULLING LTH 의미 미확정이라 색에 안 씀).
+    /// stage 날짜가 하나도 없으면(맨 목록) 탭이 '하이라이트 우선' 모드로 전환한다.
+    /// </summary>
+    public class CableLineData
+    {
+        public string CableNo { get; set; }   // Match key
+        public Dictionary<CableLineStage, DateTime?> StageDates { get; set; }
+            = new Dictionary<CableLineStage, DateTime?>();
+
+        // 원시 결선 실적일 (상세/툴팁용). Terminated 계산은 둘 다 있을 때만.
+        public DateTime? FromConnDate { get; set; }
+        public DateTime? ToConnDate { get; set; }
+
+        // 표시 전용
+        public double? DesignLth { get; set; }
+        public double? PulledLth { get; set; }
+        public double? PullingProgress { get; set; }  // 0.0-1.0 (표시 전용)
+        public string FromModule { get; set; }
+        public string FromEquip { get; set; }
+        public string ToModule { get; set; }
+        public string ToEquip { get; set; }
+        public string System { get; set; }
+        public string Type { get; set; }
+        public string Core { get; set; }
+        public string Size { get; set; }
+        public string OutDia { get; set; }
+        public string TraySys { get; set; }
+        public string Route { get; set; }
+
+        /// <summary>stage 날짜가 하나라도 있는가 — 없으면 하이라이트 전용 모드.</summary>
+        public bool HasAnyStageDate
+        {
+            get
+            {
+                foreach (var kv in StageDates)
+                    if (kv.Value.HasValue) return true;
+                return false;
+            }
+        }
+
+        public CableLineStage GetStageAtDate(DateTime referenceDate)
+        {
+            var stages = CableLineStageInfo.OrderedStages;
+            for (int i = stages.Length - 1; i >= 0; i--)
+            {
+                if (StageDates.TryGetValue(stages[i], out var date) && date.HasValue && date.Value.Date <= referenceDate.Date)
+                    return stages[i];
+            }
+            return CableLineStage.NotStarted;
+        }
+
+        /// <summary>결선완료 = FROM CONN·TO CONN 둘 다 있을 때 Max(둘). StageDates[Terminated]에 세팅.</summary>
+        public void ComputeTerminated()
+        {
+            if (FromConnDate.HasValue && ToConnDate.HasValue)
+                StageDates[CableLineStage.Terminated] =
+                    FromConnDate.Value >= ToConnDate.Value ? FromConnDate : ToConnDate;
+        }
+
+        /// <summary>
+        /// 모델 인덱스는 DisplayName 선행 '/' 제거 + 대문자 정규화로 키를 만든다.
+        /// Excel/OASIS Cable No도 동일 정규화 후 조회 (Windows 실측: 장식 문자 있으면 여기 확장).
+        /// </summary>
+        public static string NormalizeCableNo(string id)
+        {
+            if (string.IsNullOrEmpty(id)) return "";
+            return id.TrimStart('/').Trim();
+        }
     }
 }

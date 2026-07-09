@@ -90,6 +90,24 @@ namespace NavisVisualizer.Loaders
                 "ELEC", "PWR", "3C", "95SQ", "32", "T1", "115", "L2",
             });
 
+        public static string ExportCable() => Write("Cable_Input_Template",
+            new[]
+            {
+                // 한 행 = 한 케이블 (형상 탭). Cable No만 필수 — 나머지 비우면 하이라이트 전용 모드.
+                // ExcelLoader.LoadCable의 FindColumn 후보와 1:1 (바꾸면 여기도 갱신).
+                "Cable No", "Pulling Start", "Pulling End", "From Conn", "To Conn",
+                "Cable Design Lth", "Cable Pulled Lth", "Pulling %",
+                "From Module", "From Equip", "To Module", "To Equip",
+                "System", "Type", "Core", "Size", "Out Dia", "Tray Sys", "Route",
+            },
+            new[]
+            {
+                "CB-52101-001", "2026-04-01", "2026-04-03", "2026-04-05", "2026-04-06",
+                "120", "80", "67%",
+                "CM", "SWBD-01", "SM", "MCC-03",
+                "PWR", "PWR", "3C", "95SQ", "32", "T1", "LQ_LT_IN_LV1048",
+            });
+
         private static string Write(string baseName, string[] header, string[] sample)
         {
             string path = Path.Combine(

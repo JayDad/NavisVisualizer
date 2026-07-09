@@ -474,6 +474,66 @@ CREATE TABLE [Navis].[SubSystem_Master](
 - 검증: 좌표/단위 일치(COM 정점 ↔ 볼륨 공간), 회전 프래그먼트 행렬 규약, coord 0/1-based,
   wireframe 세로 레일 존재 가정.
 
+### 13. Cable(형상) 탭 재정향 + Tray 탭 OASIS 연결 (구현됨 — Windows 검증 대기)
+
+> 사용자 결정(2026-07): 아래 6개 결정 전부 추천대로 확정 → 한 번에 구현.
+> **(A) 케이블 형상 중심 Cable 탭**(신설 `CableLineTab` — `07_Trion_All_Cable.nwd`의 cable-no
+> 컴포넌트를 직접 매칭·하이라이트·단면 clash) + **(B) EIT nwd 전용 Tray 탭**(기존 `EitTrayTab`에
+> OASIS 연결·§10·3행 버튼 마무리). "Windows 실측" 표시 항목은 리눅스 컴파일 불가라 실기 검증 후 확신 가능.
+
+**확정 결정**
+1. 기존 노드/박스 `Cable Pull` 탭 = **유지·개명** (`Cable(Node)`). DB(EIT_Route)가 홉순서·NodeId
+   맵이 없어 노드 route 재구성 불가 → 노드 탭만 하는 일이 남음. 신규는 `Cable(형상)`.
+2. 형상 탭 stage = **신규 enum `CableLineStage`** 별도 정의(레거시 `CableStage` 불변 — 재정의는
+   `CableDefaults`·`ApplyCable`·노드탭을 깸).
+3. clash(단면 통과) 출력 = **리스트 + CSV만**(3D 색칠 안 함 — §7 "집계는 좁혔는데 색은 전체" 방지).
+4. 겹침 완화 기본 = **숨김 기반 isolate**(2만 케이블에서 투명 dim은 프레임레이트 붕괴 — SpoolTab 실측).
+5. Tray = **OASIS 듀얼소스 추가**(DataSourcePanel, Excel↔OASIS).
+6. OASIS 진척 색 배선 = **Excel 우선**. `EIT_Cable`의 `PULLING LTH`/`FROM·TO CONN` 날짜가 실적/계획
+   미확정이라 길이·%는 색에 배선 안 함(표시 전용). 데이터 오너 확정 후 stage 날짜 배선.
+
+**핵심 통찰**: 형상 재정향이 EIT_Cable DB 차단(§9 "노드 route 부재")을 무관화 — cable-no를 컴포넌트에
+직접 매칭하므로 노드 route가 애초에 불필요. Tray는 신규가 아니라 완성(기존 EitTrayTab이 이미 EIT
+스코프·Install% 3단계).
+
+**Cable(형상) 탭 아키텍처**
+- **매칭**: 신규 `CableLineSearcher`(7번째 `ModelItemSearcher`) — `BuildIndexForTags(cableNoSet,
+  NwdScope.Cable)` 레벨 타겟(2만 케이블은 스풀 규모 → general walk 자식 스캔 비용 회피). `CableBoxSearcher`
+  재사용 불가(box 인덱스는 `-BOX` 접두 키). `NwdScope.Cable`(키워드 "CABLE") 재사용. 소스 전환 시
+  `_needsIndexRebuild`(레벨 타겟은 태그 셋 기반, Spool 패턴).
+- **Stage**: 날짜 기반 4단계 `미착수/포설중/포설완료/결선완료`(`GetStageAtDate` 역순 스캔). Pulling=PULLING
+  START, Pulled=PULLING END, Terminated=`FROM CONN`·`TO CONN` **둘 다** 있을 때 Max(AND 게이트).
+  **하이라이트 우선 모드**: 로드 데이터에 stage 날짜가 전무하면(맨 Excel 목록) stage 계산 우회 →
+  매칭 케이블을 단색 solid 하이라이트로 칠함(안 그러면 전 케이블이 미착수=70% 투명 회색 = 하이라이트 반대).
+- **clash**: 신규 `Services/CableClashService` — 케이블 world 세그먼트 **형상만 캐시**(모델당 정적, doc-id
+  무효화), 판정은 매 [적용]마다 live `GetActiveClipPlanes`로 재계산(L2). AABB pre-cull + Cyrus–Beck
+  세그먼트-vs-반평면(축정렬 박스 6반평면 + Planes 모드 한 구현). `GeometryProbe.ExtractWorldSegments`
+  분리(컨테이너→geometry leaf 하강). ScopeFilter의 ClippingVolume 분기에 cableNo-keyed volume-judge
+  델리게이트 주입(타 탭 null → BoundingBox 중점 유지). `이 단면 지나가는 케이블 추출` 버튼 + scope-aware CSV.
+- **겹침 완화 UX**: 3행 버튼(가시화/초기화/출력). `체크 단계 외 숨김`·`선택 케이블만 보기`(SetHidden isolate,
+  상호배타), `필터 포커스`(투명 dim, 작은 히트셋만). List↔3D 양방향 선택 sync(조상 walk로 cable-no 해석).
+- **§10**: `VisualModule.CableLine` 신규 멤버(레거시 `Cable`과 캐시 충돌 방지). `ApplyCableLines`는 처음부터
+  ResetModule/AccumulatePainted 채택. focus·isolate는 override/hide라 AccumulatePainted가 안 잡으므로
+  ResetModule 전에 별도 해제.
+
+**Tray 탭 마무리 (재작성 아님)**
+- `EitTrayTab`에 `DataSourcePanel`(Excel↔OASIS) + `SqlLoader.LoadEitTray`(`[Navis].[EIT_Tray]` —
+  `BRANCH NO.`/`TRAY Install %`/`PJTNO`, **날짜 컬럼 없음 → %기반 현재상태**, `dtpReference` 비활성 유지).
+  `%` 스케일 파서(`85`/`0.85`/`"85%"`→0.85) 필수(§2.2). SourceComparer는 Stage/Install%만 diff.
+- `ApplyEit`에 §10 ResetModule/AccumulatePainted 이식(재적용 누적 버그) + `cache.Clear()` 유지.
+- 3행 버튼(`체크 단계 외 숨김`·`공종 초기화`) + 낡은 주석(`Cable 포설중`) 삭제.
+
+**Windows 검증 게이트(착수 직후)**
+1. **[최우선]** cable 컴포넌트 DisplayName이 Excel/OASIS CABLE NO와 trim/case 후 정확 일치인가(장식
+   문자 있으면 레벨 타겟 0 매칭 → `NormalizeCableNo` 추가). Tools `Cable Vertex 진단`으로 실 DisplayName 덤프.
+2. 케이블 모델링 깊이 단일/혼재(레벨 타겟은 첫 깊이만 — 혼재 시 일부 미색칠, general walk 베이스라인과 대조).
+3. 좌표/단위 일치(추출 world 세그 ↔ clip-box JSON) — 덤프 `AnySegmentClips` 열로 술어 calibration.
+4. 컨테이너 vs leaf 하강 깊이. 회전 박스는 `GetActiveClipPlanes` null→COM fallback(축정렬만 우선).
+5. `TRAY Install %` 스케일·`PJTNO` 필터, 선택 sync `HashSet<ModelItem>` 동등성(§7 미검증).
+
+**Phase**: 0(진단 refactor·DisplayName 실측) → 1(Excel-only 출하: 형상 탭·clash·Tray 마무리) →
+2(OASIS 로더 `LoadCable`/`LoadEitTray`·회전 박스). `LoadCable` 컬럼 브래킷 철자는 실 스키마 검증 후 활성.
+
 ## 레슨런 (하드 트러블슈팅 기록 — 다시 헤매지 말 것)
 
 ### L1. 단면(Clipping): **Section Box는 COM `ClippingPlanes()`에 없다** (가장 값진 교훈)

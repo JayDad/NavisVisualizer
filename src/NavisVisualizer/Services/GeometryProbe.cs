@@ -184,6 +184,15 @@ namespace NavisVisualizer.Services
             try { r.Planes = sec?.GetActiveClipPlanes(doc); }
             catch (Exception ex) { sb.AppendLine($"clip 평면 읽기 실패: {ex.Message}"); }
             sb.AppendLine($"활성 clip 평면 수   : {(r.Planes?.Count ?? 0)} (0이면 단면 없음/미인식)");
+            // 실제 clash 술어(Cyrus–Beck 세그먼트-vs-반평면)로 이 항목이 단면을 통과하는지 —
+            // 중점 점판정(아래 샘플/CSV)과 대조해 좌표·단위·부호를 calibration (§13 게이트 3).
+            if (sec != null && r.Planes != null && r.Planes.Count > 0)
+            {
+                bool anyClip = false;
+                foreach (var s in r.Segments)
+                    if (ClashMath.SegmentInsideVolume(s, r.Planes, sec.KeepPositiveSide)) { anyClip = true; break; }
+                sb.AppendLine($"AnySegmentClips(Cyrus–Beck) : {(anyClip ? "IN — 이 형상은 단면 통과" : "OUT")}");
+            }
             sb.AppendLine();
 
             int cap = Math.Min(40, r.Segments.Count);
@@ -214,7 +223,9 @@ namespace NavisVisualizer.Services
         {
             var lines = new List<string>();
             bool hasClip = r?.Planes != null && r.Planes.Count > 0;
-            lines.Add("SegIndex,X1,Y1,Z1,X2,Y2,Z2,Length,MidInsideClip");
+            // MidInsideClip = 중점 점판정, SegClips = 실제 clash 술어(Cyrus–Beck 세그먼트) —
+            // 둘을 나란히 두면 중점 밖인데 관통하는 케이스(SegClips=IN,Mid=OUT)를 바로 확인.
+            lines.Add("SegIndex,X1,Y1,Z1,X2,Y2,Z2,Length,MidInsideClip,SegClips");
             if (r == null) return lines;
 
             for (int i = 0; i < r.Segments.Count; i++)
@@ -222,15 +233,16 @@ namespace NavisVisualizer.Services
                 var s = r.Segments[i];
                 double dx = s[3] - s[0], dy = s[4] - s[1], dz = s[5] - s[2];
                 double len = Math.Sqrt(dx * dx + dy * dy + dz * dz);
-                string mid = "";
+                string mid = "", seg = "";
                 if (hasClip)
                 {
                     var c = new Point3D((s[0] + s[3]) / 2, (s[1] + s[4]) / 2, (s[2] + s[5]) / 2);
                     mid = r.Sec.IsPointVisible(c, r.Planes) ? "IN" : "OUT";
+                    seg = ClashMath.SegmentInsideVolume(s, r.Planes, r.Sec.KeepPositiveSide) ? "IN" : "OUT";
                 }
                 lines.Add(string.Format(
-                    "{0},{1:0.####},{2:0.####},{3:0.####},{4:0.####},{5:0.####},{6:0.####},{7:0.####},{8}",
-                    i, s[0], s[1], s[2], s[3], s[4], s[5], len, mid));
+                    "{0},{1:0.####},{2:0.####},{3:0.####},{4:0.####},{5:0.####},{6:0.####},{7:0.####},{8},{9}",
+                    i, s[0], s[1], s[2], s[3], s[4], s[5], len, mid, seg));
             }
             return lines;
         }
@@ -238,6 +250,49 @@ namespace NavisVisualizer.Services
         /// <summary>Kept for callers that only want the text dump.</summary>
         public static string DumpItem(Document doc, ModelItem item, SectionService sec)
             => Probe(doc, item, sec).Summary;
+
+        /// <summary>
+        /// Extract a matched item's geometry as world-space LINE segments for the cable clash
+        /// (CableClashService). Unlike <see cref="Probe"/> (which runs on the exact selected
+        /// item), this DESCENDS to every geometry-bearing descendant so a cable-no match that
+        /// resolves to a CONTAINER still yields its swept-tube wireframe segments — otherwise
+        /// GenerateSimplePrimitives on the container hands back nothing and clash silently fails.
+        /// Never throws; returns whatever segments extracted.
+        /// </summary>
+        public static List<double[]> ExtractWorldSegments(ModelItem root)
+        {
+            var collector = new PrimitiveCollector { SegmentCap = 200000 };
+            ExtractInto(root, collector, 0);
+            return collector.Segments;
+        }
+
+        private static void ExtractInto(ModelItem item, PrimitiveCollector collector, int depth)
+        {
+            if (item == null || depth > 30) return;
+            if (item.HasGeometry)
+                ExtractFragments(item, collector);
+            foreach (var child in item.Children)
+                ExtractInto(child, collector, depth + 1);
+        }
+
+        private static void ExtractFragments(ModelItem leaf, PrimitiveCollector collector)
+        {
+            try
+            {
+                dynamic path = ComApiBridge.ToInwOaPath(leaf);
+                dynamic frags = path.Fragments();
+                foreach (dynamic frag in frags)
+                {
+                    double[] m = ReadMatrix((object)frag);
+                    collector.SetMatrix(m);
+                    frag.GenerateSimplePrimitives(nwEVertexProperty.eNORMAL, collector);
+                }
+            }
+            catch
+            {
+                // Best-effort per leaf — a fragment that won't extract just contributes nothing.
+            }
+        }
 
         private static string F(Point3D p) => $"{p.X:0.###}, {p.Y:0.###}, {p.Z:0.###}";
 
