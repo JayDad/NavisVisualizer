@@ -185,49 +185,51 @@ FROM [Navis].[Mech_EQ]";
         }
 
         /// <summary>
-        /// Sub-system 마스터 로드 ([Navis].[SubSystem_Master] — 계약은 CLAUDE.md 11번).
-        /// 마일스톤 날짜(Walkdown/Partial MCC/MCC/PCC — 별도 RFCC 없음, MCC 계열이
-        /// Ready for Commissioning 의미) + A/B/C-ITR·A/B Punch 수치(각 Total+완료/종결).
-        /// 테이블이 아직 없으면 SQL Server가 예외를 던진다 — 호출부(SubSystemTab)가
-        /// 잡아서 "마스터 미구성" fallback(요소 파생 목록)으로 전환한다.
+        /// Sub-system 마스터 로드 ([Navis].[System_Summary] — 실측 스키마 2026-07 확정,
+        /// 구 SubSystem_Master 계약 대체). 마일스톤 실적일(WD/Partial MCC/MCC/PCC Actual —
+        /// 별도 RFCC 없음, MCC 계열이 Ready for Commissioning 의미) + MCC Plan(지연 판정 기준)
+        /// + A/B/C-ITR·A/B Punch 수치(각 Total+Complete/Closed).
+        /// 미사용 컬럼: Area/System/System Des(그룹핑 확장 후보), PCC Plan/MCC Fcst(계획·예측),
+        /// %계열(Total/Complete 수치로 충분). 테이블이 아직 없으면 SQL Server가 예외를 던진다 —
+        /// 호출부(SubSystemTab)가 잡아서 "마스터 미구성" fallback(요소 파생 목록)으로 전환한다.
         /// </summary>
         public static List<SubSystemMasterData> LoadSubSystemMaster(SqlConnectionSettings settings)
         {
             const string baseSql = @"
-SELECT [SUB-SYSTEM],[DESCRIPTION],
-       [MCC Plan],[Walkdown],[Partial MCC],[MCC],[PCC],
-       [A-ITR TOTAL],[A-ITR DONE],[B-ITR TOTAL],[B-ITR DONE],[C-ITR TOTAL],[C-ITR DONE],
-       [PUNCH A TOTAL],[PUNCH A CLOSED],[PUNCH B TOTAL],[PUNCH B CLOSED]
-FROM [Navis].[SubSystem_Master]";
+SELECT [Sub-System],[Sub-System Des],
+       [MCC Plan],[WD Actual],[Partial MCC Actual],[MCC Actual],[PCC Actual],
+       [A-ITR Total],[A-ITR Complete],[B-ITR Total],[B-ITR Complete],[C-ITR Total],[C-ITR Complete],
+       [A Punch Total],[A Punch Closed],[B Punch Total],[B Punch Closed]
+FROM [Navis].[System_Summary]";
 
             var masters = new List<SubSystemMasterData>();
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             ExecuteReader(settings, baseSql, "PJTNO", r =>
             {
-                string no = GetString(r, "SUB-SYSTEM");
+                string no = GetString(r, "Sub-System");
                 if (string.IsNullOrEmpty(no) || !seen.Add(no)) return;
 
                 var m = new SubSystemMasterData
                 {
                     SubSystemNo = no,
-                    Description = GetString(r, "DESCRIPTION"),
+                    Description = GetString(r, "Sub-System Des"),
                     MccPlan      = GetDate(r, "MCC Plan"),
-                    ItrATotal    = GetInt(r, "A-ITR TOTAL"),
-                    ItrADone     = GetInt(r, "A-ITR DONE"),
-                    ItrBTotal    = GetInt(r, "B-ITR TOTAL"),
-                    ItrBDone     = GetInt(r, "B-ITR DONE"),
-                    ItrCTotal    = GetInt(r, "C-ITR TOTAL"),
-                    ItrCDone     = GetInt(r, "C-ITR DONE"),
-                    PunchATotal  = GetInt(r, "PUNCH A TOTAL"),
-                    PunchAClosed = GetInt(r, "PUNCH A CLOSED"),
-                    PunchBTotal  = GetInt(r, "PUNCH B TOTAL"),
-                    PunchBClosed = GetInt(r, "PUNCH B CLOSED"),
+                    ItrATotal    = GetInt(r, "A-ITR Total"),
+                    ItrADone     = GetInt(r, "A-ITR Complete"),
+                    ItrBTotal    = GetInt(r, "B-ITR Total"),
+                    ItrBDone     = GetInt(r, "B-ITR Complete"),
+                    ItrCTotal    = GetInt(r, "C-ITR Total"),
+                    ItrCDone     = GetInt(r, "C-ITR Complete"),
+                    PunchATotal  = GetInt(r, "A Punch Total"),
+                    PunchAClosed = GetInt(r, "A Punch Closed"),
+                    PunchBTotal  = GetInt(r, "B Punch Total"),
+                    PunchBClosed = GetInt(r, "B Punch Closed"),
                 };
-                m.StageDates[SubSystemStage.Walkdown]   = GetDate(r, "Walkdown");
-                m.StageDates[SubSystemStage.PartialMcc] = GetDate(r, "Partial MCC");
-                m.StageDates[SubSystemStage.Mcc]        = GetDate(r, "MCC");
-                m.StageDates[SubSystemStage.Pcc]        = GetDate(r, "PCC");
+                m.StageDates[SubSystemStage.Walkdown]   = GetDate(r, "WD Actual");
+                m.StageDates[SubSystemStage.PartialMcc] = GetDate(r, "Partial MCC Actual");
+                m.StageDates[SubSystemStage.Mcc]        = GetDate(r, "MCC Actual");
+                m.StageDates[SubSystemStage.Pcc]        = GetDate(r, "PCC Actual");
                 masters.Add(m);
             });
 

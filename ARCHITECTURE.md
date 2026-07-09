@@ -84,9 +84,9 @@ Excel (.xlsx/.xls/.xlsb)          OASIS SQL Server ([Navis] 스키마)
   Sub-system 축으로 감싼다 (`SqlLoader.LoadSubSystemElements`). Equipment `SUB-SYSTEM`→TAG NO,
   Piping `Sub-System`→PKGNO. Sub-system 미지정 행은 제외(건수 보고). PKG 노드 색칠이
   하위 스풀/배관을 커버하므로 배관은 PKG 단위로 충분
-- **Sub-system 마스터**: `SqlLoader.LoadSubSystemMaster` ← `[Navis].[SubSystem_Master]`
-  (`SUB-SYSTEM/DESCRIPTION` + `MCC Plan`(계획일) + 마일스톤 실적일 `Walkdown/Partial MCC/MCC/PCC` +
-  `A/B/C-ITR TOTAL·DONE`, `PUNCH A/B TOTAL·CLOSED`, `PJTNO` 필터 — 계약은 CLAUDE.md 11번).
+- **Sub-system 마스터**: `SqlLoader.LoadSubSystemMaster` ← `[Navis].[System_Summary]`
+  (`Sub-System/Sub-System Des` + `MCC Plan`(계획일) + 마일스톤 실적일 `WD/Partial MCC/MCC/PCC Actual` +
+  `A/B/C-ITR Total·Complete`, `A/B Punch Total·Closed`, `PJTNO` 필터 — 실측 스키마는 CLAUDE.md 9·11번).
   요소 로드와 별도 try — **테이블 미구성이면 요소 파생 목록으로 자동 fallback**
   (단계별 가시화 모드만 비활성). MCC 계획일 경과 + P-MCC/MCC 실적 미입력 = `IsDelayed`(지연) —
   색으로는 표시 안 하고(달성 단계 그대로 칠함) 테이블 텍스트·`[MCC 지연 담기]` 버튼·리포트로만 노출

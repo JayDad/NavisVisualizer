@@ -12,8 +12,8 @@ using NavisVisualizer.Visualizers;
 namespace NavisVisualizer.UI
 {
     /// <summary>
-    /// Sub-system 탭: OASIS의 Sub-system 마스터([Navis].[SubSystem_Master] —
-    /// Walkdown/P-MCC/MCC/RFCC/PCC 날짜 + ITR/Punch 수치)와 요소 데이터
+    /// Sub-system 탭: OASIS의 Sub-system 마스터([Navis].[System_Summary] —
+    /// Walkdown/P-MCC/MCC/PCC 실적일 + ITR/Punch 수치)와 요소 데이터
     /// (Equipment SUB-SYSTEM / Hydrotest Sub-System)를 묶어, 선택한 Sub-system들의
     /// 요소를 3D에 가시화하고 현황 리포트를 출력한다.
     ///

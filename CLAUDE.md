@@ -297,9 +297,14 @@ EIT_Cable, EIT_EQ, EIT_Route, EIT_Tray, Mech_EQ, Piping_HydrotestPKG, Piping_Spo
   날짜(`PULLING START/END`, `FROM/TO CONN`)는 신설됨. `PULLING LTH` 의미(실적 vs 발주)도 확인 필요.
 - **EIT_EQ**: `[Navis].[EIT_EQ]` 컬럼 확장됨 — `WRKDTE`→`INSTALL DTE`(설치 실적일), `SUB-SYSTEM` +
   AITR/Punch 수치 보유. 단일 단계(미착수/설치완료) + TagSearcher 재사용 유력. Sub-system 요소 편입도 가능.
-- **System_Summary = SubSystem_Master 대체**: 실 DB엔 `SubSystem_Master` 없음. `[Navis].[System_Summary]`가
-  마스터 역할이나 컬럼명 전면 상이(§11 계약과 불일치) → 현 `LoadSubSystemMaster`는 예외. Sub-system 탭
-  적용 시 테이블명+컬럼 재매핑 필요(부록 참조).
+- **System_Summary = SubSystem_Master 대체**: **[해결됨]** 실 DB엔 `SubSystem_Master` 없음 —
+  `LoadSubSystemMaster`를 `[Navis].[System_Summary]` 실측 스키마(2026-07 사용자 제공)로 재매핑 완료.
+  매핑: `Sub-System`→SubSystemNo / `Sub-System Des`→Description / `MCC Plan` 동일 /
+  `WD Actual`→Walkdown / `Partial MCC Actual`→P-MCC / `MCC Actual`→MCC / `PCC Actual`→PCC /
+  `A-ITR Total·Complete` 등 ITR 3종 / `A·B Punch Total·Closed`. 프로젝트 필터 = `PJTNO`(기존 유지).
+  **미사용 컬럼(확장 후보)**: `Area`/`System`/`System Des`(상위 그룹핑 축), `PCC Plan`/`MCC Fcst`
+  (계획·예측일 — 현재 지연 판정은 MCC Plan만 사용), `%` 계열(Total/Complete 수치로 대체 가능해 제외).
+  §11의 CREATE TABLE 계약은 폐기 — 실 테이블이 이미 존재.
 
 ### 10. 공종(모듈)별 초기화 — 메커니즘 구현됨 (Spool 배선, 나머지 탭 잔여)
 
@@ -341,7 +346,7 @@ Piping `Sub-System`→PKGNO, 미지정 행 제외 + 건수 보고). 매칭은 �
 재사용 (Equipment 태그도 digit 포함 정확 일치라 전체 워크 인덱스로 조회됨 —
 EquipmentSearcher의 레벨 타겟 인덱스는 건드리지 않음).
 
-- **마스터 기준 목록**: `[Navis].[SubSystem_Master]` 로드 성공 시 좌측 목록 = 마스터 ∪
+- **마스터 기준 목록**: `[Navis].[System_Summary]` 로드 성공 시 좌측 목록 = 마스터 ∪
   요소 파생 (요소 0건은 회색, 마스터 외 요소 그룹은 "(마스터 외)" + 건수 진단).
   **테이블 미구성이면 요소 파생 목록으로 자동 fallback** + 단계 모드 비활성.
 - **가시화 2모드**: ① Sub-system 단계별 — 선택한 sub-system의 요소 전체가 그 sub-system의
@@ -367,33 +372,25 @@ EquipmentSearcher의 레벨 타겟 인덱스는 건드리지 않음).
   다중 선택 + 더블클릭 지원. 체크박스 방식에서 전환됨.
 - CSV 현황 리포트(8번 단기안): 헤더 블록 + 요약(Description/단계/ITR/Punch 병기) + 상세.
 
-**마스터 테이블 계약 (제안 — DB 생성 시 이 형태로)**
-```sql
-CREATE TABLE [Navis].[SubSystem_Master](
-  [PJTNO]        varchar(10)   NOT NULL,  -- 프로젝트 필터 (EQ 계열과 동일 컬럼명)
-  [SUB-SYSTEM]   varchar(20)   NOT NULL,  -- 요소 테이블의 SUB-SYSTEM/Sub-System 값과 일치
-  [DESCRIPTION]  nvarchar(200) NULL,
-  [MCC Plan]     date NULL,               -- MCC 계획일 (핵심 기점) — 지연 판정 기준
-  [Walkdown]     date NULL,               -- 이하 마일스톤 실적일 (지난 날짜 = 달성)
-  [Partial MCC]  date NULL,               -- 별도 RFCC 없음 — MCC/P-MCC = Ready for Commissioning
-  [MCC]          date NULL,               -- MCC 실적일 (계획일과 별개)
-  [PCC]          date NULL,
-  [A-ITR TOTAL]  int NULL, [A-ITR DONE]     int NULL,  -- ITR: 카테고리별 전체/완료 수
-  [B-ITR TOTAL]  int NULL, [B-ITR DONE]     int NULL,
-  [C-ITR TOTAL]  int NULL, [C-ITR DONE]     int NULL,
-  [PUNCH A TOTAL] int NULL, [PUNCH A CLOSED] int NULL, -- Punch: 전체/종결 수 (open = 차)
-  [PUNCH B TOTAL] int NULL, [PUNCH B CLOSED] int NULL,
-  CONSTRAINT PK_SubSystem_Master PRIMARY KEY ([PJTNO],[SUB-SYSTEM]));
+**마스터 테이블 = `[Navis].[System_Summary]` (실측 스키마 — 구 SubSystem_Master 계약 폐기)**
 ```
+Area, System, System Des, Sub-System, Sub-System Des,
+PCC Plan, PCC Actual, MCC Plan, MCC Fcst, WD Actual, Partial MCC Actual, MCC Actual,
+A-ITR Total, A-ITR Complete, A-ITR%, B-ITR Total, B-ITR Complete, B-ITR%,
+C-ITR Total, C-ITR Complete, C-ITR%,
+A Punch Total, A Punch Closed, A Punch %, B Punch Total, B Punch Closed, B Punch %, PJTNO
+```
+- 마일스톤 실적일 = `WD/Partial MCC/MCC/PCC Actual`, 지연 판정 기준 = `MCC Plan` (Fcst·PCC Plan 미사용).
+- 미사용 컬럼: `Area`/`System`/`System Des`(상위 그룹핑 확장 후보), `MCC Fcst`/`PCC Plan`, `%` 계열.
 - 컬럼명을 바꾸면 `SqlLoader.LoadSubSystemMaster`의 SELECT만 같이 수정 (명시 매핑이라 즉시 오류로 드러남).
 - ITR/Punch가 수치가 아니라 %로 오면 GetInt 대신 ParsePercentage 계열 추가 검토 (§2.2 스케일 함정 참조).
 - 화면 표기는 전부 "완료(종결)/전체" — 좌측 테이블 A-ITR/B-ITR/C-ITR/P.A/P.B 컬럼 + 리포트 요약.
 - `MCC Plan` 미보유(null)면 지연 판정 안 함 — 계획일 없는 sub-system은 지연 대상에서 제외.
-- 마일스톤 날짜가 실적일인지 계획일인지: `MCC Plan`만 계획, 나머지(Walkdown/P-MCC/MCC/PCC)는 실적 가정.
+- 마일스톤 날짜 성격은 실 컬럼명으로 확정 — `MCC Plan`만 계획, 나머지는 `Actual` 접미사(실적일).
 
 **확장 잔여 (결정/데이터 대기)**
-- **마스터 테이블 실물 생성/적재**: 위 계약으로 DB에 생성 + OASIS 적재 파이프라인은
-  데이터 오너 몫. 마일스톤 날짜가 실적일인지 계획일인지 확정 필요 (현재 로직은 실적일 가정).
+- **마스터 로더 Windows 실측 검증**: `System_Summary` 재매핑(2026-07) 후 실 서버 대상
+  로드·지연 판정 확인. 날짜 컬럼이 varchar로 오면 `GetDate` 문자열 파싱 경로로 처리됨(yyyy-MM-dd 확인됨).
 - **Spool 단위 sub-system**: 현재 배관은 PKG 노드 색칠이 하위 스풀을 커버. 개별 스풀
   granularity가 필요해지면 `Piping_Spool`에 Sub-System 컬럼 계약 확정 후
   `LoadSubSystemElements`에 추가 (Discipline enum 확장).

@@ -583,7 +583,7 @@ namespace NavisVisualizer.Models
     }
 
     /// <summary>
-    /// Sub-system 마스터 행 ([Navis].[SubSystem_Master] — 계약은 CLAUDE.md 11번).
+    /// Sub-system 마스터 행 ([Navis].[System_Summary] — 실측 스키마, CLAUDE.md 9·11번).
     /// 마일스톤 날짜 4개 + A/B/C-ITR·A/B Punch 수치(각 Total + 완료/종결).
     /// 선택 테이블·리포트에 status로 병기된다.
     /// </summary>
