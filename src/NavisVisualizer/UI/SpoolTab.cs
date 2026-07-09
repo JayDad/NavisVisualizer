@@ -42,6 +42,7 @@ namespace NavisVisualizer.UI
         private Button   _btnHideOthers;    // 체크된 단계 스풀만 남기고 나머지 3D 숨김 (토글)
         private Autodesk.Navisworks.Api.ModelItemCollection _spoolHiddenByStage; // 숨긴 것 복원용
         private Button   _btnApply;
+        private Button   _btnResetModule;   // 이 공종(Spool) 색만 제거
         private Button   _btnReset;
         private Button   _btnWriteProps;
         private Button   _btnViewpoint;
@@ -175,17 +176,23 @@ namespace NavisVisualizer.UI
                 }
             };
 
-            // 1행(핵심): 적용 · 체크 단계만 남김 · 전체 초기화
+            // 1행(가시화): 적용 · 체크 단계 외 숨김
             var btnPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 34, AutoSize = true };
             _btnApply      = new Button { Text = "적용",             Width = 80  };
             _btnHideOthers = new Button { Text = "체크 단계 외 숨김", Width = 140 };
-            _btnReset      = new Button { Text = "전체 초기화",      Width = 90  };
             _btnApply.Click      += BtnApply_Click;
             _btnHideOthers.Click += BtnHideOthers_Click;
-            _btnReset.Click      += BtnReset_Click;
-            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnHideOthers, _btnReset });
+            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnHideOthers });
 
-            // 2행(보조): 속성 쓰기 · Viewpoint 저장 · NWD Export
+            // 2행(초기화): 공종 초기화(이 공종 색만) · 전체 초기화(모든 공종)
+            var btnPanelReset = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 34, AutoSize = true };
+            _btnResetModule = new Button { Text = "공종 초기화", Width = 100 };
+            _btnReset       = new Button { Text = "전체 초기화", Width = 100 };
+            _btnResetModule.Click += BtnResetModule_Click;
+            _btnReset.Click       += BtnReset_Click;
+            btnPanelReset.Controls.AddRange(new Control[] { _btnResetModule, _btnReset });
+
+            // 3행(출력): 속성 쓰기 · Viewpoint 저장 · NWD Export
             var btnPanel2 = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 34, AutoSize = true };
             _btnWriteProps = new Button { Text = "속성 쓰기",      Width = 80  };
             _btnViewpoint  = new Button { Text = "Viewpoint 저장", Width = 120 };
@@ -204,6 +211,7 @@ namespace NavisVisualizer.UI
             layout.Controls.Add(new Label { Text = "Install", Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 18 });
             layout.Controls.Add(colorPanels.instPanel);
             layout.Controls.Add(btnPanel);
+            layout.Controls.Add(btnPanelReset);
             layout.Controls.Add(btnPanel2);
             layout.Controls.Add(_progressBar);
             layout.Controls.Add(statsRow);
@@ -692,11 +700,26 @@ namespace NavisVisualizer.UI
             }
         }
 
+        /// <summary>공종 초기화: 이 탭(Spool) 색만 제거 — 다른 공종 색은 유지. 숨김도 복원.</summary>
+        private void BtnResetModule_Click(object sender, EventArgs e)
+        {
+            var doc = _main.GetDocument();
+            if (doc == null) return;
+            if (_spoolHiddenByStage != null)
+            {
+                doc.Models.SetHidden(_spoolHiddenByStage, false);
+                _spoolHiddenByStage = null;
+                _btnHideOthers.Text = "체크 단계 외 숨김";
+            }
+            _main.OverrideEngine.ResetModule(doc, VisualModule.Spool);
+            _lblStats.Text = "공종 초기화 완료 (Spool 색만 제거)";
+        }
+
         private void BtnReset_Click(object sender, EventArgs e)
         {
             var doc = _main.GetDocument();
             if (doc == null) return;
-            // 숨김(체크 단계만 보기)도 함께 복원 — 초기화는 완전 원상복구여야 함
+            // 숨김(체크 단계 외 숨김)도 함께 복원 — 초기화는 완전 원상복구여야 함
             if (_spoolHiddenByStage != null)
             {
                 doc.Models.SetHidden(_spoolHiddenByStage, false);

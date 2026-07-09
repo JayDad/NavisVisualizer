@@ -111,8 +111,9 @@ namespace NavisVisualizer.Visualizers
                 list.AddRange(items);
             }
 
+            // 이전 적용 누적을 먼저 리셋(다른 공종 유지) — 재적용 성능 저하·체크해제 잔존 방지.
+            ResetModule(doc, VisualModule.Hydrotest);
             var cache = ModuleCache(VisualModule.Hydrotest);
-            cache.Clear();
 
             foreach (var kv in stageItems)
             {
@@ -121,7 +122,10 @@ namespace NavisVisualizer.Visualizers
                 cache[key] = collection;
 
                 if (colorSettings.TryGetValue(kv.Key, out var setting))
+                {
                     ApplyOverride(doc, collection, setting);
+                    AccumulatePainted(VisualModule.Hydrotest, collection);
+                }
             }
 
             return result;
@@ -213,8 +217,9 @@ namespace NavisVisualizer.Visualizers
             }
 
             // Equipment: matched nodes only (same as Spool/Hydrotest)
+            // 이전 적용 누적을 먼저 리셋(다른 공종 유지) — 재적용 성능 저하·체크해제 잔존 방지.
+            ResetModule(doc, VisualModule.Equipment);
             var cache = ModuleCache(VisualModule.Equipment);
-            cache.Clear();
 
             foreach (var kv in stageItems)
             {
@@ -223,7 +228,10 @@ namespace NavisVisualizer.Visualizers
                 cache[key] = collection;
 
                 if (colorSettings.TryGetValue(kv.Key, out var setting))
+                {
                     ApplyOverride(doc, collection, setting);
+                    AccumulatePainted(VisualModule.Equipment, collection);
+                }
             }
 
             return result;

@@ -38,6 +38,7 @@ namespace NavisVisualizer.UI
         private TabControl _tabFilter;
         private ListView _listView;
         private Button _btnApply;
+        private Button _btnResetModule;   // 이 공종(Equipment) 색만 제거
         private Button _btnReset;
         private Button _btnHideOthers;    // 체크된 단계 장비만 남기고 나머지 3D 숨김 (토글)
         private Button _btnWriteProps;
@@ -155,17 +156,23 @@ namespace NavisVisualizer.UI
             _listView.ColumnClick += ListView_ColumnClick;
             tabAll.Controls.Add(_listView);
 
-            // 1행(핵심): 적용 · 체크 단계 외 숨김 · 전체 초기화
+            // 1행(가시화): 적용 · 체크 단계 외 숨김
             var btnPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 34, AutoSize = true };
             _btnApply      = new Button { Text = "적용",           Width = 80  };
             _btnHideOthers = new Button { Text = "체크 단계 외 숨김", Width = 140 };
-            _btnReset      = new Button { Text = "전체 초기화",    Width = 90  };
             _btnApply.Click      += BtnApply_Click;
             _btnHideOthers.Click += BtnHideOthers_Click;
-            _btnReset.Click      += BtnReset_Click;
-            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnHideOthers, _btnReset });
+            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnHideOthers });
 
-            // 2행(덜 쓰임): 속성 쓰기 · Viewpoint 저장 · NWD Export
+            // 2행(초기화): 공종 초기화(이 공종 색만) · 전체 초기화(모든 공종)
+            var btnPanelReset = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 34, AutoSize = true };
+            _btnResetModule = new Button { Text = "공종 초기화", Width = 100 };
+            _btnReset       = new Button { Text = "전체 초기화", Width = 100 };
+            _btnResetModule.Click += BtnResetModule_Click;
+            _btnReset.Click       += BtnReset_Click;
+            btnPanelReset.Controls.AddRange(new Control[] { _btnResetModule, _btnReset });
+
+            // 3행(덜 쓰임): 속성 쓰기 · Viewpoint 저장 · NWD Export
             var btnPanel2 = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 34, AutoSize = true };
             _btnWriteProps = new Button { Text = "속성 쓰기",      Width = 80  };
             _btnViewpoint  = new Button { Text = "Viewpoint 저장", Width = 120 };
@@ -182,6 +189,7 @@ namespace NavisVisualizer.UI
             layout.Controls.Add(new Label { Text = "단계 & 색상", Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 18 });
             layout.Controls.Add(colorPanel);
             layout.Controls.Add(btnPanel);
+            layout.Controls.Add(btnPanelReset);
             layout.Controls.Add(btnPanel2);
             layout.Controls.Add(_progressBar);
             layout.Controls.Add(statsRow);
@@ -610,6 +618,21 @@ namespace NavisVisualizer.UI
                 _btnWriteProps.Enabled = true;
                 _btnWriteProps.Text = "속성 쓰기";
             }
+        }
+
+        /// <summary>공종 초기화: 이 탭(Equipment) 색만 제거 — 다른 공종 색은 유지. 숨김도 복원.</summary>
+        private void BtnResetModule_Click(object sender, EventArgs e)
+        {
+            var doc = _main.GetDocument();
+            if (doc == null) return;
+            if (_tagHiddenByStage != null)
+            {
+                doc.Models.SetHidden(_tagHiddenByStage, false);
+                _tagHiddenByStage = null;
+                _btnHideOthers.Text = "체크 단계 외 숨김";
+            }
+            _main.OverrideEngine.ResetModule(doc, VisualModule.Equipment);
+            _lblStats.Text = "공종 초기화 완료 (Equipment 색만 제거)";
         }
 
         private void BtnHideOthers_Click(object sender, EventArgs e)

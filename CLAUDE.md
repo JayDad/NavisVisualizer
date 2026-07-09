@@ -311,11 +311,18 @@ EIT_Cable, EIT_EQ, EIT_Route, EIT_Tray, Mech_EQ, Piping_HydrotestPKG, Piping_Spo
 버그 동시 해결**. SpoolTab `BtnApply_Click`에 색칠 진행바(marquee)도 추가(색칠 수 초간 UI 프리즈
 "뻗은 느낌" 제거).
 
+**구현 확대(2026-07)**:
+- **Spool/Hydrotest/Equipment 3탭 모두** `Apply*`에 `ResetModule`+`AccumulatePainted` 이식 완료 —
+  세 탭 다 재적용 누적(투명 재처리) 문제 해결. (Cable/Sub-system은 아직 잔여.)
+- **`[공종 초기화]` 버튼 신설** — 3탭 각각 버튼 3행 배치:
+  1행(가시화) `[적용][체크 단계 외 숨김]` / 2행(초기화) `[공종 초기화][전체 초기화]` /
+  3행(출력) `[속성 쓰기]?[Viewpoint 저장][NWD Export]`. `공종 초기화`는 그 탭 색만
+  `ResetModule`로 제거(다른 공종 유지) + 그 탭 숨김 복원. `전체 초기화`는 여전히 전역
+  `ResetAllPermanentMaterials`.
+
 **잔여**:
-- Hydrotest/Equipment/Cable/Sub-system 탭 `Apply*`에도 같은 2줄(`ResetModule` + `AccumulatePainted`)
-  이식 필요 — 현재는 Spool만. (같은 재적용 누적 문제가 그 탭들엔 아직 남음.)
-- UI: 각 탭 `[적용] [공종 초기화] [전체 초기화]` 3버튼 안(별도 "공종 초기화" 버튼)은 미구현 —
-  현재 `ResetModule`은 `ApplySpool` 내부에서만 자동 호출. 명시적 버튼이 필요하면 추가.
+- Cable/Sub-system 탭 `Apply*`에 `ResetModule`+`AccumulatePainted` 미이식(누적 문제 잔존) +
+  공종 초기화 버튼 미배치. Cable은 색+숨김+필터포커스+cable캐시까지 리셋해야 해 별도 설계.
 
 **설계 메모(유지)**:
 - API: `DocumentModels.ResetPermanentMaterials(ModelItemCollection)` (아이템 단위 리셋).
