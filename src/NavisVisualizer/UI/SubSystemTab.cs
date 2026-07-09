@@ -13,13 +13,16 @@ namespace NavisVisualizer.UI
 {
     /// <summary>
     /// Sub-system 탭: OASIS의 Sub-system 마스터([Navis].[System_Summary] —
-    /// Walkdown/P-MCC/MCC/PCC 실적일 + ITR/Punch 수치)와 요소 데이터
-    /// (Equipment SUB-SYSTEM / Hydrotest Sub-System)를 묶어, 선택한 Sub-system들의
+    /// Walkdown/P-MCC/MCC/PCC 실적일 + ITR/Punch 수치)와 요소 데이터 5공종
+    /// (Equipment Mech_EQ / Piping Hydrotest PKG / EIT EQ / EIT Tray / Cable —
+    /// 각 테이블의 SUB-SYSTEM 컬럼 기준)을 묶어, 선택한 Sub-system들의
     /// 요소를 3D에 가시화하고 현황 리포트를 출력한다.
     ///
-    /// - 데이터: OASIS 전용. 마스터 미구성 시 요소 파생 목록으로 자동 fallback
-    /// - 매칭: SubSystemSearcher (digit 포함 DisplayName 정확 일치 — 개발 규칙.
-    ///   Equipment TAG + Piping PKG를 모두 찾아야 해 NWD 스코프 MEQ·SPL·HYDROPKG 전용 인스턴스)
+    /// - 데이터: OASIS 전용. 마스터 미구성 시 요소 파생 목록으로 자동 fallback.
+    ///   EIT 3공종은 공종별 try/catch — 컬럼 미구성이어도 나머지는 정상 로드(라벨에 사유)
+    /// - 매칭: 공종별 스코프 라우팅(엔진 SearcherForSubSystem) — Equipment/Piping은
+    ///   SubSystemSearcher(MEQ·SPL·HYDROPKG full-walk), EIT EQ·Tray는 ElecTagSearcher(EIT),
+    ///   Cable은 SubSystemCableSearcher(CABLE 레벨 타겟 — 로드 셋 기반, _needsIndexRebuild)
     /// - 가시화 2모드: Sub-system 단계별(Walkdown→PCC 6색, 마스터 필요) /
     ///   요소 진행상태별(미착수·진행중·완료)
     /// - 선택 UI: 좌측 검색+상태 테이블(~400개) ↔ [▶ ◀ ▶▶ ◀◀] ↔ 우측 선택 누적
@@ -34,6 +37,9 @@ namespace NavisVisualizer.UI
         private List<SubSystemElement> _elements = new List<SubSystemElement>();
         private Dictionary<string, List<SubSystemElement>> _bySubSystem
             = new Dictionary<string, List<SubSystemElement>>(StringComparer.OrdinalIgnoreCase);
+        // Cable 요소 인덱스(SubSystemCableSearcher)는 레벨 타겟이라 로드된 케이블 셋에 종속 —
+        // 데이터 재로드 시 재빌드 강제 (Spool 패턴).
+        private bool _needsIndexRebuild;
         /// <summary>null = 마스터 미구성(요소 파생 fallback).</summary>
         private Dictionary<string, SubSystemMasterData> _master;
         private List<string> _subSystemNames = new List<string>();
@@ -388,7 +394,8 @@ namespace NavisVisualizer.UI
             try
             {
                 var settings = SqlConnectionSettings.Load();
-                var list = SqlLoader.LoadSubSystemElements(settings, out int noSubSystem);
+                var list = SqlLoader.LoadSubSystemElements(settings, out int noSubSystem,
+                    out List<string> disciplineNotes);
 
                 // 마스터는 별도 시도 — 테이블 미구성 환경에서도 요소 기준으로 동작해야 함
                 Dictionary<string, SubSystemMasterData> master = null;
@@ -431,7 +438,9 @@ namespace NavisVisualizer.UI
                 _lblOasis.ForeColor = Color.Black;
                 _lblOasis.Text = $"요소 {list.Count:N0}건 · Sub-system {_subSystemNames.Count}개{masterNote}"
                     + (outsideMaster > 0 ? $" · 마스터 외 {outsideMaster}개" : "")
-                    + (noSubSystem > 0 ? $" · 미지정 {noSubSystem}건 제외" : "");
+                    + (noSubSystem > 0 ? $" · 미지정 {noSubSystem}건 제외" : "")
+                    + (disciplineNotes.Count > 0 ? " · " + string.Join(" · ", disciplineNotes) : "");
+                _needsIndexRebuild = true;   // Cable 레벨 타겟 인덱스는 로드 셋 기반 — 재빌드 강제
 
                 RefreshLeftList();
                 RefreshRightList();
@@ -651,25 +660,38 @@ namespace NavisVisualizer.UI
             _lblSelCount.Text = $"선택된 Sub-system: {_selected.Count}개 · 요소 {elemCount:N0}건";
         }
 
+        /// <summary>공종별 스코프 라우팅(엔진과 동일)으로 요소들의 매칭 아이템을 모은다.
+        /// 미빌드 인덱스의 공종은 0건으로 조용히 빠진다 (선택 연동은 best-effort).</summary>
+        private Autodesk.Navisworks.Api.ModelItemCollection FindItemsFor(IEnumerable<SubSystemElement> els)
+        {
+            var collection = new Autodesk.Navisworks.Api.ModelItemCollection();
+            foreach (var group in els.GroupBy(el => _main.OverrideEngine.SearcherForSubSystem(el.Discipline)))
+            {
+                if (!group.Key.IsIndexBuilt) continue;
+                var found = group.Key.FindBySpoolIds(group.Select(el => el.ElementId).Distinct());
+                foreach (var items in found.Values)
+                    collection.AddRange(items);
+            }
+            return collection;
+        }
+
         /// <summary>우측 행 클릭 → 해당 Sub-system의 매칭 아이템을 3D에서 선택·포커스.</summary>
         private void LvSelected_SelectedIndexChanged(object sender, EventArgs e)
         {
             if (_lvSelected.SelectedItems.Count == 0) return;
             var doc = _main.GetDocument();
-            if (doc == null || !_main.SubSystemSearcher.IsIndexBuilt || _main.SubSystemSearcher.NeedsRebuild(doc)) return;
+            if (doc == null || !_main.SubSystemSearcher.IsIndexBuilt || _main.SubSystemSearcher.NeedsRebuild(doc)
+                || _needsIndexRebuild) return;
 
-            var ids = new List<string>();
+            var els = new List<SubSystemElement>();
             foreach (ListViewItem item in _lvSelected.SelectedItems)
             {
-                if (_bySubSystem.TryGetValue((string)item.Tag, out var els))
-                    ids.AddRange(els.Select(el => el.ElementId));
+                if (_bySubSystem.TryGetValue((string)item.Tag, out var found))
+                    els.AddRange(found);
             }
-            if (ids.Count == 0) return;
+            if (els.Count == 0) return;
 
-            var found = _main.SubSystemSearcher.FindBySpoolIds(ids.Distinct());
-            var collection = new Autodesk.Navisworks.Api.ModelItemCollection();
-            foreach (var items in found.Values)
-                collection.AddRange(items);
+            var collection = FindItemsFor(els);
             if (collection.Count == 0) return;
 
             doc.CurrentSelection.CopyFrom(collection);
@@ -703,6 +725,23 @@ namespace NavisVisualizer.UI
             _progressBar.Visible = true;
             Application.DoEvents();
             _main.SubSystemSearcher.BuildIndex(doc, NwdScope.SubSystem);
+
+            // EIT 요소(EIT EQ + Tray)는 EIT 스코프 full-walk 인덱스(EitTrayTab과 공유 —
+            // walk 기반이라 태그 셋 무관, 안전) — 요소가 있을 때만 빌드 보장.
+            if (_elements.Any(el => el.Discipline == SubSystemDiscipline.EitEquipment
+                                 || el.Discipline == SubSystemDiscipline.EitTray)
+                && (!_main.ElecTagSearcher.IsIndexBuilt || _main.ElecTagSearcher.NeedsRebuild(doc)))
+                _main.ElecTagSearcher.BuildIndex(doc, NwdScope.EitTray);
+
+            // Cable 요소는 전용 레벨 타겟 인덱스 (로드된 케이블 셋 기반 — CableLineSearcher와 분리)
+            var cableIds = new HashSet<string>(
+                _elements.Where(el => el.Discipline == SubSystemDiscipline.Cable)
+                         .Select(el => el.ElementId),
+                StringComparer.OrdinalIgnoreCase);
+            if (cableIds.Count > 0)
+                _main.SubSystemCableSearcher.BuildIndexForTags(doc, cableIds, NwdScope.Cable);
+
+            _needsIndexRebuild = false;
             _progressBar.Visible = false;
             _progressBar.Style = ProgressBarStyle.Blocks;
         }
@@ -725,7 +764,7 @@ namespace NavisVisualizer.UI
                 MessageBox.Show("Sub-system 마스터가 없어 단계별 가시화를 할 수 없습니다.\n요소 진행상태별 모드를 사용하세요.");
                 return;
             }
-            if (_main.SubSystemSearcher.NeedsRebuild(doc))
+            if (_needsIndexRebuild || _main.SubSystemSearcher.NeedsRebuild(doc))
                 BuildIndex();
 
             var targets = _elements.Where(el => _selected.Contains(el.SubSystem)).ToList();
@@ -812,16 +851,20 @@ namespace NavisVisualizer.UI
 
             lines.Add("");
             lines.Add("[Sub-system별 요약]");
-            lines.Add("Sub-system,Description,단계,MCC계획,지연(일),A-ITR,B-ITR,C-ITR,Punch A,Punch B,요소,Equipment,Piping,매칭,미매칭,미착수,진행중,완료,완료율(%)");
+            lines.Add("Sub-system,Description,단계,MCC계획,지연(일),A-ITR,B-ITR,C-ITR,Punch A,Punch B,요소,Equipment,Piping,EIT EQ,EIT Tray,Cable,매칭,미매칭,미착수,진행중,완료,완료율(%)");
 
-            int tElems = 0, tEq = 0, tPip = 0, tMatched = 0, tUnmatched = 0, tNs = 0, tIp = 0, tDone = 0;
+            int tElems = 0, tEq = 0, tPip = 0, tEitEq = 0, tTray = 0, tCable = 0,
+                tMatched = 0, tUnmatched = 0, tNs = 0, tIp = 0, tDone = 0;
             bool anyMatchInfo = false;
             foreach (var name in names)
             {
                 var m = GetMaster(name);
                 var els = _bySubSystem.TryGetValue(name, out var found) ? found : new List<SubSystemElement>();
-                int eq = els.Count(el => el.Discipline == SubSystemDiscipline.Equipment);
-                int pip = els.Count - eq;
+                int eq    = els.Count(el => el.Discipline == SubSystemDiscipline.Equipment);
+                int pip   = els.Count(el => el.Discipline == SubSystemDiscipline.Piping);
+                int eitEq = els.Count(el => el.Discipline == SubSystemDiscipline.EitEquipment);
+                int tray  = els.Count(el => el.Discipline == SubSystemDiscipline.EitTray);
+                int cable = els.Count(el => el.Discipline == SubSystemDiscipline.Cable);
 
                 int ns = 0, ip = 0, done = 0;
                 foreach (var el in els)
@@ -854,11 +897,13 @@ namespace NavisVisualizer.UI
                 lines.Add($"{Csv(name)},{Csv(m?.Description ?? "")},{Csv(stageLabel)},{planStr},{delayStr}," +
                     $"{Csv(m?.ItrAText ?? "-")},{Csv(m?.ItrBText ?? "-")},{Csv(m?.ItrCText ?? "-")}," +
                     $"{Csv(m?.PunchAText ?? "-")},{Csv(m?.PunchBText ?? "-")}," +
-                    $"{els.Count},{eq},{pip},{matchedText},{unmatchedText},{ns},{ip},{done},{doneRate}");
-                tElems += els.Count; tEq += eq; tPip += pip; tNs += ns; tIp += ip; tDone += done;
+                    $"{els.Count},{eq},{pip},{eitEq},{tray},{cable},{matchedText},{unmatchedText},{ns},{ip},{done},{doneRate}");
+                tElems += els.Count; tEq += eq; tPip += pip; tEitEq += eitEq; tTray += tray; tCable += cable;
+                tNs += ns; tIp += ip; tDone += done;
             }
             string totalRate = tElems > 0 ? (tDone * 100.0 / tElems).ToString("F1") : "-";
-            lines.Add($"합계 ({names.Count}개),,,,,,,,,,{tElems},{tEq},{tPip},{(anyMatchInfo ? tMatched.ToString() : "-")}," +
+            lines.Add($"합계 ({names.Count}개),,,,,,,,,,{tElems},{tEq},{tPip},{tEitEq},{tTray},{tCable}," +
+                $"{(anyMatchInfo ? tMatched.ToString() : "-")}," +
                 $"{(anyMatchInfo ? tUnmatched.ToString() : "-")},{tNs},{tIp},{tDone},{totalRate}");
 
             lines.Add("");
@@ -953,10 +998,9 @@ namespace NavisVisualizer.UI
                 if (lv.SelectedItems.Count == 0) return;
                 var el = lv.SelectedItems[0].Tag as SubSystemElement;
                 var doc = _main.GetDocument();
-                if (el == null || doc == null || !_main.SubSystemSearcher.IsIndexBuilt || _main.SubSystemSearcher.NeedsRebuild(doc)) return;
-                var found = _main.SubSystemSearcher.FindBySpoolIds(new[] { el.ElementId });
-                var collection = new Autodesk.Navisworks.Api.ModelItemCollection();
-                foreach (var items in found.Values) collection.AddRange(items);
+                if (el == null || doc == null || !_main.SubSystemSearcher.IsIndexBuilt
+                    || _main.SubSystemSearcher.NeedsRebuild(doc) || _needsIndexRebuild) return;
+                var collection = FindItemsFor(new[] { el });
                 if (collection.Count == 0) return;
                 doc.CurrentSelection.CopyFrom(collection);
                 doc.ActiveView.FocusOnCurrentSelection();

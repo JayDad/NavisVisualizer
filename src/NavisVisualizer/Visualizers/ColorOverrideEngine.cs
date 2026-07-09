@@ -35,6 +35,11 @@ namespace NavisVisualizer.Visualizers
         private readonly ModelItemSearcher _cableBoxSearcher;
         // Cable(형상) 탭 — cable-no를 컴포넌트에 직접 매칭 (레벨 타겟, 스코프 CABLE).
         private readonly ModelItemSearcher _cableLineSearcher;
+        // Sub-system 탭의 Cable 요소 전용 (레벨 타겟, 스코프 CABLE). CableLineSearcher와
+        // 스코프·전략이 같지만 레벨 타겟 인덱스는 빌드한 태그 셋에 종속되므로 탭 간 공유 불가
+        // (Cable(형상) 탭이 빌드한 인덱스를 Sub-system이 덮어쓰면 서로 stale — Spool/Equipment
+        // 레벨 타겟과 동일 이유로 별도 인스턴스).
+        private readonly ModelItemSearcher _subSystemCableSearcher;
 
         // Stage 컬렉션 캐시를 모듈별로 격리한다. 단일 캐시에 enum.ToString() 키로
         // 넣으면 "NotStarted"(전 모듈), "Setting"(Spool/Equipment) 등이 충돌해
@@ -72,7 +77,8 @@ namespace NavisVisualizer.Visualizers
             ModelItemSearcher subSystemSearcher,
             ModelItemSearcher equipmentSearcher,
             ModelItemSearcher cableBoxSearcher,
-            ModelItemSearcher cableLineSearcher)
+            ModelItemSearcher cableLineSearcher,
+            ModelItemSearcher subSystemCableSearcher)
         {
             _spoolTagSearcher = spoolTagSearcher;
             _hydroTagSearcher = hydroTagSearcher;
@@ -81,6 +87,22 @@ namespace NavisVisualizer.Visualizers
             _equipmentSearcher = equipmentSearcher;
             _cableBoxSearcher = cableBoxSearcher;
             _cableLineSearcher = cableLineSearcher;
+            _subSystemCableSearcher = subSystemCableSearcher;
+        }
+
+        /// <summary>Sub-system 요소의 공종 → 매칭 인덱스 라우팅 (스코프별 — SubSystemDiscipline 주석 참조).</summary>
+        internal ModelItemSearcher SearcherForSubSystem(SubSystemDiscipline discipline)
+        {
+            switch (discipline)
+            {
+                case SubSystemDiscipline.EitEquipment:
+                case SubSystemDiscipline.EitTray:
+                    return _elecTagSearcher;
+                case SubSystemDiscipline.Cable:
+                    return _subSystemCableSearcher;
+                default:
+                    return _subSystemSearcher;
+            }
         }
 
         private Dictionary<string, ModelItemCollection> ModuleCache(VisualModule module)
@@ -308,11 +330,14 @@ namespace NavisVisualizer.Visualizers
         /// <summary>
         /// Sub-system 탭: 요소를 groupSelector가 주는 키(모드에 따라 sub-system 이름
         /// 또는 ProgressStatus 이름)로 묶어 그룹당 1회 색상을 적용한다. 매칭은
-        /// SubSystemSearcher(digit full-walk 인덱스, 스코프 MEQ·SPL·HYDROPKG) 기준 —
-        /// Equipment 태그와 Hydrotest PKG 모두 digit 포함 DisplayName 정확 일치라 동일 인덱스로 조회된다.
+        /// 공종별 스코프가 달라 매칭 인덱스를 라우팅한다(SearcherForSubSystem):
+        /// Equipment/Piping → SubSystemSearcher(MEQ·SPL·HYDROPKG full-walk) /
+        /// EIT EQ·Tray → ElecTagSearcher(EIT full-walk) / Cable → SubSystemCableSearcher
+        /// (CABLE 레벨 타겟 — 인덱스 빌드는 SubSystemTab.BuildIndex 책임).
         /// groupSelector가 null을 반환하거나 groupSettings에 없는 키는 색칠하지
         /// 않는다(체크 해제된 단계). 캐시 키는 그룹 키 그대로라 진행 상태 모드에서는
         /// UpdateStageColor(VisualModule.SubSystem, status명)로 증분 색 변경이 된다.
+        /// 색칠 전 ResetModule로 직전 적용 누적분을 원복(§10 — 선택 축소 시 잔존 방지).
         /// </summary>
         public OverrideResult ApplySubSystem(
             Document doc,
@@ -323,11 +348,15 @@ namespace NavisVisualizer.Visualizers
             var result = new OverrideResult();
             var groupItems = new Dictionary<string, List<ModelItem>>(StringComparer.OrdinalIgnoreCase);
 
-            var allIds = elements.Select(el => el.ElementId).Distinct();
-            var searchResult = _subSystemSearcher.FindBySpoolIds(allIds);
+            // 스코프(searcher)별로 id를 모아 한 번씩 조회 후, 요소 순회 시 자기 결과에서 찾는다.
+            var resultsBySearcher = new Dictionary<ModelItemSearcher, Dictionary<string, List<ModelItem>>>();
+            foreach (var group in elements.GroupBy(el => SearcherForSubSystem(el.Discipline)))
+                resultsBySearcher[group.Key] =
+                    group.Key.FindBySpoolIds(group.Select(el => el.ElementId).Distinct());
 
             foreach (var el in elements)
             {
+                var searchResult = resultsBySearcher[SearcherForSubSystem(el.Discipline)];
                 if (!searchResult.TryGetValue(el.ElementId, out var items) || items.Count == 0)
                 {
                     result.UnmatchedIds.Add(el.ElementId);
@@ -346,6 +375,7 @@ namespace NavisVisualizer.Visualizers
                 list.AddRange(items);
             }
 
+            ResetModule(doc, VisualModule.SubSystem);
             var cache = ModuleCache(VisualModule.SubSystem);
             cache.Clear();
 
@@ -355,7 +385,10 @@ namespace NavisVisualizer.Visualizers
                 cache[kv.Key] = collection;
 
                 if (groupSettings.TryGetValue(kv.Key, out var setting))
+                {
                     ApplyOverride(doc, collection, setting);
+                    AccumulatePainted(VisualModule.SubSystem, collection);
+                }
             }
 
             return result;

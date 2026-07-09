@@ -34,6 +34,10 @@ namespace NavisVisualizer.UI
         /// CableBoxSearcher와 매칭 전략이 달라(box 접두 vs cable-no 정확 일치) 별도 인스턴스.</summary>
         public ModelItemSearcher CableLineSearcher { get; } = new ModelItemSearcher();
 
+        /// <summary>Sub-system 탭의 Cable 요소 전용 (레벨 타겟, 스코프 CABLE). CableLineSearcher와
+        /// 전략이 같지만 레벨 타겟 인덱스는 빌드 태그 셋에 종속 — 탭 간 공유 시 서로 stale이라 분리.</summary>
+        public ModelItemSearcher SubSystemCableSearcher { get; } = new ModelItemSearcher();
+
         public ColorOverrideEngine OverrideEngine { get; }
         public ExportService ExportSvc { get; } = new ExportService();
         public UserDataService UserDataSvc { get; } = new UserDataService();
@@ -55,7 +59,7 @@ namespace NavisVisualizer.UI
         {
             OverrideEngine = new ColorOverrideEngine(
                 SpoolTagSearcher, HydroTagSearcher, ElecTagSearcher, SubSystemSearcher,
-                EquipmentSearcher, CableBoxSearcher, CableLineSearcher);
+                EquipmentSearcher, CableBoxSearcher, CableLineSearcher, SubSystemCableSearcher);
             InitializeComponent();
         }
 

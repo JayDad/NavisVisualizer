@@ -303,7 +303,8 @@ EIT_Cable, EIT_EQ, EIT_Route, EIT_Tray, Mech_EQ, Piping_HydrotestPKG, Piping_Spo
   유지(§13-6). 프로젝트 컬럼 없음 → 전체 로드. 미사용: INSTALL_MODULE, SYSTEM DES, SUB-SYSTEM(+DES).
   **노드단위 집계(Cable(Node) 탭)는 여전히 보류** — `EIT_Route`에 홉 순서(SEQ)·NodeId 변환 부재.
 - **EIT_EQ**: `[Navis].[EIT_EQ]` 컬럼 확장됨 — `WRKDTE`→`INSTALL DTE`(설치 실적일), `SUB-SYSTEM` +
-  AITR/Punch 수치 보유. 단일 단계(미착수/설치완료) + TagSearcher 재사용 유력. Sub-system 요소 편입도 가능.
+  AITR/Punch 수치 보유. **Sub-system 요소로 편입됨(2026-07 — §11)**: 단일 단계(미착수/설치완료) +
+  ElecTagSearcher 재사용. 전용 탭 신설은 여전히 미정(AITR/Punch 수치 미사용).
 - **System_Summary = SubSystem_Master 대체**: **[해결됨]** 실 DB엔 `SubSystem_Master` 없음 —
   `LoadSubSystemMaster`를 `[Navis].[System_Summary]` 실측 스키마(2026-07 사용자 제공)로 재매핑 완료.
   매핑: `Sub-System`→SubSystemNo / `Sub-System Des`→Description / `MCC Plan` 동일 /
@@ -333,8 +334,9 @@ EIT_Cable, EIT_EQ, EIT_Route, EIT_Tray, Mech_EQ, Piping_HydrotestPKG, Piping_Spo
   `ResetAllPermanentMaterials`.
 
 **잔여**:
-- Cable/Sub-system 탭 `Apply*`에 `ResetModule`+`AccumulatePainted` 미이식(누적 문제 잔존) +
+- Cable(Node) 탭 `ApplyCable`에 `ResetModule`+`AccumulatePainted` 미이식(누적 문제 잔존) +
   공종 초기화 버튼 미배치. Cable은 색+숨김+필터포커스+cable캐시까지 리셋해야 해 별도 설계.
+  (Sub-system은 2026-07 `ApplySubSystem`에 이식 완료 — §11. 공종 초기화 버튼만 미배치.)
 
 **설계 메모(유지)**:
 - API: `DocumentModels.ResetPermanentMaterials(ModelItemCollection)` (아이템 단위 리셋).
@@ -401,13 +403,22 @@ A Punch Total, A Punch Closed, A Punch %, B Punch Total, B Punch Closed, B Punch
 - **Spool 단위 sub-system**: 현재 배관은 PKG 노드 색칠이 하위 스풀을 커버. 개별 스풀
   granularity가 필요해지면 `Piping_Spool`에 Sub-System 컬럼 계약 확정 후
   `LoadSubSystemElements`에 추가 (Discipline enum 확장).
-- **EIT Tray / Cable 편입**: OASIS 테이블 자체가 없음 — 9번 항목 해소 후 동일 패턴으로 추가.
+- **EIT EQ / Tray / Cable 편입**: **[구현됨 2026-07 — Windows 검증 대기]** 요소 5공종으로 확장.
+  `LoadSubSystemElements`가 `EIT_EQ`(TAG NO/INSTALL DTE 단일 단계 미착수·설치완료)·
+  `EIT_Tray`(BRANCH NO./Install % 현재상태 — **[SUB-SYSTEM] 컬럼 실측 미확인**, 없으면 그 공종만
+  제외되고 라벨에 사유 표시)·`EIT_Cable`(CABLE NO/날짜 4종, SUB-SYSTEM 실측 확정)을 공종별
+  try/catch로 편입. 매칭은 스코프 라우팅(`SearcherForSubSystem`): EIT 계열 = ElecTagSearcher
+  (EIT full-walk, EitTrayTab과 공유 — walk 기반이라 안전) / Cable = 신규 `SubSystemCableSearcher`
+  (CABLE 레벨 타겟 — CableLineSearcher와 태그 셋이 달라 공유 불가, 8번째 인스턴스).
+  Tray ElementId는 NormalizeId 정규화본 저장(모델 인덱스 키와 일치). ApplySubSystem에
+  §10 ResetModule/AccumulatePainted도 이식(선택 축소 재적용 잔존 해결).
+  EIT Tray는 날짜가 없어 기준일 무시(%기반 현재상태) — 문서화된 예외.
 - **Excel 소스**: 미지원 (OASIS 전용). 필요 시 DataSourcePanel 이중 소스로 확장 —
   Excel에 Sub-system 컬럼 계약이 먼저.
 - **집계 범위(ScopePanel) 미배선** — 필요 시 7번 공용 컴포넌트 그대로 연결 가능.
 - **팔레트 색 사용자 지정 없음** (자동 배정만). 색은 선택 순서 기준 배정, 세션 내 유지.
-- **선택 축소 후 재적용 시 이전 색 잔존**: 다른 탭과 동일한 10번 공통 문제 (해제된
-  sub-system의 색은 `전체 초기화`로만 제거됨).
+- **선택 축소 후 재적용 시 이전 색 잔존**: **[해결됨 2026-07]** `ApplySubSystem`에 §10
+  ResetModule/AccumulatePainted 이식 — 재적용 시 직전 누적분 원복 후 현재 선택만 재도색.
 - 우측 테이블 `매칭` 열과 리포트의 매칭 O/X는 **마지막 [적용] 스냅샷** 기준 — 적용에
   포함되지 않았던 sub-system은 "-" 표시 (미적용 상태에서 O로 찍히는 기존 탭 결함을 답습하지 않음).
 
