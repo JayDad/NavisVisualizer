@@ -292,9 +292,16 @@ EIT_Cable, EIT_EQ, EIT_Route, EIT_Tray, Mech_EQ, Piping_HydrotestPKG, Piping_Spo
 - **EIT Tray**: 진척 테이블 `[Navis].[EIT_Tray]` **존재 확인**(`BRANCH NO.`/`TRAY Install %`/`PJTNO`).
   단 **날짜 컬럼 없음**(`Tray install date` 부재) → 기준일 필터 불가, %기반 현재상태 판정으로 로더 설계 필요.
   `BRANCH NO.` 선행 `/` → `NormalizeId` 적용. (이번 3-탭 범위 밖.)
-- **Cable**: `[Navis].[EIT_Cable]`에 여전히 Node 컬럼 부재. `[Navis].[EIT_Route]`(ROUTE↔CABLE_NO)가
-  생겼으나 홉 순서(SEQ) + ROUTE→트레이NodeId 변환이 없어 노드단위 집계 불가 — CableTab 대공사 필요(보류).
-  날짜(`PULLING START/END`, `FROM/TO CONN`)는 신설됨. `PULLING LTH` 의미(실적 vs 발주)도 확인 필요.
+  **후행 `.` 장식(2026-07 실측)**: DB TRAY ID가 `X.`처럼 끝에 '.'이 붙은 행이 있어 매칭 실패 —
+  `EitTrayData.NormalizeId`가 후행 '.'도 제거하도록 수정(+ Sql/Excel 로더 중복 제거를 정규화 키로).
+  모델 DisplayName엔 이 장식이 없다는 가정 — 모델 쪽에도 붙어 있으면 인덱스 키 정규화 확장 필요.
+- **Cable**: **[부분 해결 — Cable(형상) 탭 개통]** `EIT_Cable` 컬럼 철자 실측 확정(2026-07 사용자
+  제공: 날짜 4개는 ` DATE` 접미사 — `PULLING START/END DATE`, `FROM/TO CONN DATE`) →
+  `SqlLoader.LoadCable` 철자 교체 + 표시 필드(FROM/TO MODULE·EQUIP, TYPE/CORE/SIZE, OUT DIA,
+  TRAY SYS, SYSTEM, Pulling %) 매핑 + `CableLineTab` DataSourcePanel 듀얼소스 배선 완료.
+  `PULLING LTH`는 샘플상 포설 실적 길이로 보이나(0/189=0%, 37/37=100%) 오너 확정 전까지 표시 전용
+  유지(§13-6). 프로젝트 컬럼 없음 → 전체 로드. 미사용: INSTALL_MODULE, SYSTEM DES, SUB-SYSTEM(+DES).
+  **노드단위 집계(Cable(Node) 탭)는 여전히 보류** — `EIT_Route`에 홉 순서(SEQ)·NodeId 변환 부재.
 - **EIT_EQ**: `[Navis].[EIT_EQ]` 컬럼 확장됨 — `WRKDTE`→`INSTALL DTE`(설치 실적일), `SUB-SYSTEM` +
   AITR/Punch 수치 보유. 단일 단계(미착수/설치완료) + TagSearcher 재사용 유력. Sub-system 요소 편입도 가능.
 - **System_Summary = SubSystem_Master 대체**: **[해결됨]** 실 DB엔 `SubSystem_Master` 없음 —
@@ -529,7 +536,8 @@ A Punch Total, A Punch Closed, A Punch %, B Punch Total, B Punch Closed, B Punch
 5. `TRAY Install %` 스케일·`PJTNO` 필터, 선택 sync `HashSet<ModelItem>` 동등성(§7 미검증).
 
 **Phase**: 0(진단 refactor·DisplayName 실측) → 1(Excel-only 출하: 형상 탭·clash·Tray 마무리) →
-2(OASIS 로더 `LoadCable`/`LoadEitTray`·회전 박스). `LoadCable` 컬럼 브래킷 철자는 실 스키마 검증 후 활성.
+2(OASIS 로더 `LoadCable`/`LoadEitTray`·회전 박스). `LoadCable` 철자는 실 스키마로 확정·배선 완료
+(2026-07 — §9 Cable 참조), Phase 2 잔여는 회전 박스뿐.
 
 ## 레슨런 (하드 트러블슈팅 기록 — 다시 헤매지 말 것)
 

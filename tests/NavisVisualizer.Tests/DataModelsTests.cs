@@ -90,5 +90,19 @@ namespace NavisVisualizer.Tests
             Assert.AreEqual(HydrotestStage.LineInspection, HydrotestStageInfo.ColumnMap["Line inspection"]);
             Assert.AreEqual(HydrotestStage.Reinstatement, HydrotestStageInfo.ColumnMap["Reinstatement"]);
         }
+
+        [TestMethod]
+        public void EitTrayData_NormalizeId_StripsLeadingSlashAndTrailingDot()
+        {
+            // 모델 DisplayName 인덱스 키와 동일 규약: 선행 '/' 제거.
+            Assert.AreEqual("101890-INT-25018-CM-PDA-CV/B1",
+                EitTrayData.NormalizeId("/101890-INT-25018-CM-PDA-CV/B1"));
+            // OASIS EIT_Tray의 BRANCH NO. 끝 '.' 장식(실측 2026-07) — 제거해야 매칭됨.
+            Assert.AreEqual("101890-INT-25018-CM-PDA-CV/B1",
+                EitTrayData.NormalizeId("101890-INT-25018-CM-PDA-CV/B1."));
+            Assert.AreEqual("101890-INT-25018", EitTrayData.NormalizeId(" /101890-INT-25018. "));
+            Assert.AreEqual("", EitTrayData.NormalizeId(null));
+            Assert.AreEqual("", EitTrayData.NormalizeId("  "));
+        }
     }
 }

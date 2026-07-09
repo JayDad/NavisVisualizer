@@ -243,8 +243,9 @@ FROM [Navis].[System_Summary]";
         /// <summary>
         /// EIT Tray 진척 로드 ([Navis].[EIT_Tray] — BRANCH NO./TRAY Install %/PJTNO).
         /// 이 테이블엔 날짜 컬럼이 없어(§9) 기준일 필터 불가 — % 기반 현재상태 판정
-        /// (EitTrayData.GetStage가 InstallProgress만 씀). BRANCH NO.의 선행 '/'는
-        /// 매칭 시 NormalizeId가 제거하므로 원시 그대로 보관. 프로젝트 컬럼 = PJTNO.
+        /// (EitTrayData.GetStage가 InstallProgress만 씀). BRANCH NO.의 선행 '/'·후행 '.'은
+        /// 매칭 시 NormalizeId가 제거하므로 원시 그대로 보관하되, 중복 제거는 정규화 키로
+        /// 한다 ("X"와 "X."은 같은 트레이 — 실측상 후행 '.' 장식 행 존재). 프로젝트 컬럼 = PJTNO.
         /// </summary>
         public static List<EitTrayData> LoadEitTray(SqlConnectionSettings settings)
         {
@@ -258,7 +259,7 @@ FROM [Navis].[EIT_Tray]";
             ExecuteReader(settings, baseSql, "PJTNO", r =>
             {
                 string trayNo = GetString(r, "BRANCH NO.");
-                if (string.IsNullOrEmpty(trayNo) || !seen.Add(trayNo)) return;
+                if (string.IsNullOrEmpty(trayNo) || !seen.Add(EitTrayData.NormalizeId(trayNo))) return;
 
                 trays.Add(new EitTrayData
                 {
@@ -271,21 +272,25 @@ FROM [Navis].[EIT_Tray]";
         }
 
         // ------------------------------------------------------------
-        // Cable(형상)  ←  [Navis].[EIT_Cable]   (Phase 2 — 컬럼 철자 실측 검증 후 활성)
+        // Cable(형상)  ←  [Navis].[EIT_Cable]   (컬럼 철자 실측 확정 — 2026-07 사용자 제공)
         // ------------------------------------------------------------
 
         /// <summary>
-        /// Cable(형상) 탭용 OASIS 로드. **주의**: 아래 컬럼 브래킷 철자는 docs가 못 박지 않았다
-        /// (§13-Phase2). explicit SELECT는 컬럼명이 틀리면 SQL Server가 throw하므로, 실 스키마로
-        /// 철자를 확인하기 전에는 이 메서드를 UI에 배선하지 말 것. EIT_Cable엔 프로젝트 컬럼이
-        /// 없어(§9) projectColumn=null → WHERE 생략. PULLING LTH 의미(실적/발주) 미확정이라
-        /// 길이·%는 표시 전용, stage 색엔 안 씀(§13-6). 날짜(PULLING START/END, FROM/TO CONN)만 stage.
+        /// Cable(형상) 탭용 OASIS 로드. 컬럼 철자는 실측 스키마로 확정(2026-07) — 날짜 4개는
+        /// 전부 ` DATE` 접미사(`PULLING START DATE` 등). EIT_Cable엔 프로젝트 컬럼이 없어(§9)
+        /// projectColumn=null → WHERE 생략. `PULLING LTH`는 실측 샘플상 포설 실적 길이로 보이나
+        /// (0/189=0%, 37/37=100%) 데이터 오너 확정 전까지 길이·%는 표시 전용, stage 색엔 안 씀
+        /// (§13-6). stage는 날짜만: Pulling=PULLING START DATE / Pulled=PULLING END DATE /
+        /// Terminated=FROM·TO CONN DATE 둘 다(AND 게이트, ComputeTerminated).
+        /// 미사용 컬럼(확장 후보): INSTALL_MODULE, SYSTEM DES, SUB-SYSTEM(+DES — sub-system 편입 시).
         /// </summary>
         public static List<CableLineData> LoadCable(SqlConnectionSettings settings)
         {
             const string baseSql = @"
-SELECT [CABLE NO],[PULLING START],[PULLING END],[FROM CONN],[TO CONN],
-       [DESIGN LTH],[PULLING LTH]
+SELECT [CABLE NO],[DESIGN LTH],[PULLING LTH],[Pulling %],
+       [PULLING START DATE],[PULLING END DATE],[FROM CONN DATE],[TO CONN DATE],
+       [FROM MODULE],[FROM EQUIP],[TO MODULE],[TO EQUIP],
+       [CABLE_TYPE],[CABLE_CORE],[CABLE_SIZE],[OUT DIA],[TRAY SYS],[SYSTEM]
 FROM [Navis].[EIT_Cable]";
 
             var cables = new List<CableLineData>();
@@ -299,13 +304,24 @@ FROM [Navis].[EIT_Cable]";
                 var c = new CableLineData
                 {
                     CableNo = cableNo,
-                    FromConnDate = GetDate(r, "FROM CONN"),
-                    ToConnDate   = GetDate(r, "TO CONN"),
+                    FromConnDate = GetDate(r, "FROM CONN DATE"),
+                    ToConnDate   = GetDate(r, "TO CONN DATE"),
                     DesignLth    = GetDouble(r, "DESIGN LTH"),
-                    PulledLth    = GetDouble(r, "PULLING LTH"),   // 표시 전용 (의미 미확정)
+                    PulledLth    = GetDouble(r, "PULLING LTH"),        // 표시 전용 (§13-6)
+                    PullingProgress = GetPercentage(r, "Pulling %"),   // 표시 전용
+                    FromModule = GetString(r, "FROM MODULE"),
+                    FromEquip  = GetString(r, "FROM EQUIP"),
+                    ToModule   = GetString(r, "TO MODULE"),
+                    ToEquip    = GetString(r, "TO EQUIP"),
+                    Type       = GetString(r, "CABLE_TYPE"),
+                    Core       = GetString(r, "CABLE_CORE"),
+                    Size       = GetString(r, "CABLE_SIZE"),
+                    OutDia     = GetString(r, "OUT DIA"),
+                    TraySys    = GetString(r, "TRAY SYS"),
+                    System     = GetString(r, "SYSTEM"),
                 };
-                c.StageDates[CableLineStage.Pulling] = GetDate(r, "PULLING START");
-                c.StageDates[CableLineStage.Pulled]  = GetDate(r, "PULLING END");
+                c.StageDates[CableLineStage.Pulling] = GetDate(r, "PULLING START DATE");
+                c.StageDates[CableLineStage.Pulled]  = GetDate(r, "PULLING END DATE");
                 c.ComputeTerminated();
                 cables.Add(c);
             });

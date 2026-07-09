@@ -359,12 +359,14 @@ namespace NavisVisualizer.Models
         /// <summary>
         /// Model tree indexer strips leading '/' from DisplayName, so Excel Tray
         /// Numbers like "/101890-INT-25018-CM-PDA-CV/B1" must be normalized the
-        /// same way before lookup.
+        /// same way before lookup. OASIS EIT_Tray의 BRANCH NO.는 끝에 '.'이 붙은
+        /// 행이 있어(실측 2026-07) 매칭이 깨졌다 — 모델 DisplayName엔 없는 장식이므로
+        /// 후행 '.'도 제거한다.
         /// </summary>
         public static string NormalizeId(string id)
         {
             if (string.IsNullOrEmpty(id)) return "";
-            return id.TrimStart('/').Trim();
+            return id.TrimStart('/').Trim().TrimEnd('.').Trim();
         }
     }
 

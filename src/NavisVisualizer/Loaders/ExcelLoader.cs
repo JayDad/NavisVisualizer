@@ -267,7 +267,9 @@ namespace NavisVisualizer.Loaders
                     string trayNo = row[trayNoCol]?.ToString()?.Trim();
                     if (string.IsNullOrEmpty(trayNo)) continue;
 
-                    if (byTray.ContainsKey(trayNo)) continue;
+                    // 중복 판정은 정규화 키("X"와 "X."은 같은 트레이 — 후행 '.' 장식 실측)
+                    string dedupKey = EitTrayData.NormalizeId(trayNo);
+                    if (byTray.ContainsKey(dedupKey)) continue;
 
                     var tray = new EitTrayData
                     {
@@ -277,8 +279,8 @@ namespace NavisVisualizer.Loaders
                         InstallProgress = installPctCol >= 0 ? ParsePercentage(row[installPctCol]) : null,
                         TrayInstallDate = trayDateCol >= 0 ? ParseCellValue(row[trayDateCol]) : null,
                     };
-                    byTray[trayNo] = tray;
-                    order.Add(trayNo);
+                    byTray[dedupKey] = tray;
+                    order.Add(dedupKey);
                 }
             }
 
