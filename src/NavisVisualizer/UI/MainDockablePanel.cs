@@ -30,6 +30,10 @@ namespace NavisVisualizer.UI
         /// <summary>Dedicated index for Cable Pull boxes (key = prefix before "-BOX") — 스코프 CABLE.</summary>
         public ModelItemSearcher CableBoxSearcher { get; } = new ModelItemSearcher();
 
+        /// <summary>Cable(형상) 탭 — cable-no를 컴포넌트에 직접 매칭 (레벨 타겟, 스코프 CABLE).
+        /// CableBoxSearcher와 매칭 전략이 달라(box 접두 vs cable-no 정확 일치) 별도 인스턴스.</summary>
+        public ModelItemSearcher CableLineSearcher { get; } = new ModelItemSearcher();
+
         public ColorOverrideEngine OverrideEngine { get; }
         public ExportService ExportSvc { get; } = new ExportService();
         public UserDataService UserDataSvc { get; } = new UserDataService();
@@ -43,6 +47,7 @@ namespace NavisVisualizer.UI
         private EquipmentTab _equipmentTab;
         private EitTrayTab _eitTrayTab;
         private CableTab _cableTab;
+        private CableLineTab _cableLineTab;
         private SubSystemTab _subSystemTab;
         private ToolsTab _toolsTab;
 
@@ -50,7 +55,7 @@ namespace NavisVisualizer.UI
         {
             OverrideEngine = new ColorOverrideEngine(
                 SpoolTagSearcher, HydroTagSearcher, ElecTagSearcher, SubSystemSearcher,
-                EquipmentSearcher, CableBoxSearcher);
+                EquipmentSearcher, CableBoxSearcher, CableLineSearcher);
             InitializeComponent();
         }
 
@@ -78,10 +83,17 @@ namespace NavisVisualizer.UI
             _eitTrayTab.Dock = DockStyle.Fill;
             eitPage.Controls.Add(_eitTrayTab);
 
-            var cablePage = new TabPage("Cable Pull");
+            // 기존 노드/박스 집계 탭 — 개명(Cable(Node)). 신규 형상 탭과 공존.
+            var cablePage = new TabPage("Cable(Node)");
             _cableTab = new CableTab(this);
             _cableTab.Dock = DockStyle.Fill;
             cablePage.Controls.Add(_cableTab);
+
+            // 신규 형상 탭 — 07_Trion_All_Cable.nwd의 cable-no 컴포넌트를 직접 매칭·하이라이트.
+            var cableLinePage = new TabPage("Cable");
+            _cableLineTab = new CableLineTab(this);
+            _cableLineTab.Dock = DockStyle.Fill;
+            cableLinePage.Controls.Add(_cableLineTab);
 
             var subSysPage = new TabPage("Sub-system");
             _subSystemTab = new SubSystemTab(this);
@@ -98,6 +110,7 @@ namespace NavisVisualizer.UI
             _tabControl.TabPages.Add(eqPage);
             _tabControl.TabPages.Add(eitPage);
             _tabControl.TabPages.Add(cablePage);
+            _tabControl.TabPages.Add(cableLinePage);
             _tabControl.TabPages.Add(subSysPage);
             _tabControl.TabPages.Add(toolPage);
 

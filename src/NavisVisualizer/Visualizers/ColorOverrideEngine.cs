@@ -15,7 +15,8 @@ namespace NavisVisualizer.Visualizers
         Spool,
         Equipment,
         EitTray,
-        Cable,
+        Cable,        // 기존 Cable Pull(노드/박스) 탭
+        CableLine,    // 신규 Cable(형상) 탭 — 캐시가 Cable과 충돌하지 않도록 별도 모듈
         SubSystem,
     }
 
@@ -32,6 +33,8 @@ namespace NavisVisualizer.Visualizers
         private readonly ModelItemSearcher _subSystemSearcher;
         private readonly ModelItemSearcher _equipmentSearcher;
         private readonly ModelItemSearcher _cableBoxSearcher;
+        // Cable(형상) 탭 — cable-no를 컴포넌트에 직접 매칭 (레벨 타겟, 스코프 CABLE).
+        private readonly ModelItemSearcher _cableLineSearcher;
 
         // Stage 컬렉션 캐시를 모듈별로 격리한다. 단일 캐시에 enum.ToString() 키로
         // 넣으면 "NotStarted"(전 모듈), "Setting"(Spool/Equipment) 등이 충돌해
@@ -53,13 +56,23 @@ namespace NavisVisualizer.Visualizers
         private Dictionary<CableStage, ColorSetting> _cableLastSettings;
         private bool _cableFilterFocusActive;
 
+        // Cable(형상) 탭 캐시 — cableNo 단위. 그룹 키(stage명 또는 "__highlight")로 색을 묶는다.
+        private Dictionary<string, ModelItemCollection> _cableLineItems
+            = new Dictionary<string, ModelItemCollection>(StringComparer.OrdinalIgnoreCase);
+        private Dictionary<string, string> _cableLineGroupOfCable
+            = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        private Dictionary<string, ColorSetting> _cableLineGroupSettings
+            = new Dictionary<string, ColorSetting>();
+        private bool _cableLineFilterFocusActive;
+
         public ColorOverrideEngine(
             ModelItemSearcher spoolTagSearcher,
             ModelItemSearcher hydroTagSearcher,
             ModelItemSearcher elecTagSearcher,
             ModelItemSearcher subSystemSearcher,
             ModelItemSearcher equipmentSearcher,
-            ModelItemSearcher cableBoxSearcher)
+            ModelItemSearcher cableBoxSearcher,
+            ModelItemSearcher cableLineSearcher)
         {
             _spoolTagSearcher = spoolTagSearcher;
             _hydroTagSearcher = hydroTagSearcher;
@@ -67,6 +80,7 @@ namespace NavisVisualizer.Visualizers
             _subSystemSearcher = subSystemSearcher;
             _equipmentSearcher = equipmentSearcher;
             _cableBoxSearcher = cableBoxSearcher;
+            _cableLineSearcher = cableLineSearcher;
         }
 
         private Dictionary<string, ModelItemCollection> ModuleCache(VisualModule module)
@@ -270,8 +284,10 @@ namespace NavisVisualizer.Visualizers
                 list.AddRange(items);
             }
 
+            // §10: 이전 적용 누적을 먼저 리셋(다른 공종 유지) — 재적용 투명 누적·체크해제 잔존 방지.
+            // cache.Clear()도 유지 — IncrementalUpdate가 깨끗한 per-stage 캐시에 의존.
+            ResetModule(doc, VisualModule.EitTray);
             var cache = ModuleCache(VisualModule.EitTray);
-            cache.Clear();
 
             foreach (var kv in stageItems)
             {
@@ -280,7 +296,10 @@ namespace NavisVisualizer.Visualizers
                 cache[key] = collection;
 
                 if (colorSettings.TryGetValue(kv.Key, out var setting))
+                {
                     ApplyOverride(doc, collection, setting);
+                    AccumulatePainted(VisualModule.EitTray, collection);
+                }
             }
 
             return result;
@@ -503,6 +522,162 @@ namespace NavisVisualizer.Visualizers
 
         public IEnumerable<string> GetMatchedCableNodeIds() => _cableNodeItems.Keys;
 
+        // ============================================================
+        // Cable(형상) 탭 — cable-no를 컴포넌트에 직접 매칭·색칠 (VisualModule.CableLine)
+        // ============================================================
+
+        /// <summary>하이라이트 우선 모드의 단일 그룹 키 (stage명과 충돌하지 않게 언더스코어 접두).</summary>
+        public const string CableLineHighlightGroup = "__highlight";
+
+        /// <summary>
+        /// Cable(형상): cable-no를 컴포넌트에 매칭해 stage색(또는 하이라이트 단색)으로 칠한다.
+        /// highlightOverride가 null이 아니면(맨 목록·stage 날짜 전무) 모든 매칭 케이블을 그 단색으로
+        /// 칠하고, null이면 GetStageAtDate 결과로 그룹핑한다. 체크 해제된 단계(colorSettings에 없음)는
+        /// 색칠하지 않지만 _cableLineItems엔 남겨(선택/clash 대상). §10 ResetModule를 처음부터 채택.
+        /// </summary>
+        public OverrideResult ApplyCableLines(
+            Document doc,
+            List<CableLineData> cables,
+            Dictionary<CableLineStage, ColorSetting> colorSettings,
+            DateTime referenceDate,
+            ColorSetting highlightOverride)
+        {
+            var result = new OverrideResult();
+            var groupItems = new Dictionary<string, List<ModelItem>>(StringComparer.OrdinalIgnoreCase);
+            var groupSettings = new Dictionary<string, ColorSetting>();
+
+            var normalizedIds = cables.Select(c => CableLineData.NormalizeCableNo(c.CableNo)).Distinct();
+            var searchResult = _cableLineSearcher.FindBySpoolIds(normalizedIds);
+
+            _cableLineItems.Clear();
+            _cableLineGroupOfCable.Clear();
+
+            foreach (var cable in cables)
+            {
+                string key = CableLineData.NormalizeCableNo(cable.CableNo);
+                if (!searchResult.TryGetValue(key, out var items) || items.Count == 0)
+                {
+                    result.UnmatchedIds.Add(cable.CableNo);
+                    continue;
+                }
+                result.MatchedCount++;
+
+                var col = new ModelItemCollection();
+                col.AddRange(items);
+                _cableLineItems[cable.CableNo] = col;   // 선택/clash용 — 체크 여부와 무관
+
+                string groupKey;
+                ColorSetting setting;
+                if (highlightOverride != null)
+                {
+                    groupKey = CableLineHighlightGroup;
+                    setting = highlightOverride;
+                }
+                else
+                {
+                    var stage = cable.GetStageAtDate(referenceDate);
+                    groupKey = stage.ToString();
+                    if (!colorSettings.TryGetValue(stage, out setting))
+                        continue;   // 체크 해제된 단계 — 색칠 안 함
+                }
+
+                _cableLineGroupOfCable[cable.CableNo] = groupKey;
+                groupSettings[groupKey] = setting;
+                if (!groupItems.TryGetValue(groupKey, out var list))
+                {
+                    list = new List<ModelItem>();
+                    groupItems[groupKey] = list;
+                }
+                list.AddRange(items);
+            }
+
+            // §10: 재적용 전 이 모듈 누적 리셋(다른 공종 유지). focus는 override라 색칠 전 별도 해제(탭에서).
+            ResetModule(doc, VisualModule.CableLine);
+            var cache = ModuleCache(VisualModule.CableLine);
+
+            foreach (var kv in groupItems)
+            {
+                var collection = ToCollection(kv.Value);
+                cache[kv.Key] = collection;
+                if (groupSettings.TryGetValue(kv.Key, out var setting))
+                {
+                    ApplyOverride(doc, collection, setting);
+                    AccumulatePainted(VisualModule.CableLine, collection);
+                }
+            }
+
+            _cableLineGroupSettings = groupSettings;
+            _cableLineFilterFocusActive = false;
+            return result;
+        }
+
+        /// <summary>필터 포커스: hit 케이블 외 전부 투명 dim, hit은 그룹 투명도 유지 (검색 히트 강조용).</summary>
+        public void SetCableLineFilterFocus(Document doc, IEnumerable<string> hitCableNos, double dimTransparency = 0.85)
+        {
+            if (_cableLineItems.Count == 0) return;
+            var hits = new HashSet<string>(hitCableNos, StringComparer.OrdinalIgnoreCase);
+
+            var dimItems = new ModelItemCollection();
+            var restoreByGroup = new Dictionary<string, ModelItemCollection>();
+            foreach (var kv in _cableLineItems)
+            {
+                if (hits.Contains(kv.Key) && _cableLineGroupOfCable.TryGetValue(kv.Key, out var g))
+                {
+                    if (!restoreByGroup.TryGetValue(g, out var bucket))
+                    {
+                        bucket = new ModelItemCollection();
+                        restoreByGroup[g] = bucket;
+                    }
+                    foreach (ModelItem mi in kv.Value) bucket.Add(mi);
+                }
+                else
+                {
+                    foreach (ModelItem mi in kv.Value) dimItems.Add(mi);
+                }
+            }
+
+            if (dimItems.Count > 0)
+                doc.Models.OverridePermanentTransparency(dimItems, dimTransparency);
+            foreach (var kv in restoreByGroup)
+                if (_cableLineGroupSettings.TryGetValue(kv.Key, out var setting))
+                    doc.Models.OverridePermanentTransparency(kv.Value, setting.Transparency);
+
+            _cableLineFilterFocusActive = true;
+        }
+
+        public void ClearCableLineFilterFocus(Document doc)
+        {
+            if (!_cableLineFilterFocusActive) return;
+            var cache = ModuleCache(VisualModule.CableLine);
+            // 색칠된 그룹은 그룹 색/투명도로 복원.
+            foreach (var kv in _cableLineGroupSettings)
+                if (cache.TryGetValue(kv.Key, out var collection))
+                    ApplyOverride(doc, collection, kv.Value);
+            // 체크 해제 단계(색칠 안 된) 케이블은 dim만 걷어낸다 — 케이블 형상은 CableLine만 칠하므로 안전.
+            var ungrouped = new ModelItemCollection();
+            foreach (var kv in _cableLineItems)
+                if (!_cableLineGroupOfCable.ContainsKey(kv.Key))
+                    foreach (ModelItem mi in kv.Value) ungrouped.Add(mi);
+            if (ungrouped.Count > 0)
+                doc.Models.ResetPermanentMaterials(ungrouped);
+            _cableLineFilterFocusActive = false;
+        }
+
+        public ModelItemCollection GetCableLineItems(string cableNo) =>
+            _cableLineItems.TryGetValue(cableNo, out var col) ? col : null;
+
+        public IEnumerable<string> GetMatchedCableLineNos() => _cableLineItems.Keys;
+
+        /// <summary>Cable(형상) 공종 초기화: focus 해제 → 이 모듈 색 리셋 → 캐시 clear. isolate 숨김은 탭이 복원.</summary>
+        public void ResetCableLineModule(Document doc)
+        {
+            ClearCableLineFilterFocus(doc);
+            ResetModule(doc, VisualModule.CableLine);
+            _cableLineItems.Clear();
+            _cableLineGroupOfCable.Clear();
+            _cableLineGroupSettings = new Dictionary<string, ColorSetting>();
+        }
+
         /// <summary>모듈 자기 캐시의 stage 컬렉션에만 색/투명도를 재적용한다.</summary>
         public bool UpdateStageColor(Document doc, VisualModule module, string stageKey, ColorSetting setting)
         {
@@ -554,6 +729,10 @@ namespace NavisVisualizer.Visualizers
             _cableNodeStages.Clear();
             _cableLastSettings = null;
             _cableFilterFocusActive = false;
+            _cableLineItems.Clear();
+            _cableLineGroupOfCable.Clear();
+            _cableLineGroupSettings = new Dictionary<string, ColorSetting>();
+            _cableLineFilterFocusActive = false;
         }
 
         private ModelItemCollection ToCollection(List<ModelItem> items)
