@@ -446,8 +446,8 @@ namespace NavisVisualizer.Models
         Equipment,     // Mech_EQ — TAG NO 매칭 (SubSystemSearcher: MEQ·SPL·HYDROPKG)
         Piping,        // Piping_HydrotestPKG — PKGNO 매칭 (PKG 노드 색칠이 하위 스풀/배관을 커버)
         EitEquipment,  // EIT_EQ — TAG NO 매칭 (ElecTagSearcher: EIT 스코프). INSTALL DTE 단일 단계
-        EitTray,       // EIT_Tray — BRANCH NO. 매칭 (ElecTagSearcher). Install % 기반 현재상태
         Cable,         // EIT_Cable — CABLE NO 매칭 (Sub-system 전용 레벨 타겟, CABLE 스코프)
+        // EIT Tray 없음 — EIT_Tray 테이블에 Sub-system 매핑 컬럼이 없음 (2026-07 사용자 확정)
     }
 
     public static class SubSystemDisciplineInfo
@@ -457,7 +457,6 @@ namespace NavisVisualizer.Models
             [SubSystemDiscipline.Equipment]    = "Equipment",
             [SubSystemDiscipline.Piping]       = "Piping",
             [SubSystemDiscipline.EitEquipment] = "EIT EQ",
-            [SubSystemDiscipline.EitTray]      = "EIT Tray",
             [SubSystemDiscipline.Cable]        = "Cable",
         };
     }
@@ -491,29 +490,26 @@ namespace NavisVisualizer.Models
 
     /// <summary>
     /// Sub-system 탭의 통합 요소. 공종별 원본 데이터(EquipmentData/TestPackageData/
-    /// EitTrayData/CableLineData/EIT_EQ 설치일)를 감싸 공통 축(Sub-system, 매칭 키,
-    /// 진행 상태)으로 노출한다 — stage 계산은 원본 모델의 판정을 그대로 재사용한다.
-    /// EIT Tray는 날짜가 없어(%기반) 기준일과 무관한 현재상태 판정 — 문서화된 예외.
+    /// CableLineData/EIT_EQ 설치일)를 감싸 공통 축(Sub-system, 매칭 키, 진행 상태)으로
+    /// 노출한다 — stage 계산은 원본 모델의 판정을 그대로 재사용한다.
     /// </summary>
     public class SubSystemElement
     {
         public string SubSystem { get; }
         public SubSystemDiscipline Discipline { get; }
-        /// <summary>모델 매칭 키. Equipment/EIT EQ는 TAG NO, Piping은 PKGNO,
-        /// EIT Tray는 정규화된 BRANCH NO., Cable은 CABLE NO.</summary>
+        /// <summary>모델 매칭 키. Equipment/EIT EQ는 TAG NO, Piping은 PKGNO, Cable은 CABLE NO.</summary>
         public string ElementId { get; }
         public string Description { get; }
 
         private readonly EquipmentData _equipment;
         private readonly TestPackageData _package;
-        private readonly EitTrayData _tray;
         private readonly CableLineData _cable;
         private readonly DateTime? _eitInstallDate;   // EIT_EQ INSTALL DTE (단일 단계)
 
         private SubSystemElement(string subSystem, SubSystemDiscipline discipline,
             string elementId, string description,
             EquipmentData equipment = null, TestPackageData package = null,
-            EitTrayData tray = null, CableLineData cable = null, DateTime? eitInstallDate = null)
+            CableLineData cable = null, DateTime? eitInstallDate = null)
         {
             SubSystem = subSystem;
             Discipline = discipline;
@@ -521,7 +517,6 @@ namespace NavisVisualizer.Models
             Description = description;
             _equipment = equipment;
             _package = package;
-            _tray = tray;
             _cable = cable;
             _eitInstallDate = eitInstallDate;
         }
@@ -540,25 +535,17 @@ namespace NavisVisualizer.Models
             new SubSystemElement(subSystem?.Trim(), SubSystemDiscipline.EitEquipment,
                 EitTrayData.NormalizeId(tagNo), description ?? "", eitInstallDate: installDate);
 
-        /// <summary>EIT Tray — ElementId는 모델 인덱스 키와 맞춘 정규화 BRANCH NO.(선행 '/'·후행 '.' 제거).</summary>
-        public static SubSystemElement FromTray(EitTrayData tray, string subSystem) =>
-            new SubSystemElement(subSystem?.Trim(), SubSystemDiscipline.EitTray,
-                EitTrayData.NormalizeId(tray.TrayNumber), "", tray: tray);
-
         public static SubSystemElement FromCable(CableLineData cable) =>
             new SubSystemElement(cable.SubSystem?.Trim(), SubSystemDiscipline.Cable,
                 cable.CableNo, cable.System ?? "", cable: cable);
 
-        /// <summary>기준일 시점의 공종별 상세 단계 라벨 (리포트 상세 리스트용).
-        /// EIT Tray만 예외적으로 기준일 무시(% 기반 현재상태 — 날짜 컬럼 부재).</summary>
+        /// <summary>기준일 시점의 공종별 상세 단계 라벨 (리포트 상세 리스트용).</summary>
         public string StageLabelAt(DateTime referenceDate)
         {
             if (_equipment != null)
                 return EquipmentStageInfo.Labels[_equipment.GetStageAtDate(referenceDate)];
             if (_package != null)
                 return HydrotestStageInfo.Labels[_package.GetStageAtDate(referenceDate)];
-            if (_tray != null)
-                return EitStageInfo.Labels[_tray.GetStage()];
             if (_cable != null)
                 return CableLineStageInfo.Labels[_cable.GetStageAtDate(referenceDate)];
             // EIT_EQ 단일 단계
@@ -580,15 +567,6 @@ namespace NavisVisualizer.Models
                 var pkgStage = _package.GetStageAtDate(referenceDate);
                 if (pkgStage == HydrotestStage.NotStarted) return ProgressStatus.NotStarted;
                 return pkgStage == HydrotestStage.Reinstatement ? ProgressStatus.Completed : ProgressStatus.InProgress;
-            }
-            if (_tray != null)
-            {
-                switch (_tray.GetStage())
-                {
-                    case EitStage.Installed: return ProgressStatus.Completed;
-                    case EitStage.Installing: return ProgressStatus.InProgress;
-                    default: return ProgressStatus.NotStarted;
-                }
             }
             if (_cable != null)
             {

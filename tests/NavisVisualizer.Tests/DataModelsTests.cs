@@ -103,12 +103,6 @@ namespace NavisVisualizer.Tests
             Assert.AreEqual(ProgressStatus.NotStarted, eqNot.StatusAt(refDate));
             Assert.AreEqual("101180-AT-10052", eqNot.ElementId); // 선행 '/' 방어 정규화
 
-            // EIT Tray — % 기반 현재상태 (기준일 무시)
-            var tray = SubSystemElement.FromTray(
-                new EitTrayData { TrayNumber = "/101890-HVT-61003/B1.", InstallProgress = 0.5 }, "0104-00");
-            Assert.AreEqual(ProgressStatus.InProgress, tray.StatusAt(refDate));
-            Assert.AreEqual("101890-HVT-61003/B1", tray.ElementId); // 선행 '/'·후행 '.' 정규화
-
             // Cable — 날짜 기반: 결선완료(Terminated)만 완료
             var cable = new CableLineData { CableNo = "101440-CLV-92440-001", SubSystem = "0104-00" };
             cable.StageDates[CableLineStage.Pulling] = new DateTime(2026, 6, 10);

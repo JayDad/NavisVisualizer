@@ -403,16 +403,15 @@ A Punch Total, A Punch Closed, A Punch %, B Punch Total, B Punch Closed, B Punch
 - **Spool 단위 sub-system**: 현재 배관은 PKG 노드 색칠이 하위 스풀을 커버. 개별 스풀
   granularity가 필요해지면 `Piping_Spool`에 Sub-System 컬럼 계약 확정 후
   `LoadSubSystemElements`에 추가 (Discipline enum 확장).
-- **EIT EQ / Tray / Cable 편입**: **[구현됨 2026-07 — Windows 검증 대기]** 요소 5공종으로 확장.
+- **EIT EQ / Cable 편입**: **[구현됨 2026-07 — Windows 검증 대기]** 요소 4공종으로 확장.
   `LoadSubSystemElements`가 `EIT_EQ`(TAG NO/INSTALL DTE 단일 단계 미착수·설치완료)·
-  `EIT_Tray`(BRANCH NO./Install % 현재상태 — **[SUB-SYSTEM] 컬럼 실측 미확인**, 없으면 그 공종만
-  제외되고 라벨에 사유 표시)·`EIT_Cable`(CABLE NO/날짜 4종, SUB-SYSTEM 실측 확정)을 공종별
-  try/catch로 편입. 매칭은 스코프 라우팅(`SearcherForSubSystem`): EIT 계열 = ElecTagSearcher
-  (EIT full-walk, EitTrayTab과 공유 — walk 기반이라 안전) / Cable = 신규 `SubSystemCableSearcher`
+  `EIT_Cable`(CABLE NO/날짜 4종, SUB-SYSTEM 실측 확정)을 공종별 try/catch로 편입
+  (컬럼 미구성 시 그 공종만 제외 + 라벨 사유). **EIT Tray는 편입 안 함 — EIT_Tray에
+  Sub-system 매핑 컬럼이 없음(2026-07 사용자 확정). 컬럼 추가 시 EIT EQ 패턴으로 재편입.**
+  매칭은 스코프 라우팅(`SearcherForSubSystem`): EIT EQ = ElecTagSearcher(EIT full-walk,
+  EitTrayTab과 공유 — walk 기반이라 안전) / Cable = 신규 `SubSystemCableSearcher`
   (CABLE 레벨 타겟 — CableLineSearcher와 태그 셋이 달라 공유 불가, 8번째 인스턴스).
-  Tray ElementId는 NormalizeId 정규화본 저장(모델 인덱스 키와 일치). ApplySubSystem에
-  §10 ResetModule/AccumulatePainted도 이식(선택 축소 재적용 잔존 해결).
-  EIT Tray는 날짜가 없어 기준일 무시(%기반 현재상태) — 문서화된 예외.
+  ApplySubSystem에 §10 ResetModule/AccumulatePainted도 이식(선택 축소 재적용 잔존 해결).
 - **Excel 소스**: 미지원 (OASIS 전용). 필요 시 DataSourcePanel 이중 소스로 확장 —
   Excel에 Sub-system 컬럼 계약이 먼저.
 - **집계 범위(ScopePanel) 미배선** — 필요 시 7번 공용 컴포넌트 그대로 연결 가능.

@@ -13,15 +13,15 @@ namespace NavisVisualizer.UI
 {
     /// <summary>
     /// Sub-system 탭: OASIS의 Sub-system 마스터([Navis].[System_Summary] —
-    /// Walkdown/P-MCC/MCC/PCC 실적일 + ITR/Punch 수치)와 요소 데이터 5공종
-    /// (Equipment Mech_EQ / Piping Hydrotest PKG / EIT EQ / EIT Tray / Cable —
-    /// 각 테이블의 SUB-SYSTEM 컬럼 기준)을 묶어, 선택한 Sub-system들의
-    /// 요소를 3D에 가시화하고 현황 리포트를 출력한다.
+    /// Walkdown/P-MCC/MCC/PCC 실적일 + ITR/Punch 수치)와 요소 데이터 4공종
+    /// (Equipment Mech_EQ / Piping Hydrotest PKG / EIT EQ / Cable —
+    /// 각 테이블의 SUB-SYSTEM 컬럼 기준. EIT Tray는 매핑 컬럼이 없어 제외)을 묶어,
+    /// 선택한 Sub-system들의 요소를 3D에 가시화하고 현황 리포트를 출력한다.
     ///
     /// - 데이터: OASIS 전용. 마스터 미구성 시 요소 파생 목록으로 자동 fallback.
-    ///   EIT 3공종은 공종별 try/catch — 컬럼 미구성이어도 나머지는 정상 로드(라벨에 사유)
+    ///   EIT 계열은 공종별 try/catch — 컬럼 미구성이어도 나머지는 정상 로드(라벨에 사유)
     /// - 매칭: 공종별 스코프 라우팅(엔진 SearcherForSubSystem) — Equipment/Piping은
-    ///   SubSystemSearcher(MEQ·SPL·HYDROPKG full-walk), EIT EQ·Tray는 ElecTagSearcher(EIT),
+    ///   SubSystemSearcher(MEQ·SPL·HYDROPKG full-walk), EIT EQ는 ElecTagSearcher(EIT),
     ///   Cable은 SubSystemCableSearcher(CABLE 레벨 타겟 — 로드 셋 기반, _needsIndexRebuild)
     /// - 가시화 2모드: Sub-system 단계별(Walkdown→PCC 6색, 마스터 필요) /
     ///   요소 진행상태별(미착수·진행중·완료)
@@ -726,10 +726,9 @@ namespace NavisVisualizer.UI
             Application.DoEvents();
             _main.SubSystemSearcher.BuildIndex(doc, NwdScope.SubSystem);
 
-            // EIT 요소(EIT EQ + Tray)는 EIT 스코프 full-walk 인덱스(EitTrayTab과 공유 —
+            // EIT EQ 요소는 EIT 스코프 full-walk 인덱스(EitTrayTab과 공유 —
             // walk 기반이라 태그 셋 무관, 안전) — 요소가 있을 때만 빌드 보장.
-            if (_elements.Any(el => el.Discipline == SubSystemDiscipline.EitEquipment
-                                 || el.Discipline == SubSystemDiscipline.EitTray)
+            if (_elements.Any(el => el.Discipline == SubSystemDiscipline.EitEquipment)
                 && (!_main.ElecTagSearcher.IsIndexBuilt || _main.ElecTagSearcher.NeedsRebuild(doc)))
                 _main.ElecTagSearcher.BuildIndex(doc, NwdScope.EitTray);
 
@@ -851,9 +850,9 @@ namespace NavisVisualizer.UI
 
             lines.Add("");
             lines.Add("[Sub-system별 요약]");
-            lines.Add("Sub-system,Description,단계,MCC계획,지연(일),A-ITR,B-ITR,C-ITR,Punch A,Punch B,요소,Equipment,Piping,EIT EQ,EIT Tray,Cable,매칭,미매칭,미착수,진행중,완료,완료율(%)");
+            lines.Add("Sub-system,Description,단계,MCC계획,지연(일),A-ITR,B-ITR,C-ITR,Punch A,Punch B,요소,Equipment,Piping,EIT EQ,Cable,매칭,미매칭,미착수,진행중,완료,완료율(%)");
 
-            int tElems = 0, tEq = 0, tPip = 0, tEitEq = 0, tTray = 0, tCable = 0,
+            int tElems = 0, tEq = 0, tPip = 0, tEitEq = 0, tCable = 0,
                 tMatched = 0, tUnmatched = 0, tNs = 0, tIp = 0, tDone = 0;
             bool anyMatchInfo = false;
             foreach (var name in names)
@@ -863,7 +862,6 @@ namespace NavisVisualizer.UI
                 int eq    = els.Count(el => el.Discipline == SubSystemDiscipline.Equipment);
                 int pip   = els.Count(el => el.Discipline == SubSystemDiscipline.Piping);
                 int eitEq = els.Count(el => el.Discipline == SubSystemDiscipline.EitEquipment);
-                int tray  = els.Count(el => el.Discipline == SubSystemDiscipline.EitTray);
                 int cable = els.Count(el => el.Discipline == SubSystemDiscipline.Cable);
 
                 int ns = 0, ip = 0, done = 0;
@@ -897,12 +895,12 @@ namespace NavisVisualizer.UI
                 lines.Add($"{Csv(name)},{Csv(m?.Description ?? "")},{Csv(stageLabel)},{planStr},{delayStr}," +
                     $"{Csv(m?.ItrAText ?? "-")},{Csv(m?.ItrBText ?? "-")},{Csv(m?.ItrCText ?? "-")}," +
                     $"{Csv(m?.PunchAText ?? "-")},{Csv(m?.PunchBText ?? "-")}," +
-                    $"{els.Count},{eq},{pip},{eitEq},{tray},{cable},{matchedText},{unmatchedText},{ns},{ip},{done},{doneRate}");
-                tElems += els.Count; tEq += eq; tPip += pip; tEitEq += eitEq; tTray += tray; tCable += cable;
+                    $"{els.Count},{eq},{pip},{eitEq},{cable},{matchedText},{unmatchedText},{ns},{ip},{done},{doneRate}");
+                tElems += els.Count; tEq += eq; tPip += pip; tEitEq += eitEq; tCable += cable;
                 tNs += ns; tIp += ip; tDone += done;
             }
             string totalRate = tElems > 0 ? (tDone * 100.0 / tElems).ToString("F1") : "-";
-            lines.Add($"합계 ({names.Count}개),,,,,,,,,,{tElems},{tEq},{tPip},{tEitEq},{tTray},{tCable}," +
+            lines.Add($"합계 ({names.Count}개),,,,,,,,,,{tElems},{tEq},{tPip},{tEitEq},{tCable}," +
                 $"{(anyMatchInfo ? tMatched.ToString() : "-")}," +
                 $"{(anyMatchInfo ? tUnmatched.ToString() : "-")},{tNs},{tIp},{tDone},{totalRate}");
 

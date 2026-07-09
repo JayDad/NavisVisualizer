@@ -164,12 +164,12 @@ FROM [Navis].[Mech_EQ]";
         /// 않도록 그 수를 noSubSystemCount로 보고한다.
         /// </summary>
         /// <summary>
-        /// Sub-system 요소 로드 — 5공종: Equipment(Mech_EQ)·Piping(Piping_HydrotestPKG)은
-        /// 기존 검증 쿼리 재사용, EIT 3공종(EIT_EQ/EIT_Tray/EIT_Cable)은 편입(2026-07 사용자 요청).
-        /// EIT 계열은 공종별 try/catch — 컬럼 미구성(특히 EIT_Tray의 [SUB-SYSTEM]은 실측 미확인)
-        /// 이어도 나머지 공종은 정상 로드하고 disciplineNotes로 사유를 보고한다.
-        /// Sub-System 미지정 행은 제외: Equipment/Piping은 noSubSystemCount(기존 유지),
-        /// EIT 계열은 모수가 커서(케이블 수만 건) 공종별 "지정 M/전체 N" note로 분리 보고.
+        /// Sub-system 요소 로드 — 4공종: Equipment(Mech_EQ)·Piping(Piping_HydrotestPKG)은
+        /// 기존 검증 쿼리 재사용, EIT EQ(EIT_EQ)·Cable(EIT_Cable)은 편입(2026-07 사용자 요청).
+        /// EIT Tray는 Sub-system 매핑 컬럼이 없어 제외(2026-07 사용자 확정).
+        /// EIT 계열은 공종별 try/catch — 컬럼 미구성이어도 나머지 공종은 정상 로드하고
+        /// disciplineNotes로 사유를 보고한다. Sub-System 미지정 행은 제외: Equipment/Piping은
+        /// noSubSystemCount(기존 유지), EIT 계열은 모수가 커서 공종별 "M/N건 편입" note로 분리 보고.
         /// </summary>
         public static List<SubSystemElement> LoadSubSystemElements(
             SqlConnectionSettings settings, out int noSubSystemCount, out List<string> disciplineNotes)
@@ -217,36 +217,8 @@ FROM [Navis].[EIT_EQ]";
                 disciplineNotes.Add($"EIT EQ 제외({FirstLine(ex.Message)})");
             }
 
-            // EIT Tray — [Navis].[EIT_Tray]: [SUB-SYSTEM] 컬럼은 실측 미확인(문서상 BRANCH NO./
-            // Install %/PJTNO만 확정 — §9). 없으면 이 블록만 실패하고 note로 드러난다.
-            try
-            {
-                int total = 0, taken = 0;
-                var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                const string traySql = @"
-SELECT [BRANCH NO.],[TRAY Install %],[SUB-SYSTEM]
-FROM [Navis].[EIT_Tray]";
-                ExecuteReader(settings, traySql, "PJTNO", r =>
-                {
-                    total++;
-                    string trayNo = GetString(r, "BRANCH NO.");
-                    string sub = GetString(r, "SUB-SYSTEM");
-                    if (string.IsNullOrEmpty(trayNo) || string.IsNullOrWhiteSpace(sub)) return;
-                    if (!seen.Add(EitTrayData.NormalizeId(trayNo))) return;
-                    taken++;
-                    var tray = new EitTrayData
-                    {
-                        TrayNumber = trayNo,
-                        InstallProgress = GetPercentage(r, "TRAY Install %"),
-                    };
-                    elements.Add(SubSystemElement.FromTray(tray, sub));
-                });
-                disciplineNotes.Add($"EIT Tray {taken:N0}/{total:N0}건 편입");
-            }
-            catch (Exception ex)
-            {
-                disciplineNotes.Add($"EIT Tray 제외({FirstLine(ex.Message)})");
-            }
+            // EIT Tray는 편입하지 않는다 — EIT_Tray에 Sub-system 매핑 컬럼이 없음(2026-07 사용자 확정).
+            // 추후 [SUB-SYSTEM] 컬럼이 추가되면 EIT EQ 블록과 동일 패턴으로 재편입.
 
             // Cable — LoadCable(철자 실측 확정) 재사용. SUB-SYSTEM 미지정 케이블(샘플상 다수)은 제외.
             try

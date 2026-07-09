@@ -96,7 +96,6 @@ namespace NavisVisualizer.Visualizers
             switch (discipline)
             {
                 case SubSystemDiscipline.EitEquipment:
-                case SubSystemDiscipline.EitTray:
                     return _elecTagSearcher;
                 case SubSystemDiscipline.Cable:
                     return _subSystemCableSearcher;
