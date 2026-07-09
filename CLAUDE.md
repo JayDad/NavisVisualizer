@@ -58,8 +58,11 @@ BuildIndexForTags / BuildIndexForBoxes에 `NwdScope` 파라미터, null = 전체
 **[해결됨] digit 보유 파일 노드로 인한 조기 정지**
 federated 구조에서 `MEBTray1.nwc`(파일명에 digit)가 `/SM/MEB/ELEC` → `/.../PCVTRAY`(digit 없는 범주) 위에 있으면, "tag-like인데 자식에 digit 없음 → STOP"이 depth 1에서 발동해 하위 ELEC 트레이가 통째로 미인덱싱 → 매칭 0건이 되던 문제. 현재 `WalkAndIndex`는 tag-like 노드라도 **구조 컨테이너(geometry 없고 자식 있는 자식)**가 있으면 계속 내려가고, 자식이 전부 geometry leaf일 때만 정지하도록 수정됨.
 
-**[잔여] 과다 방문**
-`/CM/PDA/ELEC/PCVTRAY-STW`처럼 digit 없는 범주 노드 바로 아래에 geometry가 직접 붙으면, 그 노드는 애초에 tag-like가 아니라 정지 로직을 안 타고 geometry까지 방문. 단일 NWD에서 최적화가 필요하면 `BuildIndexForTrayIds`(Equipment의 `BuildIndexForTags`와 동일 방식)를 추가하는 방안 검토.
+**[해결됨 2026-07 — Windows 검증 대기] 과다 방문 (EIT Tray 가시화 적용이 가장 느렸던 원인)**
+`/CM/PDA/ELEC/PCVTRAY-STW`처럼 digit 없는 범주 노드 바로 아래에 geometry가 직접 붙으면, 그 노드는 tag-like가 아니라서 정지 게이트를 안 타고 **geometry 서브트리 전체를 COM으로 순회**했다. EIT nwd(트레이+소형기기+서포트)는 이 구조가 많아 ElecTagSearcher 일반 walk(= EIT Tray 탭 첫 [적용])가 전 탭에서 가장 느렸다. `WalkAndIndex`의 하강 게이트("자식 중 tag-like 또는 구조 컨테이너가 있을 때만 하강, 전부 geometry면 정지")를 **비태그 노드에도 동일 적용**해 geometry 숲 진입을 차단 — 일반 walk를 쓰는 모든 searcher(Hydro/ElecTag/SubSystem)가 공통 수혜.
+- **전제(기존 태그 노드 정지 규칙과 동일)**: 태그는 컴포지트 노드 이름이며 geometry 인스턴스 아래에는 없다. Navisworks에서 `HasGeometry`는 leaf 인스턴스에서만 true라 컴포지트는 구조 컨테이너로 계속 하강된다.
+- **리스크(Windows 실측 대조 필요)**: 종전엔 digit 보유 **geometry 노드 이름도 인덱싱**됐다. 만약 어떤 모델이 태그를 컴포지트가 아닌 geometry leaf 이름에만 갖고 있으면 이제 미매칭이 된다 — 매칭 건수를 수정 전과 대조할 것. 인덱스 0건이면 기존 3중 fallback이 동작하나 부분 누락은 못 잡는다(§2 레벨 타겟과 동일 성격).
+- 그래도 느리면 차선책: EIT Tray를 레벨 타겟(`BuildIndexForTags`)으로 전환 — 단 ELEC 트리는 깊이 불균일(위 MEBTray 사례)이라 리스크가 더 크고, ElecTagSearcher가 Sub-system 탭 EIT EQ 매칭과 공유 중이므로 전환 시 전용 인스턴스 분리가 선행돼야 한다.
 
 **[변경됨] Spool 인덱스 = 레벨 타겟으로 전환 (2026-07 — 성능 극대화)**
 2만 스풀 기준 general `WalkAndIndex`가 스풀마다 "하강할지" 판단하려고 자식(전부 geometry인 경우 끝까지)을 COM으로 스캔 → 첫 빌드 ~1분. `SpoolTab.BuildIndex`를 `BuildIndex(NwdScope.Spool)`에서 **`BuildIndexForTags(spoolIdSet, NwdScope.Spool)`**(Equipment와 동일 레벨 타겟)로 교체. 스풀 id가 처음 매칭되는 깊이만 `IndexAtDepth`로 인덱싱하고 그 노드의 geometry 자식은 아예 안 건드림 → 자식 스캔 비용 제거.
