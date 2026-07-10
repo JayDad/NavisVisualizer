@@ -69,7 +69,7 @@ federated 구조에서 `MEBTray1.nwc`(파일명에 digit)가 `/SM/MEB/ELEC` → 
 `/CM/PDA/ELEC/PCVTRAY-STW`처럼 digit 없는 범주 노드 바로 아래에 geometry가 직접 붙으면, 그 노드는 tag-like가 아니라서 정지 게이트를 안 타고 **geometry 서브트리 전체를 COM으로 순회**했다. EIT nwd(트레이+소형기기+서포트)는 이 구조가 많아 ElecTagSearcher 일반 walk(= EIT Tray 탭 첫 [적용])가 전 탭에서 가장 느렸다. `WalkAndIndex`의 하강 게이트("자식 중 tag-like 또는 구조 컨테이너가 있을 때만 하강, 전부 geometry면 정지")를 **비태그 노드에도 동일 적용**해 geometry 숲 진입을 차단 — 일반 walk를 쓰는 모든 searcher(Hydro/ElecTag/SubSystem)가 공통 수혜.
 - **전제(기존 태그 노드 정지 규칙과 동일)**: 태그는 컴포지트 노드 이름이며 geometry 인스턴스 아래에는 없다. Navisworks에서 `HasGeometry`는 leaf 인스턴스에서만 true라 컴포지트는 구조 컨테이너로 계속 하강된다.
 - **리스크(Windows 실측 대조 필요)**: 종전엔 digit 보유 **geometry 노드 이름도 인덱싱**됐다. 만약 어떤 모델이 태그를 컴포지트가 아닌 geometry leaf 이름에만 갖고 있으면 이제 미매칭이 된다 — 매칭 건수를 수정 전과 대조할 것. 인덱스 0건이면 기존 3중 fallback이 동작하나 부분 누락은 못 잡는다(§2 레벨 타겟과 동일 성격).
-- 그래도 느리면 차선책: EIT Tray를 레벨 타겟(`BuildIndexForTags`)으로 전환 — 단 ELEC 트리는 깊이 불균일(위 MEBTray 사례)이라 리스크가 더 크고, ElecTagSearcher가 Sub-system 탭 EIT EQ 매칭과 공유 중이므로 전환 시 전용 인스턴스 분리가 선행돼야 한다.
+- **[전환됨 2026-07 — Windows 검증 대기] EIT Tray = 레벨 타겟으로 전환**: general walk가 여전히 느려(자식 스캔 비용) `EitTrayTab.BuildIndex`를 `BuildIndex`→`BuildIndexForTags(trayIdSet, EIT, hardScope: true)`로 교체. "매칭 깊이 인덱싱 → 하위 geometry 트리 무시 → 옆으로"라 general walk의 자식 스캔이 사라짐. Sub-system EIT EQ가 별개 사유 searcher로 분리되면서 ElecTagSearcher는 이제 EIT Tray 전용 → 공유 충돌 없음. 소스 전환 시 `_needsIndexRebuild`(레벨 타겟은 트레이 셋 기반). **리스크(ELEC 트리 깊이 불균일 — MEBTray 사례)**: 트레이가 여러 깊이에 섞이면 첫 매칭 깊이만 인덱싱 → 일부 미색칠. Windows에서 general walk 시절 매칭 건수와 대조 필수. 되돌리려면 `BuildIndex(doc, NwdScope.EitTray, hardScope: true)` 한 줄로 복귀.
 
 **[변경됨] Spool 인덱스 = 레벨 타겟으로 전환 (2026-07 — 성능 극대화)**
 2만 스풀 기준 general `WalkAndIndex`가 스풀마다 "하강할지" 판단하려고 자식(전부 geometry인 경우 끝까지)을 COM으로 스캔 → 첫 빌드 ~1분. `SpoolTab.BuildIndex`를 `BuildIndex(NwdScope.Spool)`에서 **`BuildIndexForTags(spoolIdSet, NwdScope.Spool)`**(Equipment와 동일 레벨 타겟)로 교체. 스풀 id가 처음 매칭되는 깊이만 `IndexAtDepth`로 인덱싱하고 그 노드의 geometry 자식은 아예 안 건드림 → 자식 스캔 비용 제거.
@@ -421,10 +421,18 @@ A Punch Total, A Punch Closed, A Punch %, B Punch Total, B Punch Closed, B Punch
   `EIT_Cable`(CABLE NO/날짜 4종, SUB-SYSTEM 실측 확정)을 공종별 try/catch로 편입
   (컬럼 미구성 시 그 공종만 제외 + 라벨 사유). **EIT Tray는 편입 안 함 — EIT_Tray에
   Sub-system 매핑 컬럼이 없음(2026-07 사용자 확정). 컬럼 추가 시 EIT EQ 패턴으로 재편입.**
-  매칭은 스코프 라우팅(`SearcherForSubSystem`): EIT EQ = ElecTagSearcher(EIT full-walk,
-  EitTrayTab과 공유 — walk 기반이라 안전) / Cable = 신규 `SubSystemCableSearcher`
-  (CABLE 레벨 타겟 — CableLineSearcher와 태그 셋이 달라 공유 불가, 8번째 인스턴스).
   ApplySubSystem에 §10 ResetModule/AccumulatePainted도 이식(선택 축소 재적용 잔존 해결).
+- **공종별 1:1 스코프 + 레벨 타겟 (2026-07 재설계 — Windows 검증 대기)**: 구 설계는 Equipment+Piping을
+  한 `SubSystemSearcher`(union 스코프 MEQ·SPL·HYDROPKG) **general walk**로 묶어 부정확·저속이었다.
+  **각 공종이 자기 nwd 하나만 자기 태그 셋으로 레벨 타겟**하도록 분리 — Equipment=MEQ / Piping=HYDROPKG /
+  EIT EQ=EIT / Cable=CABLE, 전부 `BuildIndexForTags(..., hardScope: true)`(그 nwd에서만, general walk 없음).
+  각 공종이 별개 태그 셋이라 4개 **사유(私有) searcher**를 `SubSystemTab`이 소유(다른 탭·서로 공유 불가) —
+  엔진 `ApplySubSystem`은 `Func<Discipline, Searcher>` 리졸버(`SearcherFor`)를 주입받아 엔진이 searcher를
+  안 들고 있음. 구 `SubSystemSearcher`/`SubSystemCableSearcher`/`SearcherForSubSystem`/`NwdScope.SubSystem`
+  모두 제거. 인덱스 최신성은 탭의 `IndexStale(doc)`(데이터 재로드 `_needsIndexRebuild` + 모델 sig)로 판정.
+  리포트 `인덱스 스코프` 행은 공종별 노트 결합(`ScopeNotes`) — 공종마다 fallback 여부 개별 확인.
+  **§2 리스크(수용)**: 레벨 타겟은 첫 매칭 깊이만 인덱싱 — 요소가 여러 깊이에 섞이면 일부 미매칭.
+  Spool/Equipment/Cable이 이미 수용한 리스크와 동일. Windows에서 general walk 시절과 매칭 건수 대조.
 - **Excel 소스**: 미지원 (OASIS 전용). 필요 시 DataSourcePanel 이중 소스로 확장 —
   Excel에 Sub-system 컬럼 계약이 먼저.
 - **집계 범위(ScopePanel) 미배선** — 필요 시 7번 공용 컴포넌트 그대로 연결 가능.

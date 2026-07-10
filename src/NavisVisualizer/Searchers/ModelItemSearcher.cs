@@ -177,8 +177,10 @@ namespace NavisVisualizer.Searchers
         /// then indexes ONLY that level. Much faster for Equipment models.
         /// scope가 있으면 대상 모델(파일)만에서 depth 탐지·인덱싱하고,
         /// 스코프 안에서 태그를 한 건도 못 찾으면 전체 모델로 자동 fallback한다.
+        /// hardScope=true면 스코프 파일 미발견/태그 미발견 시에도 전체 모델로 넓히지 않는다
+        /// (그 nwd에서만 — federated 매칭 실패 시 전 트리 스캔으로 인한 지연 방지).
         /// </summary>
-        public void BuildIndexForTags(Document doc, HashSet<string> knownTags, NwdScope scope = null)
+        public void BuildIndexForTags(Document doc, HashSet<string> knownTags, NwdScope scope = null, bool hardScope = false)
         {
             _index = new Dictionary<string, List<ModelItem>>(StringComparer.OrdinalIgnoreCase);
             _isBuilt = false;
@@ -193,14 +195,14 @@ namespace NavisVisualizer.Searchers
                     normalizedTags.Add(t);
             }
 
-            var roots = ResolveScopeRoots(doc, scope);
+            var roots = ResolveScopeRoots(doc, scope, hardScope);
 
             // Step 1: Find the depth where first tag match occurs
             // (depth는 각 루트 기준 상대값 — 탐지와 인덱싱이 같은 roots를 쓰므로 일관됨)
             int targetDepth = FindTagDepthInRoots(roots, normalizedTags);
 
-            // 스코프 모델 안에서 태그를 못 찾으면 스코프 오판 가능성 — 전체 모델로 재탐지
-            if (targetDepth < 0 && scope != null && !LastScopeFellBack && _lastScopeNarrowed)
+            // 스코프 모델 안에서 태그를 못 찾으면 스코프 오판 가능성 — 전체 모델로 재탐지 (하드 스코프 제외)
+            if (targetDepth < 0 && !hardScope && scope != null && !LastScopeFellBack && _lastScopeNarrowed)
             {
                 roots = new List<ModelItem>();
                 foreach (var model in doc.Models)

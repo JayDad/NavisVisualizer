@@ -18,11 +18,8 @@ namespace NavisVisualizer.UI
         /// <summary>Hydrotest 전용 — 스코프 HYDROPKG.</summary>
         public ModelItemSearcher HydroTagSearcher { get; } = new ModelItemSearcher();
 
-        /// <summary>EIT Tray 전용 — 스코프 EIT.</summary>
+        /// <summary>EIT Tray 전용 — 스코프 EIT (레벨 타겟, 트레이 ID 셋 기반).</summary>
         public ModelItemSearcher ElecTagSearcher { get; } = new ModelItemSearcher();
-
-        /// <summary>Sub-system 전용 — Equipment TAG + Piping PKG를 모두 찾아야 하므로 스코프 MEQ·SPL·HYDROPKG.</summary>
-        public ModelItemSearcher SubSystemSearcher { get; } = new ModelItemSearcher();
 
         /// <summary>Dedicated level-targeted index for Equipment (different match strategy) — 스코프 MEQ.</summary>
         public ModelItemSearcher EquipmentSearcher { get; } = new ModelItemSearcher();
@@ -35,9 +32,8 @@ namespace NavisVisualizer.UI
         /// CableBoxSearcher와 매칭 전략이 달라(box 접두 vs cable-no 정확 일치) 별도 인스턴스.</summary>
         public ModelItemSearcher CableLineSearcher { get; } = new ModelItemSearcher();
 
-        /// <summary>Sub-system 탭의 Cable 요소 전용 (레벨 타겟, 스코프 CABLE). CableLineSearcher와
-        /// 전략이 같지만 레벨 타겟 인덱스는 빌드 태그 셋에 종속 — 탭 간 공유 시 서로 stale이라 분리.</summary>
-        public ModelItemSearcher SubSystemCableSearcher { get; } = new ModelItemSearcher();
+        // Sub-system 탭의 공종별 매칭 searcher(Equipment/Piping/EIT EQ/Cable)는 그 탭이
+        // 사유(私有)한다 — 각자 자기 nwd 하나만 레벨 타겟이라 다른 탭과 공유 불가(§11).
 
         public ColorOverrideEngine OverrideEngine { get; }
         public ExportService ExportSvc { get; } = new ExportService();
@@ -58,8 +54,8 @@ namespace NavisVisualizer.UI
         public MainDockablePanel()
         {
             OverrideEngine = new ColorOverrideEngine(
-                SpoolTagSearcher, HydroTagSearcher, ElecTagSearcher, SubSystemSearcher,
-                EquipmentSearcher, CableLineSearcher, SubSystemCableSearcher);
+                SpoolTagSearcher, HydroTagSearcher, ElecTagSearcher,
+                EquipmentSearcher, CableLineSearcher);
             InitializeComponent();
         }
 

@@ -368,10 +368,11 @@ namespace NavisVisualizer.Models
 
     public enum SubSystemDiscipline
     {
-        Equipment,     // Mech_EQ — TAG NO 매칭 (SubSystemSearcher: MEQ·SPL·HYDROPKG)
-        Piping,        // Piping_HydrotestPKG — PKGNO 매칭 (PKG 노드 색칠이 하위 스풀/배관을 커버)
-        EitEquipment,  // EIT_EQ — TAG NO 매칭 (ElecTagSearcher: EIT 스코프). INSTALL DTE 단일 단계
-        Cable,         // EIT_Cable — CABLE NO 매칭 (Sub-system 전용 레벨 타겟, CABLE 스코프)
+        // 공종마다 자기 nwd 하나만 레벨 타겟 매칭 (SubSystemTab.SearcherFor)
+        Equipment,     // Mech_EQ — TAG NO 매칭 (스코프 MEQ)
+        Piping,        // Piping_HydrotestPKG — PKGNO 매칭 (스코프 HYDROPKG, PKG 노드가 하위 스풀 커버)
+        EitEquipment,  // EIT_EQ — TAG NO 매칭 (스코프 EIT). INSTALL DTE 단일 단계
+        Cable,         // EIT_Cable — CABLE NO 매칭 (스코프 CABLE)
         // EIT Tray 없음 — EIT_Tray 테이블에 Sub-system 매핑 컬럼이 없음 (2026-07 사용자 확정)
     }
 
