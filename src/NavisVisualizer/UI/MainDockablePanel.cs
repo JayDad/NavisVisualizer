@@ -27,7 +27,8 @@ namespace NavisVisualizer.UI
         /// <summary>Dedicated level-targeted index for Equipment (different match strategy) — 스코프 MEQ.</summary>
         public ModelItemSearcher EquipmentSearcher { get; } = new ModelItemSearcher();
 
-        /// <summary>Dedicated index for Cable Pull boxes (key = prefix before "-BOX") — 스코프 CABLE.</summary>
+        /// <summary>Cable node box 인덱스 (key = "-BOX" 앞 접두, 스코프 CABLE) — Tools 탭
+        /// box 중복 검사 전용 (구 Cable(Node) 탭은 2026-07 삭제됨).</summary>
         public ModelItemSearcher CableBoxSearcher { get; } = new ModelItemSearcher();
 
         /// <summary>Cable(형상) 탭 — cable-no를 컴포넌트에 직접 매칭 (레벨 타겟, 스코프 CABLE).
@@ -50,7 +51,6 @@ namespace NavisVisualizer.UI
         private SpoolTab _spoolTab;
         private EquipmentTab _equipmentTab;
         private EitTrayTab _eitTrayTab;
-        private CableTab _cableTab;
         private CableLineTab _cableLineTab;
         private SubSystemTab _subSystemTab;
         private ToolsTab _toolsTab;
@@ -59,7 +59,7 @@ namespace NavisVisualizer.UI
         {
             OverrideEngine = new ColorOverrideEngine(
                 SpoolTagSearcher, HydroTagSearcher, ElecTagSearcher, SubSystemSearcher,
-                EquipmentSearcher, CableBoxSearcher, CableLineSearcher, SubSystemCableSearcher);
+                EquipmentSearcher, CableLineSearcher, SubSystemCableSearcher);
             InitializeComponent();
         }
 
@@ -87,13 +87,9 @@ namespace NavisVisualizer.UI
             _eitTrayTab.Dock = DockStyle.Fill;
             eitPage.Controls.Add(_eitTrayTab);
 
-            // 기존 노드/박스 집계 탭 — 개명(Cable(Node)). 신규 형상 탭과 공존.
-            var cablePage = new TabPage("Cable(Node)");
-            _cableTab = new CableTab(this);
-            _cableTab.Dock = DockStyle.Fill;
-            cablePage.Controls.Add(_cableTab);
-
-            // 신규 형상 탭 — 07_Trion_All_Cable.nwd의 cable-no 컴포넌트를 직접 매칭·하이라이트.
+            // 형상 탭 — 07_Trion_All_Cable.nwd의 cable-no 컴포넌트를 직접 매칭·하이라이트.
+            // (구 노드/박스 집계 탭 Cable(Node)은 2026-07 사용자 결정으로 삭제 — DB에 노드
+            //  route가 없어 존재 의의가 사라짐. Tools 탭 box 중복 검사는 유지.)
             var cableLinePage = new TabPage("Cable");
             _cableLineTab = new CableLineTab(this);
             _cableLineTab.Dock = DockStyle.Fill;
@@ -113,7 +109,6 @@ namespace NavisVisualizer.UI
             _tabControl.TabPages.Add(spPage);
             _tabControl.TabPages.Add(eqPage);
             _tabControl.TabPages.Add(eitPage);
-            _tabControl.TabPages.Add(cablePage);
             _tabControl.TabPages.Add(cableLinePage);
             _tabControl.TabPages.Add(subSysPage);
             _tabControl.TabPages.Add(toolPage);

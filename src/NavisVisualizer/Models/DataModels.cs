@@ -170,18 +170,6 @@ namespace NavisVisualizer.Models
                 [EitStage.Installed]  = new ColorSetting { DisplayColor = Color.FromArgb(0, 128, 0),     Transparency = 0.0 },
             };
 
-        public static Dictionary<CableStage, ColorSetting> CableDefaults =>
-            new Dictionary<CableStage, ColorSetting>
-            {
-                [CableStage.NotStarted] = new ColorSetting { DisplayColor = Color.FromArgb(169, 169, 169), Transparency = 0.7 },
-                [CableStage.Pulling]    = new ColorSetting { DisplayColor = Color.FromArgb(255, 215, 0),   Transparency = 0.0 },
-                [CableStage.Completed]  = new ColorSetting { DisplayColor = Color.FromArgb(0, 128, 0),     Transparency = 0.0 },
-            };
-
-        public static Dictionary<CableLineStage, ColorSetting> CableLineDefaults =>
-            new Dictionary<CableLineStage, ColorSetting>
-            {
-                [CableLineStage.NotStarted] = new ColorSetting { DisplayColor = Color.FromArgb(169, 169, 169), Transparency = 0.7 },
                 [CableLineStage.Pulling]    = new ColorSetting { DisplayColor = Color.FromArgb(255, 215, 0),   Transparency = 0.0 },
                 [CableLineStage.Pulled]     = new ColorSetting { DisplayColor = Color.FromArgb(65, 105, 225),  Transparency = 0.0 },
                 [CableLineStage.Terminated] = new ColorSetting { DisplayColor = Color.FromArgb(0, 128, 0),     Transparency = 0.0 },
@@ -367,73 +355,6 @@ namespace NavisVisualizer.Models
         {
             if (string.IsNullOrEmpty(id)) return "";
             return id.TrimStart('/').Trim().TrimEnd('.').Trim();
-        }
-    }
-
-    // ============================================================
-    // Cable Pull (per-Node aggregation; one Excel row per cable)
-    // ============================================================
-
-    public enum CableStage
-    {
-        NotStarted, // overall progress == 0 (or no data)
-        Pulling,    // 0 < overall < 100
-        Completed,  // overall >= 100
-    }
-
-    public static class CableStageInfo
-    {
-        public static readonly CableStage[] OrderedStages =
-        {
-            CableStage.Pulling, CableStage.Completed
-        };
-
-        public static readonly Dictionary<CableStage, string> Labels = new Dictionary<CableStage, string>
-        {
-            [CableStage.NotStarted] = "미착수",
-            [CableStage.Pulling]    = "포설중",
-            [CableStage.Completed]  = "포설완료",
-        };
-    }
-
-    public class CableNodeData
-    {
-        public string NodeId { get; set; }   // Match key, e.g. "101780-EMCT-52101_A-ND"
-        public List<CableRecord> Cables { get; set; } = new List<CableRecord>();
-
-        public double TotalDesignLth =>
-            Cables.Sum(c => c.DesignLth ?? 0.0);
-
-        public double TotalPulledLth =>
-            Cables.Sum(c => c.PulledLth ?? 0.0);
-
-        /// <summary>Aggregate progress = sum(pulled) / sum(design). Null when no design length.</summary>
-        public double? OverallProgress
-        {
-            get
-            {
-                double design = TotalDesignLth;
-                if (design <= 0.0) return null;
-                return TotalPulledLth / design;
-            }
-        }
-
-        public CableStage GetStage()
-        {
-            var p = OverallProgress;
-            if (!p.HasValue) return CableStage.NotStarted;
-            if (p.Value >= 0.999) return CableStage.Completed;
-            if (p.Value > 0.0)    return CableStage.Pulling;
-            return CableStage.NotStarted;
-        }
-
-        /// <summary>Box DisplayName format is "{NodeId}-BOX...", so the index key is
-        /// the prefix before "-BOX". Excel NodeIds are normalized the same way
-        /// (trim, leading '/' stripped, uppercased on lookup).</summary>
-        public static string NormalizeId(string id)
-        {
-            if (string.IsNullOrEmpty(id)) return "";
-            return id.TrimStart('/').Trim();
         }
     }
 

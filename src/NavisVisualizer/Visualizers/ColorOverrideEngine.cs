@@ -15,8 +15,7 @@ namespace NavisVisualizer.Visualizers
         Spool,
         Equipment,
         EitTray,
-        Cable,        // 기존 Cable Pull(노드/박스) 탭
-        CableLine,    // 신규 Cable(형상) 탭 — 캐시가 Cable과 충돌하지 않도록 별도 모듈
+        CableLine,    // Cable(형상) 탭 (구 노드/박스 탭 Cable은 2026-07 삭제)
         SubSystem,
     }
 
@@ -26,13 +25,11 @@ namespace NavisVisualizer.Visualizers
         //   spool (SPL → 없으면 HYDROPKG 체인) / hydro (HYDROPKG) / elec (EIT) /
         //   subSystem (MEQ·SPL·HYDROPKG). 매칭 전략은 전부 digit full-walk로 동일.
         // Equipment uses its own level-targeted index.
-        // Cable Pull uses an index keyed on the "{NodeId}-BOX..." prefix.
         private readonly ModelItemSearcher _spoolTagSearcher;
         private readonly ModelItemSearcher _hydroTagSearcher;
         private readonly ModelItemSearcher _elecTagSearcher;
         private readonly ModelItemSearcher _subSystemSearcher;
         private readonly ModelItemSearcher _equipmentSearcher;
-        private readonly ModelItemSearcher _cableBoxSearcher;
         // Cable(형상) 탭 — cable-no를 컴포넌트에 직접 매칭 (레벨 타겟, 스코프 CABLE).
         private readonly ModelItemSearcher _cableLineSearcher;
         // Sub-system 탭의 Cable 요소 전용 (레벨 타겟, 스코프 CABLE). CableLineSearcher와
@@ -52,15 +49,6 @@ namespace NavisVisualizer.Visualizers
         private readonly Dictionary<VisualModule, ModelItemCollection> _paintedByModule
             = new Dictionary<VisualModule, ModelItemCollection>();
 
-        // Cable-specific caches (per-node items, per-node stage, hidden, last settings)
-        private Dictionary<string, ModelItemCollection> _cableNodeItems
-            = new Dictionary<string, ModelItemCollection>(StringComparer.OrdinalIgnoreCase);
-        private Dictionary<string, CableStage> _cableNodeStages
-            = new Dictionary<string, CableStage>(StringComparer.OrdinalIgnoreCase);
-        private ModelItemCollection _cableHiddenItems;
-        private Dictionary<CableStage, ColorSetting> _cableLastSettings;
-        private bool _cableFilterFocusActive;
-
         // Cable(형상) 탭 캐시 — cableNo 단위. 그룹 키(stage명 또는 "__highlight")로 색을 묶는다.
         private Dictionary<string, ModelItemCollection> _cableLineItems
             = new Dictionary<string, ModelItemCollection>(StringComparer.OrdinalIgnoreCase);
@@ -76,7 +64,6 @@ namespace NavisVisualizer.Visualizers
             ModelItemSearcher elecTagSearcher,
             ModelItemSearcher subSystemSearcher,
             ModelItemSearcher equipmentSearcher,
-            ModelItemSearcher cableBoxSearcher,
             ModelItemSearcher cableLineSearcher,
             ModelItemSearcher subSystemCableSearcher)
         {
@@ -85,7 +72,6 @@ namespace NavisVisualizer.Visualizers
             _elecTagSearcher = elecTagSearcher;
             _subSystemSearcher = subSystemSearcher;
             _equipmentSearcher = equipmentSearcher;
-            _cableBoxSearcher = cableBoxSearcher;
             _cableLineSearcher = cableLineSearcher;
             _subSystemCableSearcher = subSystemCableSearcher;
         }
@@ -393,167 +379,6 @@ namespace NavisVisualizer.Visualizers
             return result;
         }
 
-        /// <summary>
-        /// Cable Pull: matches each Excel Node to a "{NodeId}-BOX..." element and
-        /// colors it by aggregate progress stage. Returns matched/unmatched IDs.
-        /// Per-node matched items are cached for filter-focus / selection sync.
-        /// Unmatched boxes (in model but no Excel data) are NOT hidden here — caller
-        /// invokes HideUnmatchedCableBoxes for that.
-        /// </summary>
-        public OverrideResult ApplyCable(
-            Document doc,
-            List<CableNodeData> nodes,
-            Dictionary<CableStage, ColorSetting> colorSettings)
-        {
-            var result = new OverrideResult();
-            var stageItems = new Dictionary<CableStage, List<ModelItem>>();
-
-            var normalizedIds = nodes.Select(n => CableNodeData.NormalizeId(n.NodeId)).Distinct();
-            var searchResult = _cableBoxSearcher.FindBySpoolIds(normalizedIds);
-
-            _cableNodeItems.Clear();
-            _cableNodeStages.Clear();
-
-            foreach (var node in nodes)
-            {
-                string key = CableNodeData.NormalizeId(node.NodeId);
-                if (!searchResult.TryGetValue(key, out var items) || items.Count == 0)
-                {
-                    result.UnmatchedIds.Add(node.NodeId);
-                    continue;
-                }
-                result.MatchedCount++;
-
-                var col = new ModelItemCollection();
-                col.AddRange(items);
-                _cableNodeItems[node.NodeId] = col;
-
-                var stage = node.GetStage();
-                _cableNodeStages[node.NodeId] = stage;
-                if (!colorSettings.ContainsKey(stage)) continue;
-
-                if (!stageItems.TryGetValue(stage, out var list))
-                {
-                    list = new List<ModelItem>();
-                    stageItems[stage] = list;
-                }
-                list.AddRange(items);
-            }
-
-            var cache = ModuleCache(VisualModule.Cable);
-            cache.Clear();
-            foreach (var kv in stageItems)
-            {
-                string key = kv.Key.ToString();
-                var collection = ToCollection(kv.Value);
-                cache[key] = collection;
-
-                if (colorSettings.TryGetValue(kv.Key, out var setting))
-                    ApplyOverride(doc, collection, setting);
-            }
-
-            _cableLastSettings = colorSettings;
-            _cableFilterFocusActive = false;
-            return result;
-        }
-
-        /// <summary>Hide every indexed cable box that didn't match an Excel Node.</summary>
-        public int HideUnmatchedCableBoxes(Document doc, IEnumerable<string> matchedNodeIds)
-        {
-            if (!_cableBoxSearcher.IsIndexBuilt) return 0;
-
-            var matchedKeys = new HashSet<string>(
-                matchedNodeIds.Select(CableNodeData.NormalizeId),
-                StringComparer.OrdinalIgnoreCase);
-
-            // Re-walk the index to collect items whose key isn't in the matched set.
-            // The Searcher exposes its index only via FindBySpoolIds, so call it with
-            // every indexed key — by feeding the union (matched + everything else we
-            // can pull from the Excel-mismatched residue is unknown). Simpler: ask the
-            // searcher for all unmatched keys via a new helper.
-            var unmatchedItems = _cableBoxSearcher.GetItemsExcept(matchedKeys);
-
-            var collection = new ModelItemCollection();
-            collection.AddRange(unmatchedItems);
-            if (collection.Count > 0)
-                doc.Models.SetHidden(collection, true);
-
-            _cableHiddenItems = collection;
-            return collection.Count;
-        }
-
-        public void RestoreHiddenCableBoxes(Document doc)
-        {
-            if (_cableHiddenItems != null && _cableHiddenItems.Count > 0)
-                doc.Models.SetHidden(_cableHiddenItems, false);
-            _cableHiddenItems = null;
-        }
-
-        /// <summary>
-        /// Toggle filter focus: items NOT in <paramref name="hitNodeIds"/> get a
-        /// heavy transparency override (preserving stage color); items in the hit
-        /// set are restored to their stage's transparency.
-        /// </summary>
-        public void SetCableFilterFocus(Document doc, IEnumerable<string> hitNodeIds, double dimTransparency = 0.85)
-        {
-            if (_cableNodeItems.Count == 0 || _cableLastSettings == null) return;
-
-            var hits = new HashSet<string>(hitNodeIds, StringComparer.OrdinalIgnoreCase);
-
-            // Bucket hit items by stage so we can restore each stage's transparency.
-            var hitByStage = new Dictionary<CableStage, ModelItemCollection>();
-            var dimItems = new ModelItemCollection();
-            foreach (var kv in _cableNodeItems)
-            {
-                if (hits.Contains(kv.Key))
-                {
-                    if (_cableNodeStages.TryGetValue(kv.Key, out var stage))
-                    {
-                        if (!hitByStage.TryGetValue(stage, out var bucket))
-                        {
-                            bucket = new ModelItemCollection();
-                            hitByStage[stage] = bucket;
-                        }
-                        foreach (ModelItem mi in kv.Value) bucket.Add(mi);
-                    }
-                }
-                else
-                {
-                    foreach (ModelItem mi in kv.Value) dimItems.Add(mi);
-                }
-            }
-
-            if (dimItems.Count > 0)
-                doc.Models.OverridePermanentTransparency(dimItems, dimTransparency);
-
-            foreach (var kv in hitByStage)
-            {
-                if (_cableLastSettings.TryGetValue(kv.Key, out var setting))
-                    doc.Models.OverridePermanentTransparency(kv.Value, setting.Transparency);
-            }
-
-            _cableFilterFocusActive = true;
-        }
-
-        public void ClearCableFilterFocus(Document doc)
-        {
-            if (!_cableFilterFocusActive || _cableLastSettings == null) return;
-            // Re-apply each stage's setting to its cached collection — this resets
-            // transparency back to stage defaults across all matched boxes.
-            var cache = ModuleCache(VisualModule.Cable);
-            foreach (var kv in _cableLastSettings)
-            {
-                if (cache.TryGetValue(kv.Key.ToString(), out var collection))
-                    ApplyOverride(doc, collection, kv.Value);
-            }
-            _cableFilterFocusActive = false;
-        }
-
-        public ModelItemCollection GetCableNodeItems(string nodeId) =>
-            _cableNodeItems.TryGetValue(nodeId, out var col) ? col : null;
-
-        public IEnumerable<string> GetMatchedCableNodeIds() => _cableNodeItems.Keys;
-
         // ============================================================
         // Cable(형상) 탭 — cable-no를 컴포넌트에 직접 매칭·색칠 (VisualModule.CableLine)
         // ============================================================
@@ -754,13 +579,8 @@ namespace NavisVisualizer.Visualizers
         public void Reset(Document doc)
         {
             doc.Models.ResetAllPermanentMaterials();
-            RestoreHiddenCableBoxes(doc);
             _stageCollectionsByModule.Clear();
             _paintedByModule.Clear();
-            _cableNodeItems.Clear();
-            _cableNodeStages.Clear();
-            _cableLastSettings = null;
-            _cableFilterFocusActive = false;
             _cableLineItems.Clear();
             _cableLineGroupOfCable.Clear();
             _cableLineGroupSettings = new Dictionary<string, ColorSetting>();

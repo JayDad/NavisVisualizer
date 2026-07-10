@@ -304,7 +304,10 @@ EIT_Cable, EIT_EQ, EIT_Route, EIT_Tray, Mech_EQ, Piping_HydrotestPKG, Piping_Spo
   TRAY SYS, SYSTEM, Pulling %) 매핑 + `CableLineTab` DataSourcePanel 듀얼소스 배선 완료.
   `PULLING LTH`는 샘플상 포설 실적 길이로 보이나(0/189=0%, 37/37=100%) 오너 확정 전까지 표시 전용
   유지(§13-6). 프로젝트 컬럼 없음 → 전체 로드. 미사용: INSTALL_MODULE, SYSTEM DES, SUB-SYSTEM(+DES).
-  **노드단위 집계(Cable(Node) 탭)는 여전히 보류** — `EIT_Route`에 홉 순서(SEQ)·NodeId 변환 부재.
+  **노드단위 집계는 폐기 — Cable(Node) 탭 삭제(2026-07 사용자 결정)**: `EIT_Route`에 홉 순서
+  (SEQ)·NodeId 변환이 없어 개통 불가였고 형상 탭이 역할을 대체. `ApplyCable`/`CableNodeData`/
+  `CableStage`/`LoadCablePull`/노드 필터포커스·박스숨김 일괄 제거. Tools 탭 box 중복 검사(§5)와
+  `CableBoxSearcher`는 유지(박스 생성 매크로 QA — 탭과 무관).
 - **EIT_EQ**: `[Navis].[EIT_EQ]` 컬럼 확장됨 — `WRKDTE`→`INSTALL DTE`(설치 실적일), `SUB-SYSTEM` +
   AITR/Punch 수치 보유. **Sub-system 요소로 편입됨(2026-07 — §11)**: 단일 단계(미착수/설치완료) +
   ElecTagSearcher 재사용. 전용 탭 신설은 여전히 미정(AITR/Punch 수치 미사용).
@@ -337,9 +340,9 @@ EIT_Cable, EIT_EQ, EIT_Route, EIT_Tray, Mech_EQ, Piping_HydrotestPKG, Piping_Spo
   `ResetAllPermanentMaterials`.
 
 **잔여**:
-- Cable(Node) 탭 `ApplyCable`에 `ResetModule`+`AccumulatePainted` 미이식(누적 문제 잔존) +
-  공종 초기화 버튼 미배치. Cable은 색+숨김+필터포커스+cable캐시까지 리셋해야 해 별도 설계.
-  (Sub-system은 2026-07 `ApplySubSystem`에 이식 완료 — §11. 공종 초기화 버튼만 미배치.)
+- ~~Cable(Node) 탭 `ApplyCable` 이식~~ — **탭 삭제(2026-07)로 소멸** (§9 Cable 참조).
+  (Sub-system은 2026-07 `ApplySubSystem`에 이식 완료 — §11. Sub-system/Cable(형상)/EIT Tray의
+  `공종 초기화` 버튼 배치는 잔여.)
 
 **설계 메모(유지)**:
 - API: `DocumentModels.ResetPermanentMaterials(ModelItemCollection)` (아이템 단위 리셋).
@@ -484,6 +487,12 @@ A Punch Total, A Punch Closed, A Punch %, B Punch Total, B Punch Closed, B Punch
 - **형상은 정적**: 케이블 선분을 **1회 추출·캐시**, `[적용]`마다 캐시 선분에 볼륨 술어만
   재계산. **캐시하는 건 형상이지 판정 결과 아님**(L2 준수 — 판정은 라이브 볼륨으로 매번).
 - **AABB 사전 배제**: 케이블 `BoundingBox`가 볼륨과 안 겹치면 선분 루프 스킵.
+  **[버그였음 → 수정 2026-07]** 초기 구현은 pre-cull을 **세그먼트 추출 후**(추출된 세그먼트의
+  AABB로) 수행해 첫 배치에서 2만 케이블 전부 COM 추출이 일어났다 — "clash 엄청 느림"의 원인.
+  `CableClashService.PassesVolume`이 미캐시 케이블은 **관리형 `BoundingBox()`(COM 왕복 없는
+  사전 계산값)로 먼저 배제**하고 볼륨과 겹치는 후보만 추출하도록 순서 교정. 배제된 케이블은
+  캐시하지 않음(다른 볼륨에서 후보가 되면 그때 추출). 진단 카운터 `LastPreCulled` 신설 —
+  clash CSV의 `bbox 사전배제/추출/세그AABB배제` 행에서 pre-cull이 먹는지 확인.
 
 #### (E) 통합 지점 / Windows 검증
 - `ScopeFilter` 케이블 분기의 `BoundingBox().Center` 판정을 **선분-vs-볼륨 clash로 교체**.
@@ -499,8 +508,10 @@ A Punch Total, A Punch Closed, A Punch %, B Punch Total, B Punch Closed, B Punch
 > OASIS 연결·§10·3행 버튼 마무리). "Windows 실측" 표시 항목은 리눅스 컴파일 불가라 실기 검증 후 확신 가능.
 
 **확정 결정**
-1. 기존 노드/박스 `Cable Pull` 탭 = **유지·개명** (`Cable(Node)`). DB(EIT_Route)가 홉순서·NodeId
-   맵이 없어 노드 route 재구성 불가 → 노드 탭만 하는 일이 남음. 신규는 `Cable(형상)`.
+1. ~~기존 노드/박스 `Cable Pull` 탭 = 유지·개명 (`Cable(Node)`)~~ → **번복: 탭 삭제(2026-07
+   사용자 결정, §9 Cable 참조)**. DB(EIT_Route)에 홉순서·NodeId 맵이 없어 개통 불가였고 형상
+   탭이 대체. Cable 탭 = 형상 탭 단일. 추가로 형상 탭에 **Excel 케이블 리스트 필터**(`리스트
+   필터 Import` — Cable No 목록 파일로 리스트+3D를 그 부분집합만 표시, 토글) 신설.
 2. 형상 탭 stage = **신규 enum `CableLineStage`** 별도 정의(레거시 `CableStage` 불변 — 재정의는
    `CableDefaults`·`ApplyCable`·노드탭을 깸).
 3. clash(단면 통과) 출력 = **리스트 + CSV만**(3D 색칠 안 함 — §7 "집계는 좁혔는데 색은 전체" 방지).
