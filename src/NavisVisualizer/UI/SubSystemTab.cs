@@ -61,6 +61,8 @@ namespace NavisVisualizer.UI
 
         private Label _dotOasis;
         private Label _lblOasis;
+        // 로드 요약이 라벨 폭을 넘으면 잘리므로 전체 문구를 툴팁으로 노출
+        private readonly ToolTip _loadTip = new ToolTip { AutoPopDelay = 15000 };
         private RadioButton _rdoByStage;
         private RadioButton _rdoByProgress;
         private DateTimePicker _dtpReference;
@@ -461,6 +463,8 @@ namespace NavisVisualizer.UI
                     + (outsideMaster > 0 ? $" · 마스터 외 {outsideMaster}개" : "")
                     + (noSubSystem > 0 ? $" · 미지정 {noSubSystem}건 제외" : "")
                     + (disciplineNotes.Count > 0 ? " · " + string.Join(" · ", disciplineNotes) : "");
+                // 문구가 길어 창 폭에 잘릴 수 있음 — 전체 문구는 마우스 오버 툴팁으로 제공
+                _loadTip.SetToolTip(_lblOasis, _lblOasis.Text);
                 _needsIndexRebuild = true;   // Cable 레벨 타겟 인덱스는 로드 셋 기반 — 재빌드 강제
 
                 RefreshLeftList();
