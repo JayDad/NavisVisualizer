@@ -44,6 +44,13 @@ BuildIndexForTags / BuildIndexForBoxes에 `NwdScope` 파라미터, null = 전체
 - 3중 자동 fallback (규약 깨져도 동작 유지): 체인 전체 대상 모델 없음 / Equipment 스코프 내
   태그 미발견 / 스코프 인덱스 0건 → 전체 모델 재인덱싱. `LastScopeNote`/`LastScopeFellBack`로
   노출되어 각 탭 매칭 Status CSV `인덱스 스코프` 행 + Tools 탭 박스 중복 검사에서 확인 가능
+- **하드 스코프(`BuildIndex(..., hardScope: true)` — 2026-07)**: EIT Tray 탭은 "EIT nwd에서만"이
+  요구라 위 전체-모델 fallback을 끈다. 스코프 파일 미발견/인덱스 0건이어도 전체 트리를 walk하지
+  않고 빈 인덱스 + 진단 노트("하드 스코프: 전체 fallback 안 함 — 파일명 규약 확인")를 남긴다
+  (federated 매칭이 어긋날 때 전 트리 순회로 인한 지연 방지 — EIT 적용 최다 지연 대책의 짝).
+  `EitTrayTab`·`SubSystemTab` EIT EQ 빌드 둘 다 hardScope(ElecTagSearcher 공유 인스턴스라 일관 유지).
+  스코프 키워드 "EIT"는 granular 복수 파일명(`05-02-01_..._EIT_Tray`, `05-02-02_LQRooms_EIT_Tray`)을
+  전부 부분일치로 수집 — `ResolveScopeRoots`가 전 모델 순회라 파일 수 무관.
 
 **잔여 / 주의**
 - **Windows 실측 검증 필요**: federated NWD를 열었을 때 하위 파일이 `doc.Models` 복수로

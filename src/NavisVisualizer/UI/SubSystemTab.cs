@@ -753,9 +753,11 @@ namespace NavisVisualizer.UI
 
             // EIT EQ 요소는 EIT 스코프 full-walk 인덱스(EitTrayTab과 공유 —
             // walk 기반이라 태그 셋 무관, 안전) — 요소가 있을 때만 빌드 보장.
+            // hardScope: EitTrayTab과 동일하게 EIT nwd에서만 (공유 인스턴스라 일관 유지 —
+            // 한쪽이 soft로 전체 모델 인덱스를 만들면 다른 쪽이 그걸 재사용해버림).
             if (_elements.Any(el => el.Discipline == SubSystemDiscipline.EitEquipment)
                 && (!_main.ElecTagSearcher.IsIndexBuilt || _main.ElecTagSearcher.NeedsRebuild(doc)))
-                _main.ElecTagSearcher.BuildIndex(doc, NwdScope.EitTray);
+                _main.ElecTagSearcher.BuildIndex(doc, NwdScope.EitTray, hardScope: true);
 
             // Cable 요소는 전용 레벨 타겟 인덱스 (로드된 케이블 셋 기반 — CableLineSearcher와 분리)
             var cableIds = new HashSet<string>(

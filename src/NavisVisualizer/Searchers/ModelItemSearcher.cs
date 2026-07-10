@@ -36,19 +36,24 @@ namespace NavisVisualizer.Searchers
         /// scope가 있으면 파일명 키워드에 맞는 모델(또는 federated 트리의 파일 노드)만 walk하고,
         /// 대상이 없거나 결과가 0건이면 전체 모델로 자동 fallback한다.
         /// </summary>
-        public void BuildIndex(Document doc, NwdScope scope = null, Action<int, int> onProgress = null)
+        /// <summary>
+        /// hardScope=true면 스코프 파일을 못 찾거나 인덱스가 0건이어도 전체 모델로 넓히지
+        /// 않는다 (EIT Tray처럼 특정 nwd에서만 돌아야 하는 탭용 — federated 매칭 실패 시
+        /// 전체 트리 walk로 인한 지연 방지). 기본값 false = 기존 3중 fallback 유지.
+        /// </summary>
+        public void BuildIndex(Document doc, NwdScope scope = null, Action<int, int> onProgress = null, bool hardScope = false)
         {
             _index = new Dictionary<string, List<ModelItem>>(StringComparer.OrdinalIgnoreCase);
             _isBuilt = false;
             _lastDocumentId = GetDocumentId(doc);
 
-            var roots = ResolveScopeRoots(doc, scope);
+            var roots = ResolveScopeRoots(doc, scope, hardScope);
             foreach (var root in roots)
                 WalkAndIndex(root);
 
             // 스코프 모델은 찾았지만 인덱스가 비면 (파일은 규약대로인데 내용이 예상과 다른 경우)
-            // 규약 오판 가능성 — 전체 모델로 재시도.
-            if (scope != null && !LastScopeFellBack && _lastScopeNarrowed && _index.Count == 0)
+            // 규약 오판 가능성 — 전체 모델로 재시도. (하드 스코프는 이 fallback도 안 함.)
+            if (!hardScope && scope != null && !LastScopeFellBack && _lastScopeNarrowed && _index.Count == 0)
             {
                 _index = new Dictionary<string, List<ModelItem>>(StringComparer.OrdinalIgnoreCase);
                 foreach (var model in doc.Models)
@@ -70,7 +75,7 @@ namespace NavisVisualizer.Searchers
         ///    파일 노드만 얕게 따라 내려가며 매칭 — geometry 트리는 건드리지 않는다.
         /// 체인 전부에서 한 건도 못 찾으면 전체 모델 루트 반환 + fallback 표시.
         /// </summary>
-        private List<ModelItem> ResolveScopeRoots(Document doc, NwdScope scope)
+        private List<ModelItem> ResolveScopeRoots(Document doc, NwdScope scope, bool hardScope = false)
         {
             var roots = new List<ModelItem>();
             LastScopeFellBack = false;
@@ -95,6 +100,15 @@ namespace NavisVisualizer.Searchers
                     return roots;
                 }
                 chainNotes.Add($"{tier.Label} 없음");
+            }
+
+            // 하드 스코프: 스코프 파일을 못 찾아도 전체 모델로 넓히지 않는다 (빈 루트 반환).
+            // EIT Tray처럼 "그 nwd에서만 돌아야" 하는 탭이 federated 매칭 실패 시 전체 트리를
+            // 훑어 느려지는 것을 막는다 — 인덱스 0건 + 진단 노트로 규약 불일치를 드러낸다.
+            if (hardScope)
+            {
+                LastScopeNote = $"스코프 {string.Join(" → ", chainNotes)} → 하드 스코프: 전체 fallback 안 함 (인덱스 0건 — 파일명 규약 확인)";
+                return roots; // empty
             }
 
             foreach (var model in doc.Models)

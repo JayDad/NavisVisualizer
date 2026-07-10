@@ -402,7 +402,10 @@ namespace NavisVisualizer.UI
             _progressBar.Style = ProgressBarStyle.Marquee;
             _progressBar.Visible = true;
             Application.DoEvents();
-            _main.ElecTagSearcher.BuildIndex(doc, NwdScope.EitTray);
+            // 하드 스코프: EIT nwd에서만 인덱싱 — 파일 매칭 실패 시 전체 모델 walk로 넓히지 않음
+            // (federated 매칭 어긋날 때 전 트리 순회로 인한 지연 방지). 0건이면 인덱스 스코프
+            // 노트에 "파일명 규약 확인"이 뜨므로 매칭 Status CSV로 원인 파악.
+            _main.ElecTagSearcher.BuildIndex(doc, NwdScope.EitTray, hardScope: true);
             _progressBar.Visible = false;
             _progressBar.Style = ProgressBarStyle.Blocks;
         }
