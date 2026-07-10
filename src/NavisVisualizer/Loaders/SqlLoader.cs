@@ -163,11 +163,20 @@ FROM [Navis].[Mech_EQ]";
         /// Sub-system 값이 없는 행은 그룹핑이 불가능해 제외하며, 조용한 누락이 되지
         /// 않도록 그 수를 noSubSystemCount로 보고한다.
         /// </summary>
+        /// <summary>
+        /// Sub-system 요소 로드 — 4공종: Equipment(Mech_EQ)·Piping(Piping_HydrotestPKG)은
+        /// 기존 검증 쿼리 재사용, EIT EQ(EIT_EQ)·Cable(EIT_Cable)은 편입(2026-07 사용자 요청).
+        /// EIT Tray는 Sub-system 매핑 컬럼이 없어 제외(2026-07 사용자 확정).
+        /// EIT 계열은 공종별 try/catch — 컬럼 미구성이어도 나머지 공종은 정상 로드하고
+        /// disciplineNotes로 사유를 보고한다. Sub-System 미지정 행은 제외: Equipment/Piping은
+        /// noSubSystemCount(기존 유지), EIT 계열은 모수가 커서 공종별 "M/N건 편입" note로 분리 보고.
+        /// </summary>
         public static List<SubSystemElement> LoadSubSystemElements(
-            SqlConnectionSettings settings, out int noSubSystemCount)
+            SqlConnectionSettings settings, out int noSubSystemCount, out List<string> disciplineNotes)
         {
             var elements = new List<SubSystemElement>();
             noSubSystemCount = 0;
+            disciplineNotes = new List<string>();
 
             foreach (var eq in LoadEquipment(settings))
             {
@@ -181,53 +190,110 @@ FROM [Navis].[Mech_EQ]";
                 elements.Add(SubSystemElement.FromPackage(pkg));
             }
 
+            // EIT EQ — [Navis].[EIT_EQ]: TAG NO + INSTALL DTE(설치 실적일, 구 WRKDTE) + SUB-SYSTEM.
+            // 프로젝트 컬럼 없음(§9) → WHERE 생략.
+            try
+            {
+                int total = 0, taken = 0;
+                var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                const string eitEqSql = @"
+SELECT [TAG NO],[TAG DESCRIPTION],[INSTALL DTE],[SUB-SYSTEM]
+FROM [Navis].[EIT_EQ]";
+                ExecuteReader(settings, eitEqSql, null, r =>
+                {
+                    total++;
+                    string tag = GetString(r, "TAG NO");
+                    string sub = GetString(r, "SUB-SYSTEM");
+                    if (string.IsNullOrEmpty(tag) || string.IsNullOrWhiteSpace(sub)) return;
+                    if (!seen.Add(EitTrayData.NormalizeId(tag))) return;
+                    taken++;
+                    elements.Add(SubSystemElement.FromEitEquipment(
+                        tag, GetString(r, "TAG DESCRIPTION"), sub, GetDate(r, "INSTALL DTE")));
+                });
+                disciplineNotes.Add($"EIT EQ {taken:N0}/{total:N0}건 편입");
+            }
+            catch (Exception ex)
+            {
+                disciplineNotes.Add($"EIT EQ 제외({FirstLine(ex.Message)})");
+            }
+
+            // EIT Tray는 편입하지 않는다 — EIT_Tray에 Sub-system 매핑 컬럼이 없음(2026-07 사용자 확정).
+            // 추후 [SUB-SYSTEM] 컬럼이 추가되면 EIT EQ 블록과 동일 패턴으로 재편입.
+
+            // Cable — LoadCable(철자 실측 확정) 재사용. SUB-SYSTEM 미지정 케이블(샘플상 다수)은 제외.
+            try
+            {
+                var cables = LoadCable(settings);
+                int taken = 0;
+                foreach (var c in cables)
+                {
+                    if (string.IsNullOrWhiteSpace(c.SubSystem)) continue;
+                    taken++;
+                    elements.Add(SubSystemElement.FromCable(c));
+                }
+                disciplineNotes.Add($"Cable {taken:N0}/{cables.Count:N0}건 편입");
+            }
+            catch (Exception ex)
+            {
+                disciplineNotes.Add($"Cable 제외({FirstLine(ex.Message)})");
+            }
+
             return elements;
         }
 
+        private static string FirstLine(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return "";
+            int idx = s.IndexOfAny(new[] { '\r', '\n' });
+            return idx >= 0 ? s.Substring(0, idx) : s;
+        }
+
         /// <summary>
-        /// Sub-system 마스터 로드 ([Navis].[SubSystem_Master] — 계약은 CLAUDE.md 11번).
-        /// 마일스톤 날짜(Walkdown/Partial MCC/MCC/PCC — 별도 RFCC 없음, MCC 계열이
-        /// Ready for Commissioning 의미) + A/B/C-ITR·A/B Punch 수치(각 Total+완료/종결).
-        /// 테이블이 아직 없으면 SQL Server가 예외를 던진다 — 호출부(SubSystemTab)가
-        /// 잡아서 "마스터 미구성" fallback(요소 파생 목록)으로 전환한다.
+        /// Sub-system 마스터 로드 ([Navis].[System_Summary] — 실측 스키마 2026-07 확정,
+        /// 구 SubSystem_Master 계약 대체). 마일스톤 실적일(WD/Partial MCC/MCC/PCC Actual —
+        /// 별도 RFCC 없음, MCC 계열이 Ready for Commissioning 의미) + MCC Plan(지연 판정 기준)
+        /// + A/B/C-ITR·A/B Punch 수치(각 Total+Complete/Closed).
+        /// 미사용 컬럼: Area/System/System Des(그룹핑 확장 후보), PCC Plan/MCC Fcst(계획·예측),
+        /// %계열(Total/Complete 수치로 충분). 테이블이 아직 없으면 SQL Server가 예외를 던진다 —
+        /// 호출부(SubSystemTab)가 잡아서 "마스터 미구성" fallback(요소 파생 목록)으로 전환한다.
         /// </summary>
         public static List<SubSystemMasterData> LoadSubSystemMaster(SqlConnectionSettings settings)
         {
             const string baseSql = @"
-SELECT [SUB-SYSTEM],[DESCRIPTION],
-       [MCC Plan],[Walkdown],[Partial MCC],[MCC],[PCC],
-       [A-ITR TOTAL],[A-ITR DONE],[B-ITR TOTAL],[B-ITR DONE],[C-ITR TOTAL],[C-ITR DONE],
-       [PUNCH A TOTAL],[PUNCH A CLOSED],[PUNCH B TOTAL],[PUNCH B CLOSED]
-FROM [Navis].[SubSystem_Master]";
+SELECT [Sub-System],[Sub-System Des],
+       [MCC Plan],[WD Actual],[Partial MCC Actual],[MCC Actual],[PCC Actual],
+       [A-ITR Total],[A-ITR Complete],[B-ITR Total],[B-ITR Complete],[C-ITR Total],[C-ITR Complete],
+       [A Punch Total],[A Punch Closed],[B Punch Total],[B Punch Closed]
+FROM [Navis].[System_Summary]";
 
             var masters = new List<SubSystemMasterData>();
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             ExecuteReader(settings, baseSql, "PJTNO", r =>
             {
-                string no = GetString(r, "SUB-SYSTEM");
+                string no = GetString(r, "Sub-System");
                 if (string.IsNullOrEmpty(no) || !seen.Add(no)) return;
 
                 var m = new SubSystemMasterData
                 {
                     SubSystemNo = no,
-                    Description = GetString(r, "DESCRIPTION"),
+                    Description = GetString(r, "Sub-System Des"),
                     MccPlan      = GetDate(r, "MCC Plan"),
-                    ItrATotal    = GetInt(r, "A-ITR TOTAL"),
-                    ItrADone     = GetInt(r, "A-ITR DONE"),
-                    ItrBTotal    = GetInt(r, "B-ITR TOTAL"),
-                    ItrBDone     = GetInt(r, "B-ITR DONE"),
-                    ItrCTotal    = GetInt(r, "C-ITR TOTAL"),
-                    ItrCDone     = GetInt(r, "C-ITR DONE"),
-                    PunchATotal  = GetInt(r, "PUNCH A TOTAL"),
-                    PunchAClosed = GetInt(r, "PUNCH A CLOSED"),
-                    PunchBTotal  = GetInt(r, "PUNCH B TOTAL"),
-                    PunchBClosed = GetInt(r, "PUNCH B CLOSED"),
+                    ItrATotal    = GetInt(r, "A-ITR Total"),
+                    ItrADone     = GetInt(r, "A-ITR Complete"),
+                    ItrBTotal    = GetInt(r, "B-ITR Total"),
+                    ItrBDone     = GetInt(r, "B-ITR Complete"),
+                    ItrCTotal    = GetInt(r, "C-ITR Total"),
+                    ItrCDone     = GetInt(r, "C-ITR Complete"),
+                    PunchATotal  = GetInt(r, "A Punch Total"),
+                    PunchAClosed = GetInt(r, "A Punch Closed"),
+                    PunchBTotal  = GetInt(r, "B Punch Total"),
+                    PunchBClosed = GetInt(r, "B Punch Closed"),
                 };
-                m.StageDates[SubSystemStage.Walkdown]   = GetDate(r, "Walkdown");
-                m.StageDates[SubSystemStage.PartialMcc] = GetDate(r, "Partial MCC");
-                m.StageDates[SubSystemStage.Mcc]        = GetDate(r, "MCC");
-                m.StageDates[SubSystemStage.Pcc]        = GetDate(r, "PCC");
+                m.StageDates[SubSystemStage.Walkdown]   = GetDate(r, "WD Actual");
+                m.StageDates[SubSystemStage.PartialMcc] = GetDate(r, "Partial MCC Actual");
+                m.StageDates[SubSystemStage.Mcc]        = GetDate(r, "MCC Actual");
+                m.StageDates[SubSystemStage.Pcc]        = GetDate(r, "PCC Actual");
                 masters.Add(m);
             });
 
@@ -241,8 +307,9 @@ FROM [Navis].[SubSystem_Master]";
         /// <summary>
         /// EIT Tray 진척 로드 ([Navis].[EIT_Tray] — BRANCH NO./TRAY Install %/PJTNO).
         /// 이 테이블엔 날짜 컬럼이 없어(§9) 기준일 필터 불가 — % 기반 현재상태 판정
-        /// (EitTrayData.GetStage가 InstallProgress만 씀). BRANCH NO.의 선행 '/'는
-        /// 매칭 시 NormalizeId가 제거하므로 원시 그대로 보관. 프로젝트 컬럼 = PJTNO.
+        /// (EitTrayData.GetStage가 InstallProgress만 씀). BRANCH NO.의 선행 '/'·후행 '.'은
+        /// 매칭 시 NormalizeId가 제거하므로 원시 그대로 보관하되, 중복 제거는 정규화 키로
+        /// 한다 ("X"와 "X."은 같은 트레이 — 실측상 후행 '.' 장식 행 존재). 프로젝트 컬럼 = PJTNO.
         /// </summary>
         public static List<EitTrayData> LoadEitTray(SqlConnectionSettings settings)
         {
@@ -256,7 +323,7 @@ FROM [Navis].[EIT_Tray]";
             ExecuteReader(settings, baseSql, "PJTNO", r =>
             {
                 string trayNo = GetString(r, "BRANCH NO.");
-                if (string.IsNullOrEmpty(trayNo) || !seen.Add(trayNo)) return;
+                if (string.IsNullOrEmpty(trayNo) || !seen.Add(EitTrayData.NormalizeId(trayNo))) return;
 
                 trays.Add(new EitTrayData
                 {
@@ -269,21 +336,25 @@ FROM [Navis].[EIT_Tray]";
         }
 
         // ------------------------------------------------------------
-        // Cable(형상)  ←  [Navis].[EIT_Cable]   (Phase 2 — 컬럼 철자 실측 검증 후 활성)
+        // Cable(형상)  ←  [Navis].[EIT_Cable]   (컬럼 철자 실측 확정 — 2026-07 사용자 제공)
         // ------------------------------------------------------------
 
         /// <summary>
-        /// Cable(형상) 탭용 OASIS 로드. **주의**: 아래 컬럼 브래킷 철자는 docs가 못 박지 않았다
-        /// (§13-Phase2). explicit SELECT는 컬럼명이 틀리면 SQL Server가 throw하므로, 실 스키마로
-        /// 철자를 확인하기 전에는 이 메서드를 UI에 배선하지 말 것. EIT_Cable엔 프로젝트 컬럼이
-        /// 없어(§9) projectColumn=null → WHERE 생략. PULLING LTH 의미(실적/발주) 미확정이라
-        /// 길이·%는 표시 전용, stage 색엔 안 씀(§13-6). 날짜(PULLING START/END, FROM/TO CONN)만 stage.
+        /// Cable(형상) 탭용 OASIS 로드. 컬럼 철자는 실측 스키마로 확정(2026-07) — 날짜 4개는
+        /// 전부 ` DATE` 접미사(`PULLING START DATE` 등). EIT_Cable엔 프로젝트 컬럼이 없어(§9)
+        /// projectColumn=null → WHERE 생략. `PULLING LTH`는 실측 샘플상 포설 실적 길이로 보이나
+        /// (0/189=0%, 37/37=100%) 데이터 오너 확정 전까지 길이·%는 표시 전용, stage 색엔 안 씀
+        /// (§13-6). stage는 날짜만: Pulling=PULLING START DATE / Pulled=PULLING END DATE /
+        /// Terminated=FROM·TO CONN DATE 둘 다(AND 게이트, ComputeTerminated).
+        /// 미사용 컬럼(확장 후보): INSTALL_MODULE, SYSTEM DES, SUB-SYSTEM(+DES — sub-system 편입 시).
         /// </summary>
         public static List<CableLineData> LoadCable(SqlConnectionSettings settings)
         {
             const string baseSql = @"
-SELECT [CABLE NO],[PULLING START],[PULLING END],[FROM CONN],[TO CONN],
-       [DESIGN LTH],[PULLING LTH]
+SELECT [CABLE NO],[DESIGN LTH],[PULLING LTH],[Pulling %],
+       [PULLING START DATE],[PULLING END DATE],[FROM CONN DATE],[TO CONN DATE],
+       [FROM MODULE],[FROM EQUIP],[TO MODULE],[TO EQUIP],
+       [CABLE_TYPE],[CABLE_CORE],[CABLE_SIZE],[OUT DIA],[TRAY SYS],[SYSTEM],[SUB-SYSTEM]
 FROM [Navis].[EIT_Cable]";
 
             var cables = new List<CableLineData>();
@@ -297,13 +368,25 @@ FROM [Navis].[EIT_Cable]";
                 var c = new CableLineData
                 {
                     CableNo = cableNo,
-                    FromConnDate = GetDate(r, "FROM CONN"),
-                    ToConnDate   = GetDate(r, "TO CONN"),
+                    FromConnDate = GetDate(r, "FROM CONN DATE"),
+                    ToConnDate   = GetDate(r, "TO CONN DATE"),
                     DesignLth    = GetDouble(r, "DESIGN LTH"),
-                    PulledLth    = GetDouble(r, "PULLING LTH"),   // 표시 전용 (의미 미확정)
+                    PulledLth    = GetDouble(r, "PULLING LTH"),        // 표시 전용 (§13-6)
+                    PullingProgress = GetPercentage(r, "Pulling %"),   // 표시 전용
+                    FromModule = GetString(r, "FROM MODULE"),
+                    FromEquip  = GetString(r, "FROM EQUIP"),
+                    ToModule   = GetString(r, "TO MODULE"),
+                    ToEquip    = GetString(r, "TO EQUIP"),
+                    Type       = GetString(r, "CABLE_TYPE"),
+                    Core       = GetString(r, "CABLE_CORE"),
+                    Size       = GetString(r, "CABLE_SIZE"),
+                    OutDia     = GetString(r, "OUT DIA"),
+                    TraySys    = GetString(r, "TRAY SYS"),
+                    System     = GetString(r, "SYSTEM"),
+                    SubSystem  = GetString(r, "SUB-SYSTEM"),
                 };
-                c.StageDates[CableLineStage.Pulling] = GetDate(r, "PULLING START");
-                c.StageDates[CableLineStage.Pulled]  = GetDate(r, "PULLING END");
+                c.StageDates[CableLineStage.Pulling] = GetDate(r, "PULLING START DATE");
+                c.StageDates[CableLineStage.Pulled]  = GetDate(r, "PULLING END DATE");
                 c.ComputeTerminated();
                 cables.Add(c);
             });

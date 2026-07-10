@@ -73,23 +73,6 @@ namespace NavisVisualizer.Loaders
                 "/101890-HVT-61003-SM-MEB/B1", "12.5", "12.5", "100%", "2026-04-01",
             });
 
-        public static string ExportCablePull() => Write("CablePull_Input_Template",
-            new[]
-            {
-                // 케이블 1가닥 × 경유 Node 1개 = 1행 (같은 케이블이 노드 수만큼 반복)
-                "Node", "Count", "Equip No", "Route Sys", "Cable No",
-                "Cable Design Lth", "Cable Pulled Lth", "Pulling %",
-                "From Module", "From Equip", "To Module", "To Equip", "Install Module",
-                "System", "Type", "Core", "Size", "Out Dia", "Tray Sys", "Design Lth", "Layer Code",
-            },
-            new[]
-            {
-                "101780-EMCT-52101_A-ND", "1", "101780-EMCT-52101", "R1", "CB-52101-001",
-                "120", "80", "67%",
-                "CM", "SWBD-01", "SM", "MCC-03", "SM",
-                "ELEC", "PWR", "3C", "95SQ", "32", "T1", "115", "L2",
-            });
-
         public static string ExportCable() => Write("Cable_Input_Template",
             new[]
             {

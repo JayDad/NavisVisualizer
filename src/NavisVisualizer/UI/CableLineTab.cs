@@ -18,15 +18,18 @@ namespace NavisVisualizer.UI
 {
     /// <summary>
     /// Cable(형상) 탭 — 07_Trion_All_Cable.nwd의 cable-no 컴포넌트를 직접 매칭·하이라이트한다
-    /// (기존 Cable Pull은 트레이 노드 박스 집계 — 별개). Excel 전용(§13-6 — OASIS는 EIT_Cable
-    /// 컬럼 철자 검증 후 Phase 2). 주요 기능: ① Excel 케이블 목록 하이라이트(stage 날짜 없으면
-    /// 단색), ② 날짜 기반 4단계 공정 시각화, ③ 활성 단면 통과 케이블 추출(clash), ④ 겹침 완화
-    /// (숨김 isolate + 투명 필터 포커스). 미매칭은 스코프와 직교(전역 고정, 코너 라벨 — §7/L3).
+    /// (기존 Cable Pull은 트레이 노드 박스 집계 — 별개). Excel↔OASIS 듀얼소스
+    /// (EIT_Cable 철자 실측 확정 2026-07 — SqlLoader.LoadCable). 주요 기능: ① 케이블 목록
+    /// 하이라이트(stage 날짜 없으면 단색), ② 날짜 기반 4단계 공정 시각화, ③ 활성 단면 통과
+    /// 케이블 추출(clash), ④ 겹침 완화(숨김 isolate + 투명 필터 포커스). 미매칭은 스코프와
+    /// 직교(전역 고정, 코너 라벨 — §7/L3).
     /// </summary>
     public class CableLineTab : UserControl
     {
         private readonly MainDockablePanel _main;
 
+        private readonly Dictionary<TabDataSource, List<CableLineData>> _cablesBySource
+            = new Dictionary<TabDataSource, List<CableLineData>>();
         private List<CableLineData> _cables = new List<CableLineData>();
         private Dictionary<CableLineStage, ColorSetting> _colorSettings;
         private ColorSetting _highlightSetting;
@@ -42,19 +45,23 @@ namespace NavisVisualizer.UI
         private readonly CableClashService _clash = new CableClashService();
         private readonly Func<string, List<ModelItem>, IList<ClipPlane>, bool> _volumeJudge;
 
-        // 소스는 Excel 전용이지만 레벨 타겟 인덱스는 로드셋 기반 → 로드 시 재빌드 플래그.
+        // 레벨 타겟 인덱스는 활성 소스 태그 셋 기반 → 로드/소스 전환 시 재빌드 플래그(Spool 패턴).
         private bool _needsIndexRebuild;
 
-        // 겹침 완화용 숨김(두 isolate 버튼 공유 — 상호배타). null = 숨김 없음.
+        // 겹침 완화용 숨김(isolate 버튼들 공유 — 상호배타). null = 숨김 없음.
         private ModelItemCollection _cableHidden;
+
+        // Excel로 받은 케이블 부분집합 필터 (정규화 키). null = 필터 없음.
+        // 리스트를 이 집합으로 좁히고, 매칭 케이블이 있으면 3D도 그것만 남기고 숨긴다.
+        private HashSet<string> _listFilter;
+        private Button _btnListFilter;
 
         private Document _subscribedDoc;
         private bool _suppressSelectionSync;
         private bool _focusOn;
         private bool _suppressFocusCheck;
 
-        private Button _btnLoad;
-        private Label _lblFile;
+        private DataSourcePanel _srcPanel;
         private DateTimePicker _dtpReference;
         private TextBox _txtSearch;
         private CheckBox _chkFocus;
@@ -99,14 +106,13 @@ namespace NavisVisualizer.UI
                 Padding = new Padding(4)
             };
 
-            var loadPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 32, AutoSize = false };
-            _btnLoad = new Button { Text = "Excel Import", Width = 130, Height = 28 };
-            _btnLoad.Click += BtnLoad_Click;
-            var btnTemplate = new Button { Text = "Template 출력", Width = 110, Height = 28 };
-            btnTemplate.Click += (s, e) => ExportInputTemplate();
-            loadPanel.Controls.Add(_btnLoad);
-            loadPanel.Controls.Add(btnTemplate);
-            _lblFile = new Label { Text = "(파일 없음)", Dock = DockStyle.Fill, ForeColor = Color.Gray, AutoSize = false, Height = 18 };
+            _srcPanel = new DataSourcePanel();
+            _srcPanel.ExcelLoadClicked    += (s, e) => LoadExcel();
+            _srcPanel.TemplateClicked     += (s, e) => ExportInputTemplate();
+            _srcPanel.OasisLoadClicked    += (s, e) => LoadOasis();
+            // 라디오 전환은 절대 자동 재적용하지 않는다(§6) — 리스트/통계만 새 소스로 갱신.
+            _srcPanel.ActiveSourceChanged += (s, e) => ApplyActiveSourceData();
+            _srcPanel.CompareClicked      += (s, e) => ExportComparison();
 
             var datePanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 28, AutoSize = false };
             datePanel.Controls.Add(new Label { Text = "기준일:", AutoSize = true, Padding = new Padding(0, 4, 0, 0) });
@@ -167,6 +173,9 @@ namespace NavisVisualizer.UI
             var btnClash = new Button { Text = "이 단면 지나가는 케이블 추출", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(6, 0, 6, 0) };
             btnClash.Click += BtnClash_Click;
             searchPanel.Controls.Add(btnClash);
+            _btnListFilter = new Button { Text = "리스트 필터 Import", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(6, 0, 6, 0) };
+            _btnListFilter.Click += BtnListFilter_Click;
+            searchPanel.Controls.Add(_btnListFilter);
             var btnExport = new Button { Text = "매칭 Status 출력", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(6, 0, 6, 0) };
             btnExport.Click += BtnExport_Click;
             searchPanel.Controls.Add(btnExport);
@@ -207,8 +216,7 @@ namespace NavisVisualizer.UI
             _listView.ColumnClick += ListView_ColumnClick;
             tabAll.Controls.Add(_listView);
 
-            layout.Controls.Add(loadPanel);
-            layout.Controls.Add(_lblFile);
+            layout.Controls.Add(_srcPanel);
             layout.Controls.Add(datePanel);
             layout.Controls.Add(new Label { Text = "단계 & 색상 (하이라이트 단색 포함)", Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 18 });
             layout.Controls.Add(colorPanel);
@@ -303,7 +311,7 @@ namespace NavisVisualizer.UI
                 _main.OverrideEngine.UpdateStageColor(doc, VisualModule.CableLine, groupKey, setting);
         }
 
-        private void BtnLoad_Click(object sender, EventArgs e)
+        private void LoadExcel()
         {
             using (var dlg = new OpenFileDialog
             {
@@ -314,26 +322,94 @@ namespace NavisVisualizer.UI
                 if (dlg.ShowDialog() != DialogResult.OK) return;
                 try
                 {
-                    _cables = ExcelLoader.LoadCable(dlg.FileName);
-                    _lblFile.Text = Path.GetFileName(dlg.FileName);
-                    _matchedCableNos.Clear();
-                    _unmatchedCableNos.Clear();
-                    _scopeFilter.Reset();
-                    _scopeKeys = null;
-                    _scopePanel.ResetToFullModel();
-                    _needsIndexRebuild = true;
-                    SetFocusChecked(false);
-                    _tabFilter.TabPages[0].Text = $"전체 ({_cables.Count})";
-                    _tabFilter.TabPages[1].Text = "매칭";
-                    _tabFilter.TabPages[2].Text = "미매칭";
-                    FilterList();
-                    UpdateStats();
+                    var list = ExcelLoader.LoadCable(dlg.FileName);
+                    _cablesBySource[TabDataSource.Excel] = list;
+                    _srcPanel.SetLoaded(TabDataSource.Excel, list.Count,
+                        $"{Path.GetFileName(dlg.FileName)} · {DateTime.Now:HH:mm}");
+                    if (_srcPanel.ActiveSource == TabDataSource.Excel)
+                        ApplyActiveSourceData();
                 }
                 catch (Exception ex)
                 {
+                    _srcPanel.SetFailed(TabDataSource.Excel, "로드 실패");
                     MessageBox.Show($"Excel 로드 실패:\n{ex.Message}", "오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
+        }
+
+        private void LoadOasis()
+        {
+            try
+            {
+                var settings = SqlConnectionSettings.Load();
+                var list = SqlLoader.LoadCable(settings);
+                _cablesBySource[TabDataSource.Oasis] = list;
+                // EIT_Cable엔 프로젝트 컬럼이 없어(§9) 전체 로드 — 라벨에 프로젝트 미표기.
+                _srcPanel.SetLoaded(TabDataSource.Oasis, list.Count,
+                    $"{settings.Database} · {DateTime.Now:HH:mm}");
+                if (_srcPanel.ActiveSource == TabDataSource.Oasis)
+                    ApplyActiveSourceData();
+            }
+            catch (Exception ex)
+            {
+                _srcPanel.SetFailed(TabDataSource.Oasis, "로드 실패");
+                MessageBox.Show($"OASIS 로드 실패:\n{ex.Message}", "오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        /// <summary>
+        /// 적용 기준 소스의 리스트로 화면을 전환한다. 매칭 결과·범위 판정은 소스별로
+        /// 다르므로 초기화하고, 레벨 타겟 인덱스는 활성 태그 셋 기반이라 재빌드를 강제한다.
+        /// 자동 재색칠은 안 함(§6) — 색이 이전 소스 기준이면 경고만.
+        /// </summary>
+        private void ApplyActiveSourceData()
+        {
+            bool hadApplied = _matchedCableNos.Count > 0 || _unmatchedCableNos.Count > 0;
+            _cables = _cablesBySource.TryGetValue(_srcPanel.ActiveSource, out var list)
+                ? list : new List<CableLineData>();
+            _matchedCableNos.Clear();
+            _unmatchedCableNos.Clear();
+            _scopeFilter.Reset();
+            _scopeKeys = null;
+            _scopePanel.ResetToFullModel();
+            _needsIndexRebuild = true;
+            SetFocusChecked(false);
+            _listFilter = null;   // 리스트 필터는 소스별 부분집합 — 소스 전환 시 해제
+            if (_btnListFilter != null) _btnListFilter.Text = "리스트 필터 Import";
+            _tabFilter.TabPages[0].Text = $"전체 ({_cables.Count})";
+            _tabFilter.TabPages[1].Text = "매칭";
+            _tabFilter.TabPages[2].Text = "미매칭";
+            FilterList();
+            UpdateStats();
+            if (hadApplied && _cables.Count > 0)
+                _lblStats.Text = "⚠ 화면 색상은 이전 소스 기준 — [가시화 적용]을 눌러 새 소스로 갱신하세요";
+        }
+
+        private void ExportComparison()
+        {
+            if (!_cablesBySource.TryGetValue(TabDataSource.Excel, out var excelList) ||
+                !_cablesBySource.TryGetValue(TabDataSource.Oasis, out var oasisList))
+            {
+                MessageBox.Show("Excel과 OASIS를 모두 로드해야 비교할 수 있습니다.");
+                return;
+            }
+
+            var fields = new List<SourceComparer.Field<CableLineData>>
+            {
+                new SourceComparer.Field<CableLineData>("Pulling",
+                    c => SourceComparer.FormatDate(c.StageDates.TryGetValue(CableLineStage.Pulling, out var d) ? d : null)),
+                new SourceComparer.Field<CableLineData>("Pulled",
+                    c => SourceComparer.FormatDate(c.StageDates.TryGetValue(CableLineStage.Pulled, out var d) ? d : null)),
+                new SourceComparer.Field<CableLineData>("From Conn", c => SourceComparer.FormatDate(c.FromConnDate)),
+                new SourceComparer.Field<CableLineData>("To Conn",   c => SourceComparer.FormatDate(c.ToConnDate)),
+                new SourceComparer.Field<CableLineData>("Design Lth", c => c.DesignLth?.ToString("0.#") ?? ""),
+                new SourceComparer.Field<CableLineData>("Pulled Lth", c => c.PulledLth?.ToString("0.#") ?? ""),
+            };
+            var lines = SourceComparer.BuildCsv("Cable No", excelList, oasisList, c => c.CableNo, fields);
+            string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
+                $"CableLine_Compare_{DateTime.Now:yyyyMMdd_HHmmss}.csv");
+            File.WriteAllLines(path, lines, new System.Text.UTF8Encoding(true));
+            MessageBox.Show($"비교 결과 저장 완료: {path}");
         }
 
         private void ExportInputTemplate()
@@ -486,6 +562,85 @@ namespace NavisVisualizer.UI
             doc.Models.SetHidden(toHide, true);
             _cableHidden = toHide;
             _btnIsolateSel.Text = "전체 보기";
+        }
+
+        /// <summary>
+        /// Excel 케이블 리스트로 부분집합 필터(토글). 진척 데이터가 아니라 "보여줄 케이블 목록"만
+        /// 담은 파일 — 리스트를 그 집합으로 좁히고, 가시화 적용 상태면 3D도 그 케이블만 남기고
+        /// 나머지 매칭 케이블을 숨긴다(기존 isolate 숨김 메커니즘 공유). 다시 누르면 해제.
+        /// </summary>
+        private void BtnListFilter_Click(object sender, EventArgs e)
+        {
+            var doc = _main.GetDocument();
+
+            if (_listFilter != null)
+            {
+                _listFilter = null;
+                _btnListFilter.Text = "리스트 필터 Import";
+                if (doc != null && _cableHidden != null) RestoreHidden(doc);
+                FilterList();
+                UpdateStats();
+                return;
+            }
+
+            if (_cables.Count == 0)
+            {
+                MessageBox.Show("먼저 케이블 데이터(Excel/OASIS)를 로드하세요. 리스트 필터는 로드된 케이블의 부분집합입니다.");
+                return;
+            }
+
+            using (var dlg = new OpenFileDialog
+            {
+                Title = "케이블 리스트 Excel (Cable No 목록)",
+                Filter = "Excel 파일 (*.xlsx;*.xls;*.xlsb)|*.xlsx;*.xls;*.xlsb|모든 파일|*.*"
+            })
+            {
+                if (dlg.ShowDialog() != DialogResult.OK) return;
+                List<string> nos;
+                try { nos = ExcelLoader.LoadCableNoList(dlg.FileName); }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"리스트 로드 실패:\n{ex.Message}", "오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+                if (nos.Count == 0)
+                {
+                    MessageBox.Show("파일에서 케이블 번호를 찾지 못했습니다 ('Cable No' 헤더 또는 첫 컬럼).");
+                    return;
+                }
+
+                var filter = new HashSet<string>(
+                    nos.Select(CableLineData.NormalizeCableNo), StringComparer.OrdinalIgnoreCase);
+                int hit = _cables.Count(c => filter.Contains(CableLineData.NormalizeCableNo(c.CableNo)));
+
+                _listFilter = filter;
+                _btnListFilter.Text = $"리스트 필터 해제 ({hit:N0}건)";
+                FilterList();
+                UpdateStats();
+
+                // 3D isolate: 가시화 적용된 매칭 케이블 중 리스트 밖은 숨긴다.
+                if (doc != null && _matchedCableNos.Count > 0)
+                {
+                    if (_cableHidden != null) RestoreHidden(doc);
+                    var toHide = new ModelItemCollection();
+                    foreach (var cableNo in _matchedCableNos)
+                    {
+                        if (filter.Contains(CableLineData.NormalizeCableNo(cableNo))) continue;
+                        var col = _main.OverrideEngine.GetCableLineItems(cableNo);
+                        if (col != null) foreach (ModelItem mi in col) toHide.Add(mi);
+                    }
+                    if (toHide.Count > 0)
+                    {
+                        doc.Models.SetHidden(toHide, true);
+                        _cableHidden = toHide;
+                    }
+                }
+
+                MessageBox.Show($"리스트 {nos.Count:N0}건 중 로드 데이터와 일치 {hit:N0}건.\n" +
+                    (_matchedCableNos.Count > 0
+                        ? "3D에는 리스트 케이블만 남기고 나머지 매칭 케이블을 숨겼습니다 (버튼 재클릭으로 해제)."
+                        : "가시화 적용 전이라 리스트만 필터됐습니다 — [가시화 적용] 후 다시 필터하면 3D에도 반영됩니다."));
+            }
         }
 
         // ----- 필터 포커스 (투명 dim) -----
@@ -655,7 +810,7 @@ namespace NavisVisualizer.UI
         {
             var lines = new List<string>();
             lines.Add($"단면 통과 케이블,{inCount}건");
-            lines.Add($"추출/AABB배제,{_clash.LastExtracted}/{_clash.LastCulled}");
+            lines.Add($"bbox 사전배제/추출/세그AABB배제,{_clash.LastPreCulled}/{_clash.LastExtracted}/{_clash.LastCulled}");
             lines.Add($"인덱스 스코프,\"{_main.CableLineSearcher.LastScopeNote ?? "-"}\"");
             lines.Add("Cable No,단계,From,To,Design,Pulled");
             var referenceDate = _dtpReference.Value;
@@ -765,6 +920,8 @@ namespace NavisVisualizer.UI
             else if (tabIndex == 2 && _unmatchedCableNos.Count > 0)
                 filtered = filtered.Where(c => _unmatchedCableNos.Contains(c.CableNo));
 
+            if (_listFilter != null)
+                filtered = filtered.Where(c => _listFilter.Contains(CableLineData.NormalizeCableNo(c.CableNo)));
             if (_scopeKeys != null)
                 filtered = filtered.Where(c => InScope(c.CableNo));
             if (!string.IsNullOrEmpty(keyword))

@@ -84,16 +84,17 @@ Excel (.xlsx/.xls/.xlsb)          OASIS SQL Server ([Navis] 스키마)
   Sub-system 축으로 감싼다 (`SqlLoader.LoadSubSystemElements`). Equipment `SUB-SYSTEM`→TAG NO,
   Piping `Sub-System`→PKGNO. Sub-system 미지정 행은 제외(건수 보고). PKG 노드 색칠이
   하위 스풀/배관을 커버하므로 배관은 PKG 단위로 충분
-- **Sub-system 마스터**: `SqlLoader.LoadSubSystemMaster` ← `[Navis].[SubSystem_Master]`
-  (`SUB-SYSTEM/DESCRIPTION` + `MCC Plan`(계획일) + 마일스톤 실적일 `Walkdown/Partial MCC/MCC/PCC` +
-  `A/B/C-ITR TOTAL·DONE`, `PUNCH A/B TOTAL·CLOSED`, `PJTNO` 필터 — 계약은 CLAUDE.md 11번).
+- **Sub-system 마스터**: `SqlLoader.LoadSubSystemMaster` ← `[Navis].[System_Summary]`
+  (`Sub-System/Sub-System Des` + `MCC Plan`(계획일) + 마일스톤 실적일 `WD/Partial MCC/MCC/PCC Actual` +
+  `A/B/C-ITR Total·Complete`, `A/B Punch Total·Closed`, `PJTNO` 필터 — 실측 스키마는 CLAUDE.md 9·11번).
   요소 로드와 별도 try — **테이블 미구성이면 요소 파생 목록으로 자동 fallback**
   (단계별 가시화 모드만 비활성). MCC 계획일 경과 + P-MCC/MCC 실적 미입력 = `IsDelayed`(지연) —
   색으로는 표시 안 하고(달성 단계 그대로 칠함) 테이블 텍스트·`[MCC 지연 담기]` 버튼·리포트로만 노출
-- EIT Tray / Cable 탭은 OASIS 미지원 — 트레이 진척 테이블 부재, EIT_Cable에 Node 매핑 부재
-  (상세: `docs/SQL_DB_CONNECTION_ANALYSIS.md`)
+- EIT Tray(`EIT_Tray` %기반)·Cable(형상) 탭(`EIT_Cable` — 철자 실측 확정 2026-07)도 OASIS
+  듀얼소스 지원. 구 Cable(Node) 탭은 삭제됨(EIT_Route에 Node 매핑 부재 — CLAUDE.md §9,
+  상세: `docs/SQL_DB_CONNECTION_ANALYSIS.md`)
 
-**이중 소스 UI (`UI/DataSourcePanel.cs`)** — Spool/Hydrotest/Equipment 탭 상단 공용 블록:
+**이중 소스 UI (`UI/DataSourcePanel.cs`)** — Spool/Hydrotest/Equipment/EIT Tray/Cable(형상) 탭 상단 공용 블록:
 - [Excel 로드] [OASIS 로드] + 소스별 ● 상태(건수·출처·시각)
 - "적용 기준" 라디오: 로드된 소스만 활성, 첫 로드 자동 선택. 전환 시 매칭 셋 초기화 +
   적용 이력이 있으면 자동 재적용 (Equipment는 태그 셋 기반 레벨 타겟 인덱스도 재빌드)
@@ -220,7 +221,8 @@ Apply:
 
 ### 6. UI Architecture (`UI/`)
 
-**탭 구성:** Hydrotest | Spool | Equipment | EIT Tray | Cable Pull | Sub-system | Tools
+**탭 구성:** Hydrotest | Spool | Equipment | EIT Tray | Cable(형상) | Sub-system | Tools
+(구 Cable Pull/Cable(Node) 노드·박스 집계 탭은 2026-07 삭제 — Tools의 box 중복 검사만 유지)
 
 **공통 패턴 (날짜 기반 탭 동일):**
 - DateTimePicker (기준일, 기본: 오늘)

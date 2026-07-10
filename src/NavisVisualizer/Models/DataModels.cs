@@ -170,14 +170,6 @@ namespace NavisVisualizer.Models
                 [EitStage.Installed]  = new ColorSetting { DisplayColor = Color.FromArgb(0, 128, 0),     Transparency = 0.0 },
             };
 
-        public static Dictionary<CableStage, ColorSetting> CableDefaults =>
-            new Dictionary<CableStage, ColorSetting>
-            {
-                [CableStage.NotStarted] = new ColorSetting { DisplayColor = Color.FromArgb(169, 169, 169), Transparency = 0.7 },
-                [CableStage.Pulling]    = new ColorSetting { DisplayColor = Color.FromArgb(255, 215, 0),   Transparency = 0.0 },
-                [CableStage.Completed]  = new ColorSetting { DisplayColor = Color.FromArgb(0, 128, 0),     Transparency = 0.0 },
-            };
-
         public static Dictionary<CableLineStage, ColorSetting> CableLineDefaults =>
             new Dictionary<CableLineStage, ColorSetting>
             {
@@ -359,79 +351,14 @@ namespace NavisVisualizer.Models
         /// <summary>
         /// Model tree indexer strips leading '/' from DisplayName, so Excel Tray
         /// Numbers like "/101890-INT-25018-CM-PDA-CV/B1" must be normalized the
-        /// same way before lookup.
+        /// same way before lookup. OASIS EIT_Tray의 BRANCH NO.는 끝에 '.'이 붙은
+        /// 행이 있어(실측 2026-07) 매칭이 깨졌다 — 모델 DisplayName엔 없는 장식이므로
+        /// 후행 '.'도 제거한다.
         /// </summary>
         public static string NormalizeId(string id)
         {
             if (string.IsNullOrEmpty(id)) return "";
-            return id.TrimStart('/').Trim();
-        }
-    }
-
-    // ============================================================
-    // Cable Pull (per-Node aggregation; one Excel row per cable)
-    // ============================================================
-
-    public enum CableStage
-    {
-        NotStarted, // overall progress == 0 (or no data)
-        Pulling,    // 0 < overall < 100
-        Completed,  // overall >= 100
-    }
-
-    public static class CableStageInfo
-    {
-        public static readonly CableStage[] OrderedStages =
-        {
-            CableStage.Pulling, CableStage.Completed
-        };
-
-        public static readonly Dictionary<CableStage, string> Labels = new Dictionary<CableStage, string>
-        {
-            [CableStage.NotStarted] = "미착수",
-            [CableStage.Pulling]    = "포설중",
-            [CableStage.Completed]  = "포설완료",
-        };
-    }
-
-    public class CableNodeData
-    {
-        public string NodeId { get; set; }   // Match key, e.g. "101780-EMCT-52101_A-ND"
-        public List<CableRecord> Cables { get; set; } = new List<CableRecord>();
-
-        public double TotalDesignLth =>
-            Cables.Sum(c => c.DesignLth ?? 0.0);
-
-        public double TotalPulledLth =>
-            Cables.Sum(c => c.PulledLth ?? 0.0);
-
-        /// <summary>Aggregate progress = sum(pulled) / sum(design). Null when no design length.</summary>
-        public double? OverallProgress
-        {
-            get
-            {
-                double design = TotalDesignLth;
-                if (design <= 0.0) return null;
-                return TotalPulledLth / design;
-            }
-        }
-
-        public CableStage GetStage()
-        {
-            var p = OverallProgress;
-            if (!p.HasValue) return CableStage.NotStarted;
-            if (p.Value >= 0.999) return CableStage.Completed;
-            if (p.Value > 0.0)    return CableStage.Pulling;
-            return CableStage.NotStarted;
-        }
-
-        /// <summary>Box DisplayName format is "{NodeId}-BOX...", so the index key is
-        /// the prefix before "-BOX". Excel NodeIds are normalized the same way
-        /// (trim, leading '/' stripped, uppercased on lookup).</summary>
-        public static string NormalizeId(string id)
-        {
-            if (string.IsNullOrEmpty(id)) return "";
-            return id.TrimStart('/').Trim();
+            return id.TrimStart('/').Trim().TrimEnd('.').Trim();
         }
     }
 
@@ -441,16 +368,21 @@ namespace NavisVisualizer.Models
 
     public enum SubSystemDiscipline
     {
-        Equipment,   // Mech_EQ — TAG NO 매칭
-        Piping,      // Piping_HydrotestPKG — PKGNO 매칭 (PKG 노드 색칠이 하위 스풀/배관을 커버)
+        Equipment,     // Mech_EQ — TAG NO 매칭 (SubSystemSearcher: MEQ·SPL·HYDROPKG)
+        Piping,        // Piping_HydrotestPKG — PKGNO 매칭 (PKG 노드 색칠이 하위 스풀/배관을 커버)
+        EitEquipment,  // EIT_EQ — TAG NO 매칭 (ElecTagSearcher: EIT 스코프). INSTALL DTE 단일 단계
+        Cable,         // EIT_Cable — CABLE NO 매칭 (Sub-system 전용 레벨 타겟, CABLE 스코프)
+        // EIT Tray 없음 — EIT_Tray 테이블에 Sub-system 매핑 컬럼이 없음 (2026-07 사용자 확정)
     }
 
     public static class SubSystemDisciplineInfo
     {
         public static readonly Dictionary<SubSystemDiscipline, string> Labels = new Dictionary<SubSystemDiscipline, string>
         {
-            [SubSystemDiscipline.Equipment] = "Equipment",
-            [SubSystemDiscipline.Piping]    = "Piping",
+            [SubSystemDiscipline.Equipment]    = "Equipment",
+            [SubSystemDiscipline.Piping]       = "Piping",
+            [SubSystemDiscipline.EitEquipment] = "EIT EQ",
+            [SubSystemDiscipline.Cable]        = "Cable",
         };
     }
 
@@ -482,23 +414,27 @@ namespace NavisVisualizer.Models
     }
 
     /// <summary>
-    /// Sub-system 탭의 통합 요소. 공종별 원본 데이터(EquipmentData/TestPackageData)를
-    /// 감싸 공통 축(Sub-system, 매칭 키, 진행 상태)으로 노출한다 — stage 계산은
-    /// 원본 모델의 GetStageAtDate를 그대로 재사용한다.
+    /// Sub-system 탭의 통합 요소. 공종별 원본 데이터(EquipmentData/TestPackageData/
+    /// CableLineData/EIT_EQ 설치일)를 감싸 공통 축(Sub-system, 매칭 키, 진행 상태)으로
+    /// 노출한다 — stage 계산은 원본 모델의 판정을 그대로 재사용한다.
     /// </summary>
     public class SubSystemElement
     {
         public string SubSystem { get; }
         public SubSystemDiscipline Discipline { get; }
-        /// <summary>모델 매칭 키. Equipment는 TAG NO(로더에서 선행 '/' 정규화됨), Piping은 PKGNO.</summary>
+        /// <summary>모델 매칭 키. Equipment/EIT EQ는 TAG NO, Piping은 PKGNO, Cable은 CABLE NO.</summary>
         public string ElementId { get; }
         public string Description { get; }
 
         private readonly EquipmentData _equipment;
         private readonly TestPackageData _package;
+        private readonly CableLineData _cable;
+        private readonly DateTime? _eitInstallDate;   // EIT_EQ INSTALL DTE (단일 단계)
 
         private SubSystemElement(string subSystem, SubSystemDiscipline discipline,
-            string elementId, string description, EquipmentData equipment, TestPackageData package)
+            string elementId, string description,
+            EquipmentData equipment = null, TestPackageData package = null,
+            CableLineData cable = null, DateTime? eitInstallDate = null)
         {
             SubSystem = subSystem;
             Discipline = discipline;
@@ -506,22 +442,40 @@ namespace NavisVisualizer.Models
             Description = description;
             _equipment = equipment;
             _package = package;
+            _cable = cable;
+            _eitInstallDate = eitInstallDate;
         }
 
         public static SubSystemElement FromEquipment(EquipmentData eq) =>
             new SubSystemElement(eq.SubSystem?.Trim(), SubSystemDiscipline.Equipment,
-                eq.TagNo, eq.Description ?? "", eq, null);
+                eq.TagNo, eq.Description ?? "", equipment: eq);
 
         public static SubSystemElement FromPackage(TestPackageData pkg) =>
             new SubSystemElement(pkg.SystemNo?.Trim(), SubSystemDiscipline.Piping,
-                pkg.TestPkgId, pkg.LineService ?? "", null, pkg);
+                pkg.TestPkgId, pkg.LineService ?? "", package: pkg);
+
+        /// <summary>EIT_EQ 행 — INSTALL DTE 단일 단계(미착수/설치완료). 선행 '/' 방어 정규화.</summary>
+        public static SubSystemElement FromEitEquipment(string tagNo, string description,
+            string subSystem, DateTime? installDate) =>
+            new SubSystemElement(subSystem?.Trim(), SubSystemDiscipline.EitEquipment,
+                EitTrayData.NormalizeId(tagNo), description ?? "", eitInstallDate: installDate);
+
+        public static SubSystemElement FromCable(CableLineData cable) =>
+            new SubSystemElement(cable.SubSystem?.Trim(), SubSystemDiscipline.Cable,
+                cable.CableNo, cable.System ?? "", cable: cable);
 
         /// <summary>기준일 시점의 공종별 상세 단계 라벨 (리포트 상세 리스트용).</summary>
         public string StageLabelAt(DateTime referenceDate)
         {
             if (_equipment != null)
                 return EquipmentStageInfo.Labels[_equipment.GetStageAtDate(referenceDate)];
-            return HydrotestStageInfo.Labels[_package.GetStageAtDate(referenceDate)];
+            if (_package != null)
+                return HydrotestStageInfo.Labels[_package.GetStageAtDate(referenceDate)];
+            if (_cable != null)
+                return CableLineStageInfo.Labels[_cable.GetStageAtDate(referenceDate)];
+            // EIT_EQ 단일 단계
+            return _eitInstallDate.HasValue && _eitInstallDate.Value.Date <= referenceDate.Date
+                ? "설치완료" : "미착수";
         }
 
         /// <summary>기준일 시점의 정규화 진행 상태. 마지막 stage 도달 = 완료, 그 외 착수 = 진행중.</summary>
@@ -533,9 +487,21 @@ namespace NavisVisualizer.Models
                 if (stage == EquipmentStage.NotStarted) return ProgressStatus.NotStarted;
                 return stage == EquipmentStage.Inspection ? ProgressStatus.Completed : ProgressStatus.InProgress;
             }
-            var pkgStage = _package.GetStageAtDate(referenceDate);
-            if (pkgStage == HydrotestStage.NotStarted) return ProgressStatus.NotStarted;
-            return pkgStage == HydrotestStage.Reinstatement ? ProgressStatus.Completed : ProgressStatus.InProgress;
+            if (_package != null)
+            {
+                var pkgStage = _package.GetStageAtDate(referenceDate);
+                if (pkgStage == HydrotestStage.NotStarted) return ProgressStatus.NotStarted;
+                return pkgStage == HydrotestStage.Reinstatement ? ProgressStatus.Completed : ProgressStatus.InProgress;
+            }
+            if (_cable != null)
+            {
+                var cableStage = _cable.GetStageAtDate(referenceDate);
+                if (cableStage == CableLineStage.NotStarted) return ProgressStatus.NotStarted;
+                return cableStage == CableLineStage.Terminated ? ProgressStatus.Completed : ProgressStatus.InProgress;
+            }
+            // EIT_EQ: 단일 단계 — 진행중 없음
+            return _eitInstallDate.HasValue && _eitInstallDate.Value.Date <= referenceDate.Date
+                ? ProgressStatus.Completed : ProgressStatus.NotStarted;
         }
     }
 
@@ -583,7 +549,7 @@ namespace NavisVisualizer.Models
     }
 
     /// <summary>
-    /// Sub-system 마스터 행 ([Navis].[SubSystem_Master] — 계약은 CLAUDE.md 11번).
+    /// Sub-system 마스터 행 ([Navis].[System_Summary] — 실측 스키마, CLAUDE.md 9·11번).
     /// 마일스톤 날짜 4개 + A/B/C-ITR·A/B Punch 수치(각 Total + 완료/종결).
     /// 선택 테이블·리포트에 status로 병기된다.
     /// </summary>
@@ -652,33 +618,9 @@ namespace NavisVisualizer.Models
         public string PunchBText => Ratio(PunchBClosed, PunchBTotal);
     }
 
-    public class CableRecord
-    {
-        public int? Count { get; set; }
-        public string EquipNo { get; set; }
-        public string RouteSys { get; set; }
-        public string CableNo { get; set; }
-        public double? DesignLth { get; set; }   // Cable Design Lth
-        public double? PulledLth { get; set; }   // Cable Pulled Lth
-        public double? PullingProgress { get; set; } // 0.0 - 1.0
-        public string FromModule { get; set; }
-        public string FromEquip { get; set; }
-        public string ToModule { get; set; }
-        public string ToEquip { get; set; }
-        public string InstallModule { get; set; }
-        public string System { get; set; }
-        public string Type { get; set; }
-        public string Core { get; set; }
-        public string Size { get; set; }
-        public string OutDia { get; set; }
-        public string TraySys { get; set; }
-        public double? RouteDesignLth { get; set; } // separate "Design Lth" col
-        public string LayerCode { get; set; }
-    }
-
     // ============================================================
     // Cable (형상 중심 — 07_Trion_All_Cable.nwd의 cable-no 컴포넌트를 직접 매칭)
-    // 기존 Cable Pull(노드/박스 집계)과 별개. 한 행 = 한 케이블.
+    // 한 행 = 한 케이블. (구 Cable Pull 노드/박스 집계 모델은 탭 삭제와 함께 제거됨)
     // ============================================================
 
     /// <summary>
@@ -733,6 +675,7 @@ namespace NavisVisualizer.Models
         public string ToModule { get; set; }
         public string ToEquip { get; set; }
         public string System { get; set; }
+        public string SubSystem { get; set; }   // EIT_Cable [SUB-SYSTEM] — Sub-system 탭 편입 축
         public string Type { get; set; }
         public string Core { get; set; }
         public string Size { get; set; }

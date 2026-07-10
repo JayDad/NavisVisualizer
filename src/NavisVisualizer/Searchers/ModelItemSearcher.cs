@@ -298,28 +298,35 @@ namespace NavisVisualizer.Searchers
                     if (slash > 0)
                         AddToIndex(key.Substring(0, slash), item);
                 }
-
-                // Decide whether to keep descending. Stopping as soon as no immediate
-                // child has a digit breaks federated trees where a digit-bearing file
-                // node (e.g. "MEBTray1.nwc") sits above non-digit category nodes
-                // ("/SM/MEB/ELEC" -> "/.../PCVTRAY") that still contain deeper tags.
-                // So also descend into structural containers (a child with no geometry
-                // of its own but with children); only stop once children are geometry.
-                bool descend = false;
-                foreach (var child in item.Children)
-                {
-                    string childName = child.DisplayName?.Trim();
-                    bool childTagLike = !string.IsNullOrEmpty(childName) && ContainsDigit(childName);
-                    if (childTagLike || (!child.HasGeometry && child.Children.Any()))
-                    {
-                        descend = true;
-                        break;
-                    }
-                }
-
-                if (!descend)
-                    return;
             }
+
+            // Decide whether to keep descending — for ALL nodes, tag-like or not.
+            // Stopping as soon as no immediate child has a digit breaks federated trees
+            // where a digit-bearing file node (e.g. "MEBTray1.nwc") sits above non-digit
+            // category nodes ("/SM/MEB/ELEC" -> "/.../PCVTRAY") that still contain deeper
+            // tags. So also descend into structural containers (a child with no geometry
+            // of its own but with children); only stop once children are geometry.
+            //
+            // 비태그 노드에도 같은 게이트를 적용하는 이유(§2 "과다 방문" 해소): digit 없는
+            // 범주 노드(/CM/PDA/ELEC/PCVTRAY-STW) 바로 아래 geometry가 직접 붙은 경우, 종전엔
+            // 무조건 하강해 geometry 서브트리 전체를 COM으로 순회했다 — EIT처럼 이런 구조가
+            // 많은 스코프에서 인덱스 빌드(= 첫 가시화 적용)가 가장 느렸던 원인. 인덱스가
+            // 필요로 하는 태그는 컴포지트 노드 이름이고 "태그는 geometry 인스턴스 아래에
+            // 없다"는 가정은 태그 노드 정지 규칙이 이미 쓰던 것과 동일하다.
+            bool descend = false;
+            foreach (var child in item.Children)
+            {
+                string childName = child.DisplayName?.Trim();
+                bool childTagLike = !string.IsNullOrEmpty(childName) && ContainsDigit(childName);
+                if (childTagLike || (!child.HasGeometry && child.Children.Any()))
+                {
+                    descend = true;
+                    break;
+                }
+            }
+
+            if (!descend)
+                return;
 
             foreach (var child in item.Children)
                 WalkAndIndex(child);

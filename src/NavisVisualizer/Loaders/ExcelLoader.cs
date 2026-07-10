@@ -267,7 +267,9 @@ namespace NavisVisualizer.Loaders
                     string trayNo = row[trayNoCol]?.ToString()?.Trim();
                     if (string.IsNullOrEmpty(trayNo)) continue;
 
-                    if (byTray.ContainsKey(trayNo)) continue;
+                    // 중복 판정은 정규화 키("X"와 "X."은 같은 트레이 — 후행 '.' 장식 실측)
+                    string dedupKey = EitTrayData.NormalizeId(trayNo);
+                    if (byTray.ContainsKey(dedupKey)) continue;
 
                     var tray = new EitTrayData
                     {
@@ -277,8 +279,8 @@ namespace NavisVisualizer.Loaders
                         InstallProgress = installPctCol >= 0 ? ParsePercentage(row[installPctCol]) : null,
                         TrayInstallDate = trayDateCol >= 0 ? ParseCellValue(row[trayDateCol]) : null,
                     };
-                    byTray[trayNo] = tray;
-                    order.Add(trayNo);
+                    byTray[dedupKey] = tray;
+                    order.Add(dedupKey);
                 }
             }
 
@@ -287,112 +289,6 @@ namespace NavisVisualizer.Loaders
             return result;
         }
 
-        /// <summary>
-        /// Cable Pull. Distinguished from Cable Tray by header presence of both
-        /// "Node" and "Cable No" — the same workbook may contain a Tray sheet and
-        /// a Pull sheet. Multiple rows share a Node; we group them into CableNodeData.
-        /// </summary>
-        public static List<CableNodeData> LoadCablePull(string filePath)
-        {
-            var nodeHeaders   = new[] { "Node" };
-            var cableHeaders  = new[] { "Cable No", "Cable No.", "CableNo" };
-            var byNode = new Dictionary<string, CableNodeData>(StringComparer.OrdinalIgnoreCase);
-            var order = new List<string>();
-
-            using (var stream = File.Open(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
-            using (var reader = ExcelReaderFactory.CreateReader(stream))
-            {
-                var dataSet = reader.AsDataSet();
-
-                System.Data.DataTable table = null;
-                int headerRowIdx = -1;
-
-                // Distinguish Pull vs Tray: a Pull sheet has BOTH "Node" and "Cable No" headers
-                // on the same row.
-                foreach (System.Data.DataTable dt in dataSet.Tables)
-                {
-                    int row = FindHeaderRowMatchingAll(dt, nodeHeaders, cableHeaders);
-                    if (row >= 0) { table = dt; headerRowIdx = row; break; }
-                }
-
-                if (table == null || headerRowIdx < 0)
-                    throw new Exception("'Node'와 'Cable No' 헤더를 모두 포함한 시트를 찾을 수 없습니다. (Cable Pull 입력 파일이 맞는지 확인하세요)");
-
-                var cols = BuildColumnMap(table, headerRowIdx);
-
-                int nodeCol      = FindColumn(cols, nodeHeaders);
-                int countCol     = FindColumn(cols, "Count");
-                int equipNoCol   = FindColumn(cols, "Equip No", "EquipNo", "Equipment No");
-                int routeSysCol  = FindColumn(cols, "Route Sys", "RouteSys");
-                int cableNoCol   = FindColumn(cols, cableHeaders);
-                int designLthCol = FindColumn(cols, "Cable Design Lth", "CableDesignLth", "Cable Design Length");
-                int pulledLthCol = FindColumn(cols, "Cable Pulled Lth", "CablePulledLth", "Cable Pulled Length");
-                int pullingPctCol = FindColumn(cols, "Pulling %", "Pulling Percent", "PullingPercent", "Pulling Progress");
-                int fromModCol   = FindColumn(cols, "From Module", "FromModule");
-                int fromEquipCol = FindColumn(cols, "From Equip", "FromEquip");
-                int toModCol     = FindColumn(cols, "To Module", "ToModule");
-                int toEquipCol   = FindColumn(cols, "To Equip", "ToEquip");
-                int instModCol   = FindColumn(cols, "Install Module", "InstallModule");
-                int systemCol    = FindColumn(cols, "System");
-                int typeCol      = FindColumn(cols, "Type");
-                int coreCol      = FindColumn(cols, "Core");
-                int sizeCol      = FindColumn(cols, "Size");
-                int outDiaCol    = FindColumn(cols, "Out Dia", "OutDia", "Outer Dia");
-                int traySysCol   = FindColumn(cols, "Tray Sys", "TraySys");
-                int routeDsnCol  = FindColumn(cols, "Design Lth", "DesignLth", "Design Length");
-                int layerCodeCol = FindColumn(cols, "Layer Code", "LayerCode");
-
-                if (nodeCol < 0 || cableNoCol < 0)
-                    throw new Exception("'Node' 또는 'Cable No' 컬럼을 찾을 수 없습니다.");
-
-                for (int r = headerRowIdx + 1; r < table.Rows.Count; r++)
-                {
-                    var row = table.Rows[r];
-                    string nodeId = row[nodeCol]?.ToString()?.Trim();
-                    if (string.IsNullOrEmpty(nodeId)) continue;
-
-                    if (!byNode.TryGetValue(nodeId, out var node))
-                    {
-                        node = new CableNodeData { NodeId = nodeId };
-                        byNode[nodeId] = node;
-                        order.Add(nodeId);
-                    }
-
-                    string cableNo = cableNoCol >= 0 ? row[cableNoCol]?.ToString()?.Trim() ?? "" : "";
-                    // Skip rows that have no Cable No AND no progress — treat as separator/blank
-                    if (string.IsNullOrEmpty(cableNo) && designLthCol < 0 && pulledLthCol < 0)
-                        continue;
-
-                    node.Cables.Add(new CableRecord
-                    {
-                        Count           = countCol     >= 0 ? ParseInt(row[countCol]) : null,
-                        EquipNo         = equipNoCol   >= 0 ? row[equipNoCol]?.ToString()?.Trim() ?? "" : "",
-                        RouteSys        = routeSysCol  >= 0 ? row[routeSysCol]?.ToString()?.Trim() ?? "" : "",
-                        CableNo         = cableNo,
-                        DesignLth       = designLthCol >= 0 ? ParseDouble(row[designLthCol]) : null,
-                        PulledLth       = pulledLthCol >= 0 ? ParseDouble(row[pulledLthCol]) : null,
-                        PullingProgress = pullingPctCol>= 0 ? ParsePercentage(row[pullingPctCol]) : null,
-                        FromModule      = fromModCol   >= 0 ? row[fromModCol]?.ToString()?.Trim() ?? "" : "",
-                        FromEquip       = fromEquipCol >= 0 ? row[fromEquipCol]?.ToString()?.Trim() ?? "" : "",
-                        ToModule        = toModCol     >= 0 ? row[toModCol]?.ToString()?.Trim() ?? "" : "",
-                        ToEquip         = toEquipCol   >= 0 ? row[toEquipCol]?.ToString()?.Trim() ?? "" : "",
-                        InstallModule   = instModCol   >= 0 ? row[instModCol]?.ToString()?.Trim() ?? "" : "",
-                        System          = systemCol    >= 0 ? row[systemCol]?.ToString()?.Trim() ?? "" : "",
-                        Type            = typeCol      >= 0 ? row[typeCol]?.ToString()?.Trim() ?? "" : "",
-                        Core            = coreCol      >= 0 ? row[coreCol]?.ToString()?.Trim() ?? "" : "",
-                        Size            = sizeCol      >= 0 ? row[sizeCol]?.ToString()?.Trim() ?? "" : "",
-                        OutDia          = outDiaCol    >= 0 ? row[outDiaCol]?.ToString()?.Trim() ?? "" : "",
-                        TraySys         = traySysCol   >= 0 ? row[traySysCol]?.ToString()?.Trim() ?? "" : "",
-                        RouteDesignLth  = routeDsnCol  >= 0 ? ParseDouble(row[routeDsnCol]) : null,
-                        LayerCode       = layerCodeCol >= 0 ? row[layerCodeCol]?.ToString()?.Trim() ?? "" : "",
-                    });
-                }
-            }
-
-            var result = new List<CableNodeData>(order.Count);
-            foreach (var k in order) result.Add(byNode[k]);
-            return result;
-        }
 
         /// <summary>
         /// Cable(형상) 탭용 로드 — 한 행 = 한 케이블 (Cable Pull의 노드 다대다와 별개).
@@ -485,6 +381,59 @@ namespace NavisVisualizer.Loaders
 
             var result = new List<CableLineData>(order.Count);
             foreach (var k in order) result.Add(byCable[k]);
+            return result;
+        }
+
+        /// <summary>
+        /// Cable(형상) 탭 "리스트 필터"용 케이블 번호 목록 로드 — 진척 데이터가 아니라
+        /// 보여줄 케이블의 부분집합만 담은 단순 리스트. "Cable No" 헤더가 있으면 그 컬럼을,
+        /// 없으면 첫 시트 첫 컬럼의 비어있지 않은 값을 케이블 번호로 읽는다 (관대한 파싱 —
+        /// 현장에서 아무 목록이나 붙여넣은 파일 수용). 중복 제거, 순서 유지.
+        /// </summary>
+        public static List<string> LoadCableNoList(string filePath)
+        {
+            var headerNames = new[] { "Cable No", "Cable No.", "CableNo", "CABLE NO", "Cable Number" };
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var result = new List<string>();
+
+            using (var stream = File.Open(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            using (var reader = ExcelReaderFactory.CreateReader(stream))
+            {
+                var dataSet = reader.AsDataSet();
+
+                System.Data.DataTable table = null;
+                int headerRowIdx = -1, col = 0;
+
+                foreach (System.Data.DataTable dt in dataSet.Tables)
+                {
+                    int row = FindHeaderRowInTable(dt, headerNames);
+                    if (row >= 0)
+                    {
+                        table = dt;
+                        headerRowIdx = row;
+                        col = FindColumn(BuildColumnMap(dt, row), headerNames);
+                        break;
+                    }
+                }
+
+                if (table == null)
+                {
+                    // 헤더 없는 맨 목록 — 첫 시트 첫 컬럼 전체
+                    if (dataSet.Tables.Count == 0) return result;
+                    table = dataSet.Tables[0];
+                    headerRowIdx = -1;
+                    col = 0;
+                }
+
+                for (int r = headerRowIdx + 1; r < table.Rows.Count; r++)
+                {
+                    if (col < 0 || col >= table.Columns.Count) break;
+                    string no = table.Rows[r][col]?.ToString()?.Trim();
+                    if (string.IsNullOrEmpty(no)) continue;
+                    if (seen.Add(no)) result.Add(no);
+                }
+            }
+
             return result;
         }
 
