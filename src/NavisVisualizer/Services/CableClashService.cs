@@ -33,6 +33,13 @@ namespace NavisVisualizer.Services
         /// (2만 케이블 중 볼륨 근처만 추출돼야 함). 작으면 pre-cull이 안 먹는 것.</summary>
         public int LastPreCulled { get; private set; }
 
+        // 이번 배치에서 통과 판정된 케이블의 "첫 통과 세그먼트 중점" — 오탐 진단용.
+        // 이 좌표가 볼륨 안이면 정상 관통(케이블이 길어 먼 곳까지 뻗은 것), 볼륨에서 멀면
+        // 술어/좌표계 버그 또는 인덱스 키 충돌(남의 아이템이 케이블에 붙음) 의심.
+        private readonly Dictionary<string, double[]> _lastHits =
+            new Dictionary<string, double[]>(StringComparer.OrdinalIgnoreCase);
+        public IReadOnlyDictionary<string, double[]> LastHits => _lastHits;
+
         /// <summary>모델이 바뀌면 세그먼트 캐시를 버린다. 판정 배치 시작 전에 호출.</summary>
         public void EnsureFresh(Document doc)
         {
@@ -44,7 +51,11 @@ namespace NavisVisualizer.Services
             }
         }
 
-        public void ResetBatchCounters() { LastExtracted = 0; LastCulled = 0; LastPreCulled = 0; }
+        public void ResetBatchCounters()
+        {
+            LastExtracted = 0; LastCulled = 0; LastPreCulled = 0;
+            _lastHits.Clear();
+        }
 
         /// <summary>
         /// cableNo의 형상(items에서 추출·캐시)이 planes 볼륨을 통과하는가. planes가 비면 true.
@@ -83,7 +94,13 @@ namespace NavisVisualizer.Services
             }
             foreach (var seg in cached.Segments)
                 if (ClashMath.SegmentInsideVolume(seg, planes, keepPositive))
+                {
+                    _lastHits[key] = new[]
+                    {
+                        (seg[0] + seg[3]) / 2.0, (seg[1] + seg[4]) / 2.0, (seg[2] + seg[5]) / 2.0,
+                    };
                     return true;
+                }
             return false;
         }
 

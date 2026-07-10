@@ -56,6 +56,9 @@ namespace NavisVisualizer.UI
         private HashSet<string> _listFilter;
         private Button _btnListFilter;
 
+        // 마지막 clash 판정에 쓰인 반평면 수 (CSV 진단 — 1~2개면 볼륨 퇴화 의심).
+        private int _lastClashPlaneCount;
+
         private Document _subscribedDoc;
         private bool _suppressSelectionSync;
         private bool _focusOn;
@@ -790,6 +793,9 @@ namespace NavisVisualizer.UI
             }
             _clash.EnsureFresh(doc);
             _clash.ResetBatchCounters();
+            // 볼륨 퇴화 진단: 축정렬 박스면 6반평면. 1~2개면 반쪽 공간(예: 회전 박스 → COM
+            // fallback 잔여 평면 — L1/L6)이라 먼 케이블도 정당하게 '통과'로 찍힌다.
+            _lastClashPlaneCount = planes.Count;
 
             _progressBar.Style = ProgressBarStyle.Marquee;
             _progressBar.Visible = true;
@@ -818,15 +824,29 @@ namespace NavisVisualizer.UI
             var lines = new List<string>();
             lines.Add($"단면 통과 케이블,{inCount}건");
             lines.Add($"bbox 사전배제/추출/세그AABB배제,{_clash.LastPreCulled}/{_clash.LastExtracted}/{_clash.LastCulled}");
+            // 반평면 수: 축정렬 박스 = 6. 1~2면 볼륨이 반쪽 공간으로 퇴화(회전 박스 → COM fallback
+            // 잔여 평면 등) — 먼 케이블도 정당하게 통과로 찍히므로 "동떨어진 통과"의 1순위 원인.
+            lines.Add($"판정 반평면 수,{_lastClashPlaneCount}");
             lines.Add($"인덱스 스코프,\"{_main.CableLineSearcher.LastScopeNote ?? "-"}\"");
-            lines.Add("Cable No,단계,From,To,Design,Pulled");
+            // 통과지점 = 첫 통과 세그먼트 중점(모델 좌표). 단면 볼륨 안이면 정상 관통(케이블이
+            // 길어서 먼 곳까지 뻗은 것). 볼륨에서 멀면 좌표계/술어 버그. 아이템수 ≥2면 같은
+            // cable-no에 여러 컴포넌트가 매칭된 것 — 남의 아이템이 섞였는지(인덱스 '/' 접두 키
+            // 충돌) 그 케이블을 리스트에서 더블클릭해 3D로 확인.
+            lines.Add("Cable No,단계,From,To,Design,Pulled,아이템수,통과지점X,통과지점Y,통과지점Z");
             var referenceDate = _dtpReference.Value;
             foreach (var c in _cables)
             {
                 if (_scopeKeys == null || !_scopeKeys.Contains(c.CableNo)) continue;
                 string stageLabel = _lastHighlightMode ? "하이라이트" : CableLineStageInfo.Labels[c.GetStageAtDate(referenceDate)];
+                int itemCount = _main.OverrideEngine.GetCableLineItems(c.CableNo)?.Count ?? 0;
+                string hit = "";
+                if (_clash.LastHits.TryGetValue(c.CableNo, out var h))
+                    hit = $"{h[0]:0.##},{h[1]:0.##},{h[2]:0.##}";
+                else
+                    hit = ",,";
                 lines.Add($"\"{c.CableNo}\",\"{stageLabel}\",\"{FromText(c)}\",\"{ToText(c)}\"," +
-                          $"{(c.DesignLth?.ToString("0.##") ?? "")},{(c.PulledLth?.ToString("0.##") ?? "")}");
+                          $"{(c.DesignLth?.ToString("0.##") ?? "")},{(c.PulledLth?.ToString("0.##") ?? "")}," +
+                          $"{itemCount},{hit}");
             }
             string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
                 $"CableClash_{DateTime.Now:yyyyMMdd_HHmmss}.csv");
