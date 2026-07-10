@@ -51,11 +51,16 @@ namespace NavisVisualizer.Searchers
         /// <summary>스풀은 SPL 파일 우선 — SPL 파일이 없는 문서에선 스풀이 HYDROPKG 안에 있으므로 체인 fallback.</summary>
         public static readonly NwdScope Spool = new NwdScope("SPL", Hydrotest, "SPL");
         public static readonly NwdScope Equipment = new NwdScope("MEQ", "MEQ");
+        /// <summary>EIT 소형기기·Tray·Support. 키워드 "EIT"는 granular 파일명도 부분일치로 잡는다
+        /// (예: 05-02-01_..._EIT_Tray, 05-02-02_LQRooms_EIT_Tray — 복수 파일 모두 스코프 루트로
+        /// 수집됨. ResolveScopeRoots가 전 모델을 순회하며 매칭 파일을 전부 담으므로 파일 수 무관).
+        /// EitTrayTab·SubSystem EIT EQ가 이 스코프를 공유하므로 좁은 "EIT_Tray"가 아니라 "EIT"로 둔다
+        /// (EQ 파일까지 커버해야 EIT EQ 매칭이 됨).</summary>
         public static readonly NwdScope EitTray = new NwdScope("EIT", "EIT");
         /// <summary>node box nwd 파일명 규약 확정 시 키워드 추가 (미매칭 시 전체 fallback으로 동작은 유지).</summary>
         public static readonly NwdScope Cable = new NwdScope("CABLE", "CABLE");
-        /// <summary>Sub-system 요소 = Equipment TAG + Piping PKG — PKG·스풀이 어느 배관 파일에 있든 커버하는 합집합.</summary>
-        public static readonly NwdScope SubSystem = new NwdScope("MEQ·SPL·HYDROPKG", "MEQ", "SPL", "HYDROPKG");
+        // (구 SubSystem 합집합 스코프는 폐기 — Sub-system 탭이 공종별로 Equipment/Hydrotest/EitTray/Cable
+        //  스코프를 각각 레벨 타겟하므로 union 불필요. 2026-07 §11.)
 
         /// <summary>
         /// 파일명(전체 경로 허용) 또는 파일 노드 DisplayName이 키워드를 포함하는가.

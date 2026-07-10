@@ -92,18 +92,20 @@ namespace NavisVisualizer.Tests
         }
 
         [TestMethod]
-        public void SubSystem_Matches_Equipment_And_Piping_Files()
+        public void SubSystem_Disciplines_Match_Their_Own_Files()
         {
-            Assert.IsTrue(NwdScope.SubSystem.MatchesFileName(Meq));
-            Assert.IsTrue(NwdScope.SubSystem.MatchesFileName(HydroPkg));
-            Assert.IsTrue(NwdScope.SubSystem.MatchesFileName(Spl));
+            // 구 union 스코프(MEQ·SPL·HYDROPKG) 폐기 — Sub-system은 공종별로 자기 nwd만
+            // 레벨 타겟한다. 각 공종 스코프가 자기 파일만 매칭하는지 검증.
+            Assert.IsTrue(NwdScope.Equipment.MatchesFileName(Meq));
+            Assert.IsTrue(NwdScope.Hydrotest.MatchesFileName(HydroPkg));
+            Assert.IsTrue(NwdScope.EitTray.MatchesFileName(Eit));
+            Assert.IsTrue(NwdScope.Cable.MatchesFileName(Cable));
 
-            // 컨테이너 파일명("...Subsystem.nwd")은 매칭되면 안 됨 —
-            // 통째로 잡히면 하위 파일 스코핑이 무력화된다
-            Assert.IsFalse(NwdScope.SubSystem.MatchesFileName(Container));
-            Assert.IsFalse(NwdScope.SubSystem.MatchesFileName(Eit));
-            Assert.IsFalse(NwdScope.SubSystem.MatchesFileName(Cable));
-            Assert.IsFalse(NwdScope.SubSystem.MatchesFileName(Str));
+            // 교차 오탐 없음 — Equipment 스코프가 Piping/EIT/Cable 파일을 잡으면 안 됨
+            Assert.IsFalse(NwdScope.Equipment.MatchesFileName(HydroPkg));
+            Assert.IsFalse(NwdScope.Equipment.MatchesFileName(Eit));
+            Assert.IsFalse(NwdScope.Hydrotest.MatchesFileName(Meq));
+            Assert.IsFalse(NwdScope.EitTray.MatchesFileName(Meq));
         }
 
         [TestMethod]

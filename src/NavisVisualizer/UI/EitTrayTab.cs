@@ -21,6 +21,8 @@ namespace NavisVisualizer.UI
     {
         private readonly MainDockablePanel _main;
 
+        // 레벨 타겟 인덱스는 로드된 트레이 ID 셋 기반 → 소스 전환/재로드 시 재빌드 강제(Spool 패턴).
+        private bool _needsIndexRebuild;
         private List<EitTrayData> _trays = new List<EitTrayData>();
         private readonly Dictionary<TabDataSource, List<EitTrayData>> _traysBySource
             = new Dictionary<TabDataSource, List<EitTrayData>>();
@@ -103,6 +105,11 @@ namespace NavisVisualizer.UI
             btnExport.Click += BtnExport_Click;
             searchPanel.Controls.Add(btnExport);
 
+            // 선택 행(없으면 표시 중인 전체 행)을 클립보드로 복사 — Ctrl+C 대체 버튼.
+            var btnCopy = new Button { Text = "클립보드 복사", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(8, 1, 8, 1) };
+            btnCopy.Click += (s, e) => CopyListToClipboard();
+            searchPanel.Controls.Add(btnCopy);
+
             var statsRow = new Panel { Dock = DockStyle.Fill, Height = 36 };
             _lblStats = new Label { Dock = DockStyle.Fill, Text = "로드된 데이터 없음", AutoSize = false };
             _lblUnmatched = new Label
@@ -143,6 +150,8 @@ namespace NavisVisualizer.UI
             _listView.Columns.Add("매칭", 40);
             _listView.SelectedIndexChanged += ListView_SelectedIndexChanged;
             _listView.ColumnClick += ListView_ColumnClick;
+            // ListView는 기본적으로 Ctrl+C를 지원하지 않으므로 공용 헬퍼로 배선.
+            ListViewClipboard.EnableCtrlC(_listView, ShowCopied);
             tabAll.Controls.Add(_listView);
 
             // 1행(가시화)
@@ -317,12 +326,13 @@ namespace NavisVisualizer.UI
             }
         }
 
-        /// <summary>적용 기준 소스로 화면 전환. ElecTagSearcher는 full-walk라 소스와 무관 — 재빌드 불필요.</summary>
+        /// <summary>적용 기준 소스로 화면 전환. 레벨 타겟 인덱스는 트레이 ID 셋 기반 → 소스 전환 시 재빌드.</summary>
         private void ApplyActiveSourceData(bool reapply)
         {
             _trays = _traysBySource.TryGetValue(_srcPanel.ActiveSource, out var list) ? list : new List<EitTrayData>();
             _matchedTrayNos.Clear();
             _unmatchedTrayNos.Clear();
+            _needsIndexRebuild = true;
             _scopeFilter.Invalidate();
             _scopeKeys = null;
 
@@ -395,7 +405,15 @@ namespace NavisVisualizer.UI
             _progressBar.Style = ProgressBarStyle.Marquee;
             _progressBar.Visible = true;
             Application.DoEvents();
-            _main.ElecTagSearcher.BuildIndex(doc, NwdScope.EitTray);
+            // 레벨 타겟: 로드된 트레이 ID 셋으로 매칭 깊이만 인덱싱하고 그 아래(geometry)는 안 봄
+            // — "매칭 → 하위 트리 무시 → 옆으로" (general walk의 자식 스캔 비용 제거, 최다 지연 대책).
+            // 하드 스코프: EIT nwd에서만 (미발견 시 전체 트리 안 훑고 0건 + "파일명 규약 확인" 노트).
+            // §2 리스크: 트레이가 여러 깊이에 섞이면 첫 매칭 깊이만 인덱싱 → 매칭 건수 대조 필요(Windows).
+            var trayIds = new HashSet<string>(
+                _trays.Select(t => EitTrayData.NormalizeId(t.TrayNumber)),
+                StringComparer.OrdinalIgnoreCase);
+            _main.ElecTagSearcher.BuildIndexForTags(doc, trayIds, NwdScope.EitTray, hardScope: true);
+            _needsIndexRebuild = false;
             _progressBar.Visible = false;
             _progressBar.Style = ProgressBarStyle.Blocks;
         }
@@ -408,7 +426,7 @@ namespace NavisVisualizer.UI
                 MessageBox.Show("데이터를 먼저 로드하고 모델을 열어주세요.");
                 return;
             }
-            if (_main.ElecTagSearcher.NeedsRebuild(doc))
+            if (_needsIndexRebuild || _main.ElecTagSearcher.NeedsRebuild(doc))
                 BuildIndex();
 
             var activeSettings = new Dictionary<EitStage, ColorSetting>();
@@ -461,9 +479,9 @@ namespace NavisVisualizer.UI
                 return;
             }
             if (_matchedTrayNos.Count == 0) { MessageBox.Show("먼저 가시화 적용을 실행하세요."); return; }
-            if (_main.ElecTagSearcher.NeedsRebuild(doc))
+            if (_needsIndexRebuild || _main.ElecTagSearcher.NeedsRebuild(doc))
             {
-                MessageBox.Show("모델이 변경되었습니다. 가시화 적용을 다시 실행한 뒤 사용하세요.");
+                MessageBox.Show("모델 또는 데이터 소스가 변경되었습니다. 가시화 적용을 다시 실행한 뒤 사용하세요.");
                 return;
             }
 
@@ -518,9 +536,9 @@ namespace NavisVisualizer.UI
                     MessageBox.Show("먼저 가시화 적용을 실행하세요. 집계 범위는 매칭된 항목에 적용됩니다.");
                     return;
                 }
-                if (_main.ElecTagSearcher.NeedsRebuild(doc))
+                if (_needsIndexRebuild || _main.ElecTagSearcher.NeedsRebuild(doc))
                 {
-                    MessageBox.Show("모델이 변경되었습니다. 가시화 적용을 다시 실행한 뒤 범위를 선택하세요.");
+                    MessageBox.Show("모델 또는 데이터 소스가 변경되었습니다. 가시화 적용을 다시 실행한 뒤 범위를 선택하세요.");
                     return;
                 }
 
@@ -612,7 +630,7 @@ namespace NavisVisualizer.UI
         {
             if (_listView.SelectedItems.Count == 0) return;
             var doc = _main.GetDocument();
-            if (doc == null || !_main.ElecTagSearcher.IsIndexBuilt || _main.ElecTagSearcher.NeedsRebuild(doc)) return;
+            if (doc == null || _needsIndexRebuild || !_main.ElecTagSearcher.IsIndexBuilt || _main.ElecTagSearcher.NeedsRebuild(doc)) return;
 
             var collection = new Autodesk.Navisworks.Api.ModelItemCollection();
             foreach (ListViewItem selected in _listView.SelectedItems)
@@ -627,6 +645,14 @@ namespace NavisVisualizer.UI
             if (collection.Count == 0) return;
             doc.CurrentSelection.CopyFrom(collection);
             doc.ActiveView.FocusOnCurrentSelection();
+        }
+
+        /// <summary>[클립보드 복사] 버튼 → 공용 헬퍼 호출 후 결과 표시.</summary>
+        private void CopyListToClipboard() => ShowCopied(ListViewClipboard.CopySelectedOrAll(_listView));
+
+        private void ShowCopied(int n)
+        {
+            if (n > 0) _lblStats.Text = $"클립보드에 {n}행 복사됨";
         }
 
         private void ListView_ColumnClick(object sender, ColumnClickEventArgs e)

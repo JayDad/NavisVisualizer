@@ -28,15 +28,11 @@ namespace NavisVisualizer.Visualizers
         private readonly ModelItemSearcher _spoolTagSearcher;
         private readonly ModelItemSearcher _hydroTagSearcher;
         private readonly ModelItemSearcher _elecTagSearcher;
-        private readonly ModelItemSearcher _subSystemSearcher;
         private readonly ModelItemSearcher _equipmentSearcher;
         // Cable(형상) 탭 — cable-no를 컴포넌트에 직접 매칭 (레벨 타겟, 스코프 CABLE).
         private readonly ModelItemSearcher _cableLineSearcher;
-        // Sub-system 탭의 Cable 요소 전용 (레벨 타겟, 스코프 CABLE). CableLineSearcher와
-        // 스코프·전략이 같지만 레벨 타겟 인덱스는 빌드한 태그 셋에 종속되므로 탭 간 공유 불가
-        // (Cable(형상) 탭이 빌드한 인덱스를 Sub-system이 덮어쓰면 서로 stale — Spool/Equipment
-        // 레벨 타겟과 동일 이유로 별도 인스턴스).
-        private readonly ModelItemSearcher _subSystemCableSearcher;
+        // Sub-system 탭의 공종별 매칭 searcher는 탭이 소유한다(엔진 비의존) — ApplySubSystem에
+        // 공종→searcher 리졸버를 주입받는다. 공종마다 자기 nwd 하나만 레벨 타겟(§11).
 
         // Stage 컬렉션 캐시를 모듈별로 격리한다. 단일 캐시에 enum.ToString() 키로
         // 넣으면 "NotStarted"(전 모듈), "Setting"(Spool/Equipment) 등이 충돌해
@@ -62,32 +58,14 @@ namespace NavisVisualizer.Visualizers
             ModelItemSearcher spoolTagSearcher,
             ModelItemSearcher hydroTagSearcher,
             ModelItemSearcher elecTagSearcher,
-            ModelItemSearcher subSystemSearcher,
             ModelItemSearcher equipmentSearcher,
-            ModelItemSearcher cableLineSearcher,
-            ModelItemSearcher subSystemCableSearcher)
+            ModelItemSearcher cableLineSearcher)
         {
             _spoolTagSearcher = spoolTagSearcher;
             _hydroTagSearcher = hydroTagSearcher;
             _elecTagSearcher = elecTagSearcher;
-            _subSystemSearcher = subSystemSearcher;
             _equipmentSearcher = equipmentSearcher;
             _cableLineSearcher = cableLineSearcher;
-            _subSystemCableSearcher = subSystemCableSearcher;
-        }
-
-        /// <summary>Sub-system 요소의 공종 → 매칭 인덱스 라우팅 (스코프별 — SubSystemDiscipline 주석 참조).</summary>
-        internal ModelItemSearcher SearcherForSubSystem(SubSystemDiscipline discipline)
-        {
-            switch (discipline)
-            {
-                case SubSystemDiscipline.EitEquipment:
-                    return _elecTagSearcher;
-                case SubSystemDiscipline.Cable:
-                    return _subSystemCableSearcher;
-                default:
-                    return _subSystemSearcher;
-            }
         }
 
         private Dictionary<string, ModelItemCollection> ModuleCache(VisualModule module)
@@ -315,10 +293,9 @@ namespace NavisVisualizer.Visualizers
         /// <summary>
         /// Sub-system 탭: 요소를 groupSelector가 주는 키(모드에 따라 sub-system 이름
         /// 또는 ProgressStatus 이름)로 묶어 그룹당 1회 색상을 적용한다. 매칭은
-        /// 공종별 스코프가 달라 매칭 인덱스를 라우팅한다(SearcherForSubSystem):
-        /// Equipment/Piping → SubSystemSearcher(MEQ·SPL·HYDROPKG full-walk) /
-        /// EIT EQ·Tray → ElecTagSearcher(EIT full-walk) / Cable → SubSystemCableSearcher
-        /// (CABLE 레벨 타겟 — 인덱스 빌드는 SubSystemTab.BuildIndex 책임).
+        /// 공종별 스코프가 달라 인덱스를 라우팅한다 — 탭이 <paramref name="searcherFor"/>로
+        /// 공종→searcher를 주입한다(각 공종이 자기 nwd 하나만 레벨 타겟: Equipment=MEQ /
+        /// Piping=HYDROPKG / EIT EQ=EIT / Cable=CABLE. 인덱스 빌드는 SubSystemTab.BuildIndex 책임).
         /// groupSelector가 null을 반환하거나 groupSettings에 없는 키는 색칠하지
         /// 않는다(체크 해제된 단계). 캐시 키는 그룹 키 그대로라 진행 상태 모드에서는
         /// UpdateStageColor(VisualModule.SubSystem, status명)로 증분 색 변경이 된다.
@@ -328,20 +305,21 @@ namespace NavisVisualizer.Visualizers
             Document doc,
             List<SubSystemElement> elements,
             Func<SubSystemElement, string> groupSelector,
-            Dictionary<string, ColorSetting> groupSettings)
+            Dictionary<string, ColorSetting> groupSettings,
+            Func<SubSystemDiscipline, ModelItemSearcher> searcherFor)
         {
             var result = new OverrideResult();
             var groupItems = new Dictionary<string, List<ModelItem>>(StringComparer.OrdinalIgnoreCase);
 
-            // 스코프(searcher)별로 id를 모아 한 번씩 조회 후, 요소 순회 시 자기 결과에서 찾는다.
+            // 공종(searcher)별로 id를 모아 한 번씩 조회 후, 요소 순회 시 자기 결과에서 찾는다.
             var resultsBySearcher = new Dictionary<ModelItemSearcher, Dictionary<string, List<ModelItem>>>();
-            foreach (var group in elements.GroupBy(el => SearcherForSubSystem(el.Discipline)))
+            foreach (var group in elements.GroupBy(el => searcherFor(el.Discipline)))
                 resultsBySearcher[group.Key] =
                     group.Key.FindBySpoolIds(group.Select(el => el.ElementId).Distinct());
 
             foreach (var el in elements)
             {
-                var searchResult = resultsBySearcher[SearcherForSubSystem(el.Discipline)];
+                var searchResult = resultsBySearcher[searcherFor(el.Discipline)];
                 if (!searchResult.TryGetValue(el.ElementId, out var items) || items.Count == 0)
                 {
                     result.UnmatchedIds.Add(el.ElementId);
