@@ -282,6 +282,18 @@ namespace NavisVisualizer.UI
             _btnDelayed.Click += (s, e) => AddDelayedToSelection();
             leftTop.Controls.Add(_btnDelayed);
 
+            // 좌측 상태 목록(_lvAll) 선택 행(없으면 전체)을 클립보드로 복사 — Ctrl+C 대체 버튼.
+            var btnCopyAll = new Button
+            {
+                Text = "클립보드 복사",
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Padding = new Padding(6, 0, 6, 0),
+                Margin = new Padding(0, 2, 0, 0),
+            };
+            btnCopyAll.Click += (s, e) => ShowCopied(ListViewClipboard.CopySelectedOrAll(_lvAll));
+            leftTop.Controls.Add(btnCopyAll);
+
             var rightTopLbl = new Label
             {
                 Dock = DockStyle.Fill,
@@ -346,6 +358,10 @@ namespace NavisVisualizer.UI
             _lvSelected.SelectedIndexChanged += LvSelected_SelectedIndexChanged;
             _lvSelected.DoubleClick += (s, e) => RemoveHighlightedRight();
 
+            // ListView는 기본적으로 Ctrl+C를 지원하지 않으므로 양쪽 리스트 모두 공용 헬퍼로 배선.
+            ListViewClipboard.EnableCtrlC(_lvAll, ShowCopied);
+            ListViewClipboard.EnableCtrlC(_lvSelected, ShowCopied);
+
             _lblSelCount = new Label
             {
                 Dock = DockStyle.Fill,
@@ -373,6 +389,11 @@ namespace NavisVisualizer.UI
 
             group.Controls.Add(grid);
             return group;
+        }
+
+        private void ShowCopied(int n)
+        {
+            if (n > 0) _lblStats.Text = $"클립보드에 {n}행 복사됨";
         }
 
         private static Button MakeArrow(string text, string tip)
@@ -971,6 +992,8 @@ namespace NavisVisualizer.UI
             top.Controls.Add(new Label { Text = "검색:", AutoSize = true, Padding = new Padding(0, 5, 0, 0) });
             top.Controls.Add(txtSearch);
             top.Controls.Add(btnCsv);
+            var btnCopyDetail = new Button { Text = "클립보드 복사", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(8, 0, 8, 0) };
+            top.Controls.Add(btnCopyDetail);
 
             var lv = new ListView
             {
@@ -989,6 +1012,7 @@ namespace NavisVisualizer.UI
             lv.Columns.Add("현재 단계", 90);
             lv.Columns.Add("진행 상태", 70);
             lv.Columns.Add("매칭", 46);
+            ListViewClipboard.EnableCtrlC(lv);   // Ctrl+C 복사 (상세 창)
 
             // 3D 선택 연동: 행 더블클릭 → 그 요소를 뷰에서 선택·포커스
             lv.DoubleClick += (s, e) =>
@@ -1049,6 +1073,7 @@ namespace NavisVisualizer.UI
 
             txtSearch.TextChanged += (s, e) => populate(txtSearch.Text.Trim());
             btnCsv.Click += (s, e) => ExportDetailCsv(names, referenceDate);
+            btnCopyDetail.Click += (s, e) => ListViewClipboard.CopySelectedOrAll(lv);
 
             populate("");
 

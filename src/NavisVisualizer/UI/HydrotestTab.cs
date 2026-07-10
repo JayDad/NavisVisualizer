@@ -104,6 +104,11 @@ namespace NavisVisualizer.UI
             btnExport.Click += BtnExport_Click;
             searchPanel.Controls.Add(btnExport);
 
+            // 선택 행(없으면 표시 중인 전체 행)을 클립보드로 복사 — Ctrl+C 대체 버튼.
+            var btnCopy = new Button { Text = "클립보드 복사", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(8, 1, 8, 1) };
+            btnCopy.Click += (s, e) => CopyListToClipboard();
+            searchPanel.Controls.Add(btnCopy);
+
             // Stats row: scoped stats left, fixed 미매칭(모델 없음) count pinned right.
             var statsRow = new Panel { Dock = DockStyle.Fill, Height = 36 };
             _lblStats = new Label { Dock = DockStyle.Fill, Text = "로드된 데이터 없음", AutoSize = false };
@@ -152,6 +157,8 @@ namespace NavisVisualizer.UI
             _listView.Columns.Add("매칭", 45);
             _listView.SelectedIndexChanged += ListView_SelectedIndexChanged;
             _listView.ColumnClick += ListView_ColumnClick;
+            // ListView는 기본적으로 Ctrl+C를 지원하지 않으므로 공용 헬퍼로 배선.
+            ListViewClipboard.EnableCtrlC(_listView, ShowCopied);
             tabAll.Controls.Add(_listView);
 
             // 1행(가시화): 적용 · 체크 단계 외 숨김
@@ -672,6 +679,14 @@ namespace NavisVisualizer.UI
             if (collection.Count == 0) return;
             doc.CurrentSelection.CopyFrom(collection);
             doc.ActiveView.FocusOnCurrentSelection();
+        }
+
+        /// <summary>[클립보드 복사] 버튼 → 공용 헬퍼 호출 후 결과 표시.</summary>
+        private void CopyListToClipboard() => ShowCopied(ListViewClipboard.CopySelectedOrAll(_listView));
+
+        private void ShowCopied(int n)
+        {
+            if (n > 0) _lblStats.Text = $"클립보드에 {n}행 복사됨";
         }
 
         private void ListView_ColumnClick(object sender, ColumnClickEventArgs e)
