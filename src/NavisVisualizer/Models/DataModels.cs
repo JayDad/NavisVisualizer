@@ -170,6 +170,10 @@ namespace NavisVisualizer.Models
                 [EitStage.Installed]  = new ColorSetting { DisplayColor = Color.FromArgb(0, 128, 0),     Transparency = 0.0 },
             };
 
+        public static Dictionary<CableLineStage, ColorSetting> CableLineDefaults =>
+            new Dictionary<CableLineStage, ColorSetting>
+            {
+                [CableLineStage.NotStarted] = new ColorSetting { DisplayColor = Color.FromArgb(169, 169, 169), Transparency = 0.7 },
                 [CableLineStage.Pulling]    = new ColorSetting { DisplayColor = Color.FromArgb(255, 215, 0),   Transparency = 0.0 },
                 [CableLineStage.Pulled]     = new ColorSetting { DisplayColor = Color.FromArgb(65, 105, 225),  Transparency = 0.0 },
                 [CableLineStage.Terminated] = new ColorSetting { DisplayColor = Color.FromArgb(0, 128, 0),     Transparency = 0.0 },
@@ -614,33 +618,9 @@ namespace NavisVisualizer.Models
         public string PunchBText => Ratio(PunchBClosed, PunchBTotal);
     }
 
-    public class CableRecord
-    {
-        public int? Count { get; set; }
-        public string EquipNo { get; set; }
-        public string RouteSys { get; set; }
-        public string CableNo { get; set; }
-        public double? DesignLth { get; set; }   // Cable Design Lth
-        public double? PulledLth { get; set; }   // Cable Pulled Lth
-        public double? PullingProgress { get; set; } // 0.0 - 1.0
-        public string FromModule { get; set; }
-        public string FromEquip { get; set; }
-        public string ToModule { get; set; }
-        public string ToEquip { get; set; }
-        public string InstallModule { get; set; }
-        public string System { get; set; }
-        public string Type { get; set; }
-        public string Core { get; set; }
-        public string Size { get; set; }
-        public string OutDia { get; set; }
-        public string TraySys { get; set; }
-        public double? RouteDesignLth { get; set; } // separate "Design Lth" col
-        public string LayerCode { get; set; }
-    }
-
     // ============================================================
     // Cable (형상 중심 — 07_Trion_All_Cable.nwd의 cable-no 컴포넌트를 직접 매칭)
-    // 기존 Cable Pull(노드/박스 집계)과 별개. 한 행 = 한 케이블.
+    // 한 행 = 한 케이블. (구 Cable Pull 노드/박스 집계 모델은 탭 삭제와 함께 제거됨)
     // ============================================================
 
     /// <summary>
