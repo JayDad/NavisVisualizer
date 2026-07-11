@@ -47,6 +47,7 @@ namespace NavisVisualizer.UI
         private Autodesk.Navisworks.Api.ModelItemCollection _tagHiddenByStage; // 숨긴 것 복원용
         private Label _lblStats;
         private Label _lblUnmatched;   // fixed 미매칭(모델 없음) count, pinned to the corner
+        private ApplyStatePanel _applyState;   // 3D 적용 상태 표시 (데이터↔3D 어긋남 경고 전담)
         private ProgressBar _progressBar;
 
         private int _sortColumn = -1;
@@ -73,6 +74,9 @@ namespace NavisVisualizer.UI
                 Padding = new Padding(4)
             };
 
+            // 색상 패널·기준일 핸들러가 참조하므로 먼저 생성 (버튼 연결은 버튼 행에서).
+            _applyState = new ApplyStatePanel();
+
             _srcPanel = new DataSourcePanel();
             _srcPanel.ExcelLoadClicked    += (s, e) => LoadExcel();
             _srcPanel.TemplateClicked     += (s, e) => ExportInputTemplate();
@@ -91,7 +95,7 @@ namespace NavisVisualizer.UI
             };
             _dtpReference.ValueChanged += (s, e) =>
             {
-                if (_equipments.Count > 0) { FilterList(); UpdateStats(); }
+                if (_equipments.Count > 0) { FilterList(); UpdateStats(); _applyState.MarkStale("기준일 변경"); }
             };
             datePanel.Controls.Add(dateLabel);
             datePanel.Controls.Add(_dtpReference);
@@ -103,7 +107,7 @@ namespace NavisVisualizer.UI
             _txtSearch = new TextBox { Width = 210, Text = "" };
             _txtSearch.TextChanged += (s, e) => FilterList();
             searchPanel.Controls.Add(_txtSearch);
-            var btnExport = new Button { Text = "매칭 Status 출력", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(8, 1, 8, 1) };
+            var btnExport = new Button { Text = "매칭 Status 엑셀 출력", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(8, 1, 8, 1) };
             btnExport.Click += BtnExport_Click;
             searchPanel.Controls.Add(btnExport);
 
@@ -165,16 +169,17 @@ namespace NavisVisualizer.UI
 
             // 1행(가시화): 적용 · 체크 단계 외 숨김
             var btnPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 34, AutoSize = true };
-            _btnApply      = new Button { Text = "적용",           Width = 80  };
+            _btnApply      = new Button { Text = "가시화 적용",       Width = 90  };
             _btnHideOthers = new Button { Text = "체크 단계 외 숨김", Width = 140 };
             _btnApply.Click      += BtnApply_Click;
             _btnHideOthers.Click += BtnHideOthers_Click;
-            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnHideOthers });
+            _applyState.AttachApplyButton(_btnApply);
+            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnHideOthers, _applyState });
 
-            // 2행(초기화): 공종 초기화(이 공종 색만) · 전체 초기화(모든 공종)
+            // 2행(해제): 이 탭 가시화 해제(이 공종 색만) · 전체 가시화 해제(모든 공종)
             var btnPanelReset = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 34, AutoSize = true };
-            _btnResetModule = new Button { Text = "공종 초기화", Width = 100 };
-            _btnReset       = new Button { Text = "전체 초기화", Width = 100 };
+            _btnResetModule = new Button { Text = "이 탭 가시화 해제", Width = 130 };
+            _btnReset       = new Button { Text = "전체 가시화 해제", Width = 130 };
             _btnResetModule.Click += BtnResetModule_Click;
             _btnReset.Click       += BtnReset_Click;
             btnPanelReset.Controls.AddRange(new Control[] { _btnResetModule, _btnReset });
@@ -195,6 +200,8 @@ namespace NavisVisualizer.UI
             layout.Controls.Add(datePanel);
             layout.Controls.Add(new Label { Text = "단계 & 색상", Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 18 });
             layout.Controls.Add(colorPanel);
+            // 색상 편집(▼·투명도)은 기본 접힘 — 체크박스·스와치만 상시 노출 (UX audit P1)
+            layout.Controls.Add(ColorEditCollapse.BuildToggleRow(colorPanel));
             layout.Controls.Add(btnPanel);
             layout.Controls.Add(btnPanelReset);
             layout.Controls.Add(btnPanel2);
@@ -228,6 +235,7 @@ namespace NavisVisualizer.UI
                 string label = EquipmentStageInfo.Labels[stage];
 
                 var chk = new CheckBox { Text = label, Checked = true, AutoSize = true };
+                chk.CheckedChanged += (s, e) => _applyState.MarkStale("단계 선택 변경");
                 var colorBox = new Panel { Width = 32, Height = 20, BackColor = setting.DisplayColor, BorderStyle = BorderStyle.FixedSingle };
                 var colorBtn = new Button { Text = "▼", Width = 22, Height = 20, FlatStyle = FlatStyle.Flat };
                 colorBtn.FlatAppearance.BorderSize = 0;
@@ -310,7 +318,8 @@ namespace NavisVisualizer.UI
             try
             {
                 string path = InputTemplate.ExportEquipment();
-                MessageBox.Show($"입력 양식 저장 완료: {path}\n작성 후 Excel 형식(.xlsx)으로 저장해 Import 하세요.");
+                SaveNotifier.ShowSaved(this, "Template 출력", path,
+                    "작성 후 Excel 형식(.xlsx)으로 저장해 Import 하세요.");
             }
             catch (Exception ex)
             {
@@ -367,9 +376,10 @@ namespace NavisVisualizer.UI
             FilterList();
             UpdateStats();
 
-            // 색상이 이전 소스 기준으로 화면에 남아 있으면 경고 — 자동 재색칠은 안 함(§6).
-            if (!willReapply && _appliedOnce && _equipments.Count > 0)
-                _lblStats.Text = "⚠ 화면 색상은 이전 소스 기준 — [적용]을 눌러 새 소스로 갱신하세요";
+            // 색상이 이전 소스 기준으로 화면에 남아 있으면 상태 표시기로 경고 —
+            // 자동 재색칠은 안 함(§6). 통계 라벨은 통계만 표시한다 (UX audit P0-1).
+            if (!willReapply)
+                _applyState.MarkStale("데이터 변경");
 
             if (willReapply)
                 BtnApply_Click(null, EventArgs.Empty);
@@ -409,7 +419,7 @@ namespace NavisVisualizer.UI
             string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
                 $"Equipment_Compare_{DateTime.Now:yyyyMMdd_HHmmss}.csv");
             File.WriteAllLines(path, lines, new System.Text.UTF8Encoding(true));
-            MessageBox.Show($"비교 결과 저장 완료: {path}");
+            SaveNotifier.ShowSaved(this, "Excel↔OASIS 비교 출력", path);
         }
 
         private void BtnExport_Click(object sender, EventArgs e)
@@ -458,7 +468,8 @@ namespace NavisVisualizer.UI
             string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
                 $"Equipment_Match_{DateTime.Now:yyyyMMdd_HHmmss}.csv");
             File.WriteAllLines(path, lines, System.Text.Encoding.UTF8);
-            MessageBox.Show($"저장 완료: {path}\n인덱스: {_main.EquipmentSearcher.IndexedCount}건");
+            SaveNotifier.ShowSaved(this, "매칭 Status 엑셀 출력", path,
+                $"인덱스: {_main.EquipmentSearcher.IndexedCount}건");
         }
 
         private void BuildIndex()
@@ -467,6 +478,8 @@ namespace NavisVisualizer.UI
             if (doc == null) return;
             _progressBar.Style = ProgressBarStyle.Marquee;
             _progressBar.Visible = true;
+            // 단순 marquee만으로는 무엇을 하는지 알 수 없어 단계 문구 병기 (UX audit P0-3)
+            _lblStats.Text = "모델 태그 인덱스 생성 중…";
             Application.DoEvents();
 
             // Use level-targeted indexing with known tags from the active source
@@ -495,7 +508,23 @@ namespace NavisVisualizer.UI
                     activeSettings[kv.Key] = _colorSettings[kv.Key];
 
             var referenceDate = _dtpReference.Value;
-            var result = _main.OverrideEngine.ApplyEquipment(doc, _equipments, activeSettings, referenceDate);
+            // 색칠은 permanent override 배치 — 진행바+단계 문구로 UI 프리즈 인상 제거.
+            OverrideResult result;
+            _btnApply.Enabled = false;
+            _progressBar.Style = ProgressBarStyle.Marquee;
+            _progressBar.Visible = true;
+            _lblStats.Text = "색상 적용 중…";
+            Application.DoEvents();
+            try
+            {
+                result = _main.OverrideEngine.ApplyEquipment(doc, _equipments, activeSettings, referenceDate);
+            }
+            finally
+            {
+                _progressBar.Visible = false;
+                _progressBar.Style = ProgressBarStyle.Blocks;
+                _btnApply.Enabled = true;
+            }
 
             _unmatchedTagNos = result.UnmatchedIds;
             var unmatchedSet = new HashSet<string>(result.UnmatchedIds, StringComparer.OrdinalIgnoreCase);
@@ -508,10 +537,14 @@ namespace NavisVisualizer.UI
             ReapplyCurrentScope(doc);
 
             _appliedOnce = true;
+            _applyState.SetApplied($"{SourceLabel()} · 기준일 {referenceDate:MM-dd}");
             UpdateTabCounts();
             UpdateStats(result);
             FilterList();
         }
+
+        private string SourceLabel() =>
+            _srcPanel.ActiveSource == TabDataSource.Oasis ? "OASIS" : "Excel";
 
         // ----- 현황 집계 범위 (aggregation scope) -----
 
@@ -539,12 +572,12 @@ namespace NavisVisualizer.UI
                 var doc = _main.GetDocument();
                 if (doc == null || _matchedTagNos.Count == 0)
                 {
-                    MessageBox.Show("먼저 적용(가시화)을 실행하세요. 집계 범위는 매칭된 항목에 적용됩니다.");
+                    MessageBox.Show("먼저 [가시화 적용]을 실행하세요. 집계 범위는 매칭된 항목에 적용됩니다.");
                     return;
                 }
                 if (_main.EquipmentSearcher.NeedsRebuild(doc) || _needsIndexRebuild)
                 {
-                    MessageBox.Show("모델 또는 데이터 소스가 변경되었습니다. 적용(가시화)을 다시 실행한 뒤 범위를 선택하세요.");
+                    MessageBox.Show("모델 또는 데이터 소스가 변경되었습니다. [가시화 적용]을 다시 실행한 뒤 범위를 선택하세요.");
                     return;
                 }
 
@@ -627,7 +660,7 @@ namespace NavisVisualizer.UI
             }
         }
 
-        /// <summary>공종 초기화: 이 탭(Equipment) 색만 제거 — 다른 공종 색은 유지. 숨김도 복원.</summary>
+        /// <summary>이 탭 가시화 해제: 이 탭(Equipment) 색만 제거 — 다른 공종 색은 유지. 숨김도 복원.</summary>
         private void BtnResetModule_Click(object sender, EventArgs e)
         {
             var doc = _main.GetDocument();
@@ -639,7 +672,8 @@ namespace NavisVisualizer.UI
                 _btnHideOthers.Text = "체크 단계 외 숨김";
             }
             _main.OverrideEngine.ResetModule(doc, VisualModule.Equipment);
-            _lblStats.Text = "공종 초기화 완료 (Equipment 색만 제거)";
+            _lblStats.Text = "이 탭 가시화 해제 완료 (Equipment 색만 제거)";
+            _applyState.SetCleared();
         }
 
         private void BtnHideOthers_Click(object sender, EventArgs e)
@@ -657,12 +691,12 @@ namespace NavisVisualizer.UI
 
             if (_matchedTagNos.Count == 0)
             {
-                MessageBox.Show("먼저 적용(가시화)을 실행하세요. 숨김은 매칭된 항목에 적용됩니다.");
+                MessageBox.Show("먼저 [가시화 적용]을 실행하세요. 숨김은 매칭된 항목에 적용됩니다.");
                 return;
             }
             if (_needsIndexRebuild || _main.EquipmentSearcher.NeedsRebuild(doc))
             {
-                MessageBox.Show("모델 또는 데이터 소스가 변경되었습니다. 적용(가시화)을 다시 실행한 뒤 사용하세요.");
+                MessageBox.Show("모델 또는 데이터 소스가 변경되었습니다. [가시화 적용]을 다시 실행한 뒤 사용하세요.");
                 return;
             }
 
@@ -705,8 +739,9 @@ namespace NavisVisualizer.UI
                 _btnHideOthers.Text = "체크 단계 외 숨김";
             }
             _main.OverrideEngine.Reset(doc);
-            _lblStats.Text = "전체 초기화 완료";
+            _lblStats.Text = "전체 가시화 해제 완료";
             _lblUnmatched.Text = "";
+            _applyState.SetCleared();
         }
 
         private void BtnViewpoint_Click(object sender, EventArgs e)

@@ -79,6 +79,7 @@ namespace NavisVisualizer.UI
         private Button _btnNwd;
         private Label _lblStats;
         private Label _lblUnmatched;
+        private ApplyStatePanel _applyState;   // 3D 적용 상태 표시 (데이터↔3D 어긋남 경고 전담)
         private ProgressBar _progressBar;
 
         private int _sortColumn = -1;
@@ -109,6 +110,9 @@ namespace NavisVisualizer.UI
                 Padding = new Padding(4)
             };
 
+            // 색상 패널·기준일 핸들러가 참조하므로 먼저 생성 (버튼 연결은 버튼 행에서).
+            _applyState = new ApplyStatePanel();
+
             _srcPanel = new DataSourcePanel();
             _srcPanel.ExcelLoadClicked    += (s, e) => LoadExcel();
             _srcPanel.TemplateClicked     += (s, e) => ExportInputTemplate();
@@ -120,7 +124,8 @@ namespace NavisVisualizer.UI
             var datePanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 28, AutoSize = false };
             datePanel.Controls.Add(new Label { Text = "기준일:", AutoSize = true, Padding = new Padding(0, 4, 0, 0) });
             _dtpReference = new DateTimePicker { Format = DateTimePickerFormat.Short, Value = DateTime.Today, Width = 110 };
-            _dtpReference.ValueChanged += (s, e) => { if (_cables.Count > 0) { FilterList(); UpdateStats(); } };
+            _dtpReference.ValueChanged += (s, e) =>
+            { if (_cables.Count > 0) { FilterList(); UpdateStats(); _applyState.MarkStale("기준일 변경"); } };
             datePanel.Controls.Add(_dtpReference);
             datePanel.Controls.Add(new Label { Text = "(stage 날짜 없으면 하이라이트 단색)", AutoSize = true, ForeColor = Color.Gray, Padding = new Padding(6, 4, 0, 0) });
 
@@ -134,12 +139,13 @@ namespace NavisVisualizer.UI
             _btnApply.Click      += BtnApply_Click;
             _btnHideOthers.Click += BtnHideOthers_Click;
             _btnIsolateSel.Click += BtnIsolateSel_Click;
-            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnHideOthers, _btnIsolateSel });
+            _applyState.AttachApplyButton(_btnApply);
+            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnHideOthers, _btnIsolateSel, _applyState });
 
-            // 2행(초기화)
+            // 2행(해제)
             var btnPanelReset = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 34, AutoSize = true };
-            _btnResetModule = new Button { Text = "공종 초기화", Width = 100 };
-            _btnReset       = new Button { Text = "전체 초기화", Width = 100 };
+            _btnResetModule = new Button { Text = "이 탭 가시화 해제", Width = 130 };
+            _btnReset       = new Button { Text = "전체 가시화 해제", Width = 130 };
             _btnResetModule.Click += BtnResetModule_Click;
             _btnReset.Click       += BtnReset_Click;
             btnPanelReset.Controls.AddRange(new Control[] { _btnResetModule, _btnReset });
@@ -179,7 +185,7 @@ namespace NavisVisualizer.UI
             _btnListFilter = new Button { Text = "리스트 필터 Import", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(6, 0, 6, 0) };
             _btnListFilter.Click += BtnListFilter_Click;
             searchPanel.Controls.Add(_btnListFilter);
-            var btnExport = new Button { Text = "매칭 Status 출력", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(6, 0, 6, 0) };
+            var btnExport = new Button { Text = "매칭 Status 엑셀 출력", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(6, 0, 6, 0) };
             btnExport.Click += BtnExport_Click;
             searchPanel.Controls.Add(btnExport);
 
@@ -230,6 +236,8 @@ namespace NavisVisualizer.UI
             layout.Controls.Add(datePanel);
             layout.Controls.Add(new Label { Text = "단계 & 색상 (하이라이트 단색 포함)", Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 18 });
             layout.Controls.Add(colorPanel);
+            // 색상 편집(▼·투명도)은 기본 접힘 — 체크박스·스와치만 상시 노출 (UX audit P1)
+            layout.Controls.Add(ColorEditCollapse.BuildToggleRow(colorPanel));
             layout.Controls.Add(btnPanel);
             layout.Controls.Add(btnPanelReset);
             layout.Controls.Add(btnPanel2);
@@ -278,6 +286,7 @@ namespace NavisVisualizer.UI
             if (registerCheck != null)
             {
                 var chk = new CheckBox { Text = label, Checked = true, AutoSize = true };
+                chk.CheckedChanged += (s, e) => _applyState.MarkStale("단계 선택 변경");
                 registerCheck(chk);
                 first = chk;
             }
@@ -374,7 +383,6 @@ namespace NavisVisualizer.UI
         /// </summary>
         private void ApplyActiveSourceData()
         {
-            bool hadApplied = _matchedCableNos.Count > 0 || _unmatchedCableNos.Count > 0;
             _cables = _cablesBySource.TryGetValue(_srcPanel.ActiveSource, out var list)
                 ? list : new List<CableLineData>();
             _matchedCableNos.Clear();
@@ -391,8 +399,8 @@ namespace NavisVisualizer.UI
             _tabFilter.TabPages[2].Text = "미매칭";
             FilterList();
             UpdateStats();
-            if (hadApplied && _cables.Count > 0)
-                _lblStats.Text = "⚠ 화면 색상은 이전 소스 기준 — [가시화 적용]을 눌러 새 소스로 갱신하세요";
+            // 색이 이전 소스 기준으로 남아 있으면 상태 표시기로 경고 (통계 라벨은 통계만 — P0-1)
+            _applyState.MarkStale("데이터 변경");
         }
 
         private void ExportComparison()
@@ -419,7 +427,7 @@ namespace NavisVisualizer.UI
             string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
                 $"CableLine_Compare_{DateTime.Now:yyyyMMdd_HHmmss}.csv");
             File.WriteAllLines(path, lines, new System.Text.UTF8Encoding(true));
-            MessageBox.Show($"비교 결과 저장 완료: {path}");
+            SaveNotifier.ShowSaved(this, "Excel↔OASIS 비교 출력", path);
         }
 
         private void ExportInputTemplate()
@@ -427,7 +435,8 @@ namespace NavisVisualizer.UI
             try
             {
                 string path = InputTemplate.ExportCable();
-                MessageBox.Show($"입력 양식 저장 완료: {path}\n작성 후 Excel 형식(.xlsx)으로 저장해 Import 하세요.");
+                SaveNotifier.ShowSaved(this, "Template 출력", path,
+                    "작성 후 Excel 형식(.xlsx)으로 저장해 Import 하세요.");
             }
             catch (Exception ex)
             {
@@ -441,6 +450,8 @@ namespace NavisVisualizer.UI
             if (doc == null) return;
             _progressBar.Style = ProgressBarStyle.Marquee;
             _progressBar.Visible = true;
+            // 단순 marquee만으로는 무엇을 하는지 알 수 없어 단계 문구 병기 (UX audit P0-3)
+            _lblStats.Text = "모델 태그 인덱스 생성 중…";
             Application.DoEvents();
             var cableNoSet = new HashSet<string>(_cables.Select(c => c.CableNo));
             _main.CableLineSearcher.BuildIndexForTags(doc, cableNoSet, NwdScope.Cable);
@@ -478,6 +489,7 @@ namespace NavisVisualizer.UI
             _btnApply.Enabled = false;
             _progressBar.Style = ProgressBarStyle.Marquee;
             _progressBar.Visible = true;
+            _lblStats.Text = "색상 적용 중…";
             Application.DoEvents();
             try
             {
@@ -500,6 +512,9 @@ namespace NavisVisualizer.UI
             _scopeFilter.Invalidate();
             ReapplyCurrentScope(doc);
 
+            _applyState.SetApplied(
+                (_srcPanel.ActiveSource == TabDataSource.Oasis ? "OASIS" : "Excel")
+                + (_lastHighlightMode ? " · 하이라이트" : $" · 기준일 {referenceDate:MM-dd}"));
             UpdateTabCounts();
             UpdateStats(result);
             FilterList();
@@ -851,7 +866,7 @@ namespace NavisVisualizer.UI
             string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
                 $"CableClash_{DateTime.Now:yyyyMMdd_HHmmss}.csv");
             File.WriteAllText(path, string.Join("\r\n", lines), new System.Text.UTF8Encoding(true));
-            MessageBox.Show($"단면 통과 케이블 {inCount}건.\n저장 완료: {path}");
+            SaveNotifier.ShowSaved(this, "단면 통과 케이블 추출", path, $"단면 통과 케이블 {inCount}건.");
         }
 
         // ----- Buttons -----
@@ -863,7 +878,8 @@ namespace NavisVisualizer.UI
             RestoreHidden(doc);
             SetFocusChecked(false);
             _main.OverrideEngine.ResetCableLineModule(doc);
-            _lblStats.Text = "공종 초기화 완료 (Cable 형상 색만 제거)";
+            _lblStats.Text = "이 탭 가시화 해제 완료 (Cable 형상 색만 제거)";
+            _applyState.SetCleared();
         }
 
         private void BtnReset_Click(object sender, EventArgs e)
@@ -876,8 +892,9 @@ namespace NavisVisualizer.UI
             _scopeFilter.Reset();
             _scopeKeys = null;
             _scopePanel.ResetToFullModel();
-            _lblStats.Text = "전체 초기화 완료";
+            _lblStats.Text = "전체 가시화 해제 완료";
             _lblUnmatched.Text = "";
+            _applyState.SetCleared();
         }
 
         private void BtnViewpoint_Click(object sender, EventArgs e)
@@ -916,7 +933,7 @@ namespace NavisVisualizer.UI
             string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
                 $"Cable_Match_{DateTime.Now:yyyyMMdd_HHmmss}.csv");
             File.WriteAllText(path, string.Join("\r\n", lines), new System.Text.UTF8Encoding(true));
-            MessageBox.Show($"저장 완료: {path}");
+            SaveNotifier.ShowSaved(this, "매칭 Status 엑셀 출력", path);
         }
 
         // ----- List / selection -----

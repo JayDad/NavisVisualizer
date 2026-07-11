@@ -195,7 +195,8 @@ Apply:
 - 각 `Apply*`는 자기 모듈 캐시만 Clear/채움 → 다른 공종 적용 후에도 자기 색 미세조정 가능
 - `Apply*`는 전체 Reset 없이 자기 매칭 아이템만 칠하므로 공종 간 색은 뷰에서 공존
   (Tray 노드와 Cable `-BOX`는 물리적으로 다른 객체)
-- "전체 초기화"만 문서 전체 리셋 (공종별 초기화는 CLAUDE.md 향후 고려사항 7 참조)
+- "전체 가시화 해제"(구 "전체 초기화")만 문서 전체 리셋, "이 탭 가시화 해제"(구 "공종 초기화")는
+  그 공종 누적 painted만 리셋 (CLAUDE.md §10)
 
 **성능 최적화 이력:**
 
@@ -221,17 +222,19 @@ Apply:
 
 ### 6. UI Architecture (`UI/`)
 
-**탭 구성:** Hydrotest | Spool | Equipment | EIT Tray | Cable(형상) | Sub-system | Tools
-(구 Cable Pull/Cable(Node) 노드·박스 집계 탭은 2026-07 삭제 — Tools의 box 중복 검사만 유지)
+**탭 구성:** Hydrotest | Spool | Equipment | EIT Tray | Cable(형상) | Sub-system | 고급 진단(구 Tools)
+(구 Cable Pull/Cable(Node) 노드·박스 집계 탭은 2026-07 삭제 — 고급 진단의 box 중복 검사만 유지)
 
 **공통 패턴 (날짜 기반 탭 동일):**
 - DateTimePicker (기준일, 기본: 오늘)
-- 2열 색상 패널 (색상 피커 + 투명도 드롭다운)
+- 2열 색상 패널 (색상 피커 + 투명도 드롭다운 — 편집 컨트롤은 기본 접힘, `ColorEditCollapse` 토글)
 - 색상 변경 시 증분 업데이트 (캐시 활용)
 - 전체/매칭/미매칭 탭 필터 (건수 표시)
-- 검색 + "매칭 Status 출력" CSV Export
+- 검색 + "매칭 Status 엑셀 출력" CSV Export (저장 완료는 `SaveNotifier` 비모달 알림 — 파일/폴더 열기)
 - ListView 컬럼 정렬 (오름차순/내림차순)
-- 적용 / 전체 초기화 / 속성 쓰기 / Viewpoint 저장 / NWD Export
+- 가시화 적용 / 이 탭·전체 가시화 해제 / 속성 쓰기 / Viewpoint 저장 / NWD Export
+- 가시화 버튼 행의 `ApplyStatePanel`이 3D 적용 상태(미적용/적용됨/업데이트 필요+사유)를 상시 표시
+  — 소스·기준일·단계 체크·선택 변경 시 MarkStale, 적용 시 SetApplied (2026-07 UX audit P0-1)
 
 **Sub-system 탭 (`UI/SubSystemTab.cs`):**
 - OASIS 전용 로드 (단일 소스 — DataSourcePanel 미사용). 요소 + 마스터를 한 번에 로드,

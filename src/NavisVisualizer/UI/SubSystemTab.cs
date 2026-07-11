@@ -116,6 +116,7 @@ namespace NavisVisualizer.UI
         private Label _lblSelCount;
         private ProgressBar _progressBar;
         private Label _lblStats;
+        private ApplyStatePanel _applyState;   // 3D 적용 상태 표시 (선택/모드/기준일↔3D 어긋남 경고 전담)
 
         // 그리드 밖에서는 단계별 체크 상태만 필요 (색/투명도는 빌더 클로저가 직접 갱신)
         private Dictionary<SubSystemStage, CheckBox> _stageChecks = new Dictionary<SubSystemStage, CheckBox>();
@@ -144,6 +145,9 @@ namespace NavisVisualizer.UI
                 AutoScroll = true,
                 Padding = new Padding(4)
             };
+
+            // 색상 그리드·선택/모드/기준일 핸들러가 참조하므로 먼저 생성 (버튼 연결은 버튼 행에서).
+            _applyState = new ApplyStatePanel();
 
             // ----- OASIS 로드 행 -----
             var loadPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 30, AutoSize = false, WrapContents = false };
@@ -179,7 +183,8 @@ namespace NavisVisualizer.UI
             _dtpReference.ValueChanged += (s, e) =>
             {
                 // 단계/스와치 컬럼이 기준일에 의존 → 목록·통계 재표시
-                if (_subSystemNames.Count > 0) { RefreshLeftList(); RefreshRightList(); UpdateStats(); }
+                if (_subSystemNames.Count > 0)
+                { RefreshLeftList(); RefreshRightList(); UpdateStats(); _applyState.MarkStale("기준일 변경"); }
             };
             modeFlow.Controls.Add(_dtpReference);
             modeGroup.Controls.Add(modeFlow);
@@ -196,17 +201,21 @@ namespace NavisVisualizer.UI
 
             // ----- 버튼 행 -----
             var btnPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 65, AutoSize = true };
-            var btnApply = new Button { Text = "적용", Width = 80 };
-            var btnReset = new Button { Text = "전체 초기화", Width = 90 };
+            var btnApply = new Button { Text = "가시화 적용", Width = 90 };
+            var btnResetModule = new Button { Text = "이 탭 가시화 해제", Width = 130 };
+            var btnReset = new Button { Text = "전체 가시화 해제", Width = 130 };
             var btnReport = new Button { Text = "현황 리포트 출력", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(8, 1, 8, 1) };
             var btnViewpoint = new Button { Text = "Viewpoint 저장", Width = 120 };
             var btnNwd = new Button { Text = "NWD Export", Width = 110 };
             btnApply.Click += BtnApply_Click;
+            btnResetModule.Click += BtnResetModule_Click;
             btnReset.Click += BtnReset_Click;
             btnReport.Click += BtnReport_Click;
             btnViewpoint.Click += BtnViewpoint_Click;
             btnNwd.Click += BtnNwd_Click;
-            btnPanel.Controls.AddRange(new Control[] { btnApply, btnReset, btnReport, btnViewpoint, btnNwd });
+            _applyState.AttachApplyButton(btnApply);
+            btnPanel.Controls.AddRange(new Control[]
+                { btnApply, btnResetModule, btnReset, btnReport, btnViewpoint, btnNwd, _applyState });
 
             _progressBar = new ProgressBar { Dock = DockStyle.Fill, Height = 12, Visible = false };
             _lblStats = new Label { Dock = DockStyle.Fill, Text = "로드된 데이터 없음", AutoSize = false, Height = 78 };
@@ -216,6 +225,8 @@ namespace NavisVisualizer.UI
             layout.Controls.Add(new Label { Text = "단계 색상", Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 18 });
             layout.Controls.Add(_stagePanel);
             layout.Controls.Add(_progressPanel);
+            // 색상 편집(▼·투명도)은 기본 접힘 — 체크박스·스와치만 상시 노출 (UX audit P1)
+            layout.Controls.Add(ColorEditCollapse.BuildToggleRow(_stagePanel, _progressPanel));
             layout.Controls.Add(selGroup);
             layout.Controls.Add(btnPanel);
             layout.Controls.Add(_progressBar);
@@ -247,6 +258,7 @@ namespace NavisVisualizer.UI
                 var setting = settings[key];
 
                 var chk = new CheckBox { Text = labels[key], Checked = true, AutoSize = true };
+                chk.CheckedChanged += (s, e) => _applyState.MarkStale("단계 선택 변경");
                 var colorBox = new Panel { Width = 32, Height = 20, BackColor = setting.DisplayColor, BorderStyle = BorderStyle.FixedSingle };
                 var colorBtn = new Button { Text = "▼", Width = 22, Height = 20, FlatStyle = FlatStyle.Flat };
                 colorBtn.FlatAppearance.BorderSize = 0;
@@ -308,7 +320,7 @@ namespace NavisVisualizer.UI
             // 좌측 상단: 검색 (코드 + 설명 매칭) + MCC 지연 일괄 선택
             var leftTop = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = Padding.Empty };
             leftTop.Controls.Add(new Label { Text = "검색:", AutoSize = true, Padding = new Padding(0, 6, 0, 0) });
-            _txtFilter = new TextBox { Width = 88, Margin = new Padding(0, 3, 3, 0) };
+            _txtFilter = new TextBox { Width = 120, Margin = new Padding(0, 3, 3, 0) };
             _txtFilter.TextChanged += (s, e) => RefreshLeftList();
             leftTop.Controls.Add(_txtFilter);
             _btnDelayed = new Button
@@ -511,6 +523,8 @@ namespace NavisVisualizer.UI
                 RefreshRightList();
                 UpdateSelCount();
                 UpdateStats();
+                // 3D 색이 남아 있으면 이전 로드 기준 — 상태 표시기로 경고 (P0-1)
+                _applyState.MarkStale("데이터 재로드");
             }
             catch (Exception ex)
             {
@@ -596,12 +610,14 @@ namespace NavisVisualizer.UI
         {
             if (!_selected.Add(name)) return;
             _selectionOrder.Add(name);
+            _applyState.MarkStale("선택 변경");
         }
 
         private void RemoveSelection(string name)
         {
             if (!_selected.Remove(name)) return;
             _selectionOrder.RemoveAll(n => n.Equals(name, StringComparison.OrdinalIgnoreCase));
+            _applyState.MarkStale("선택 변경");
         }
 
         /// <summary>▶ — 좌측에서 하이라이트한 행들을 우측에 추가.</summary>
@@ -672,6 +688,7 @@ namespace NavisVisualizer.UI
         /// <summary>◀◀ — 전체 해제.</summary>
         private void ClearSelection()
         {
+            if (_selected.Count > 0) _applyState.MarkStale("선택 변경");
             _selected.Clear();
             _selectionOrder.Clear();
             RefreshLeftList();
@@ -769,8 +786,8 @@ namespace NavisVisualizer.UI
             if (_stagePanel == null || _progressPanel == null) return; // 초기화 중 이벤트 방어
             _stagePanel.Visible = _rdoByStage.Checked;
             _progressPanel.Visible = !_rdoByStage.Checked;
-            if (_appliedOnce)
-                _lblStats.Text += "\n⚠ 화면 색상은 이전 적용 기준 — 적용을 다시 실행하세요";
+            // 색이 이전 모드 기준으로 남아 있으면 상태 표시기로 경고 (통계 라벨은 통계만 — P0-1)
+            _applyState.MarkStale("시각화 모드 변경");
         }
 
         /// <summary>색/투명도 증분 변경 — 마지막 적용 모드와 같은 그리드에서만 유효.</summary>
@@ -787,6 +804,8 @@ namespace NavisVisualizer.UI
             if (doc == null) return;
             _progressBar.Style = ProgressBarStyle.Marquee;
             _progressBar.Visible = true;
+            // 단순 marquee만으로는 무엇을 하는지 알 수 없어 단계 문구 병기 (UX audit P0-3)
+            _lblStats.Text = "모델 태그 인덱스 생성 중… (공종별)";
             Application.DoEvents();
 
             // 공종마다 자기 태그 셋으로 자기 nwd 하나만 레벨 타겟 (general walk 없음, 하드 스코프
@@ -842,30 +861,43 @@ namespace NavisVisualizer.UI
 
             OverrideResult result;
             ApplyMode mode;
-            if (_rdoByStage.Checked)
+            // 색칠은 permanent override 배치 — 진행바+단계 문구로 UI 프리즈 인상 제거 (P0-3).
+            _progressBar.Style = ProgressBarStyle.Marquee;
+            _progressBar.Visible = true;
+            _lblStats.Text = "색상 적용 중…";
+            Application.DoEvents();
+            try
             {
-                mode = ApplyMode.Stage;
-                var groupSettings = new Dictionary<string, ColorSetting>(StringComparer.OrdinalIgnoreCase);
-                foreach (var kv in _stageChecks)
-                    if (kv.Value.Checked)
-                        groupSettings[kv.Key.ToString()] = _stageSettings[kv.Key];
+                if (_rdoByStage.Checked)
+                {
+                    mode = ApplyMode.Stage;
+                    var groupSettings = new Dictionary<string, ColorSetting>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var kv in _stageChecks)
+                        if (kv.Value.Checked)
+                            groupSettings[kv.Key.ToString()] = _stageSettings[kv.Key];
 
-                // 요소는 자기 sub-system의 마스터 실적 단계색을 받는다(지연 여부와 무관).
-                // 마스터 외 sub-system 요소는 그룹 키 null → 색칠 제외(매칭 집계에는 포함).
-                result = _main.OverrideEngine.ApplySubSystem(doc, targets,
-                    el => StageOf(GetMaster(el.SubSystem), referenceDate)?.ToString(),
-                    groupSettings, SearcherFor);
+                    // 요소는 자기 sub-system의 마스터 실적 단계색을 받는다(지연 여부와 무관).
+                    // 마스터 외 sub-system 요소는 그룹 키 null → 색칠 제외(매칭 집계에는 포함).
+                    result = _main.OverrideEngine.ApplySubSystem(doc, targets,
+                        el => StageOf(GetMaster(el.SubSystem), referenceDate)?.ToString(),
+                        groupSettings, SearcherFor);
+                }
+                else
+                {
+                    mode = ApplyMode.Progress;
+                    var groupSettings = new Dictionary<string, ColorSetting>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var kv in _progressChecks)
+                        if (kv.Value.Checked)
+                            groupSettings[kv.Key.ToString()] = _progressSettings[kv.Key];
+
+                    result = _main.OverrideEngine.ApplySubSystem(doc, targets,
+                        el => el.StatusAt(referenceDate).ToString(), groupSettings, SearcherFor);
+                }
             }
-            else
+            finally
             {
-                mode = ApplyMode.Progress;
-                var groupSettings = new Dictionary<string, ColorSetting>(StringComparer.OrdinalIgnoreCase);
-                foreach (var kv in _progressChecks)
-                    if (kv.Value.Checked)
-                        groupSettings[kv.Key.ToString()] = _progressSettings[kv.Key];
-
-                result = _main.OverrideEngine.ApplySubSystem(doc, targets,
-                    el => el.StatusAt(referenceDate).ToString(), groupSettings, SearcherFor);
+                _progressBar.Visible = false;
+                _progressBar.Style = ProgressBarStyle.Blocks;
             }
 
             _unmatchedIds = new HashSet<string>(result.UnmatchedIds, StringComparer.OrdinalIgnoreCase);
@@ -875,9 +907,21 @@ namespace NavisVisualizer.UI
             _appliedSubSystems = new HashSet<string>(_selected, StringComparer.OrdinalIgnoreCase);
             _appliedOnce = true;
             _appliedMode = mode;
+            _applyState.SetApplied(
+                $"{(mode == ApplyMode.Stage ? "단계별" : "진행상태별")} · {_appliedSubSystems.Count}개 sub-system");
 
             RefreshRightList();
             UpdateStats(result);
+        }
+
+        /// <summary>이 탭 가시화 해제: Sub-system 색만 제거 — 다른 공종 색은 유지 (§10 ResetModule).</summary>
+        private void BtnResetModule_Click(object sender, EventArgs e)
+        {
+            var doc = _main.GetDocument();
+            if (doc == null) return;
+            _main.OverrideEngine.ResetModule(doc, VisualModule.SubSystem);
+            _lblStats.Text = "이 탭 가시화 해제 완료 (Sub-system 색만 제거)";
+            _applyState.SetCleared();
         }
 
         private void BtnReset_Click(object sender, EventArgs e)
@@ -885,7 +929,8 @@ namespace NavisVisualizer.UI
             var doc = _main.GetDocument();
             if (doc == null) return;
             _main.OverrideEngine.Reset(doc);
-            _lblStats.Text = "전체 초기화 완료";
+            _lblStats.Text = "전체 가시화 해제 완료";
+            _applyState.SetCleared();
         }
 
         // ----- 현황 리포트 -----
@@ -997,7 +1042,7 @@ namespace NavisVisualizer.UI
             string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
                 $"SubSystem_Report_{DateTime.Now:yyyyMMdd_HHmmss}.csv");
             File.WriteAllLines(path, lines, new System.Text.UTF8Encoding(true));
-            MessageBox.Show($"리포트 저장 완료: {path}");
+            SaveNotifier.ShowSaved(this, "현황 리포트 출력", path);
         }
 
         private static string Csv(string s) =>
@@ -1161,7 +1206,7 @@ namespace NavisVisualizer.UI
             string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
                 $"SubSystem_Detail_{DateTime.Now:yyyyMMdd_HHmmss}.csv");
             File.WriteAllLines(path, lines, new System.Text.UTF8Encoding(true));
-            MessageBox.Show($"상세 현황 저장 완료: {path}");
+            SaveNotifier.ShowSaved(this, "선택 Sub-system 상세 현황", path);
         }
 
         // ----- 기타 -----

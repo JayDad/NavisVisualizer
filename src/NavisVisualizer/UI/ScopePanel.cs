@@ -66,9 +66,10 @@ namespace NavisVisualizer.UI
                 flow.Controls.Add(radio);
             }
 
+            // "가시화 적용"과 혼동되지 않도록 "범위 적용"으로 구분 (UX audit P0-2)
             var btnApply = new Button
             {
-                Text = "적용",
+                Text = "범위 적용",
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 Padding = new Padding(8, 0, 8, 0),

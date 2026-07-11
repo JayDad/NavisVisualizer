@@ -578,6 +578,32 @@ A Punch Total, A Punch Closed, A Punch %, B Punch Total, B Punch Closed, B Punch
 2(OASIS 로더 `LoadCable`/`LoadEitTray`·회전 박스). `LoadCable` 철자는 실 스키마로 확정·배선 완료
 (2026-07 — §9 Cable 참조), Phase 2 잔여는 회전 박스뿐.
 
+### 14. UX Audit 반영 (2026-07 — 구현됨, Windows 검증 대기)
+
+master 기준 UX audit의 항목별 판정·근거·보류 목록은 **`docs/UX_AUDIT_REVIEW.md`** 참조. 반영분:
+
+- **3D 적용 상태 표시 `UI/ApplyStatePanel.cs`** (audit P0-1): 가시화 버튼 행에 `3D: 미적용 /
+  {기준}·시각 적용됨 / ⚠ 3D 업데이트 필요(사유)` 라벨 + stale 시 [가시화 적용] 버튼 배경 강조.
+  6개 탭 전부 배선 — MarkStale 트리거는 소스 전환/재로드·기준일·단계 체크·(Sub-system) 선택/모드.
+  기존 `_lblStats`에 얹던 ⚠ 경고 문구는 전부 제거 (**통계 라벨은 통계만** — 경고가 통계를 덮어쓰던
+  문제 해소). 색/투명도 변경은 증분 즉시 반영이라 stale 아님.
+- **버튼 명칭 통일** (P0-2): `적용`→`가시화 적용`(전 탭), ScopePanel `적용`→`범위 적용`,
+  `공종 초기화`→`이 탭 가시화 해제`, `전체 초기화`→`전체 가시화 해제`(§6 "초기화 오독" 취지 실현),
+  `매칭 Status 출력`→`매칭 Status 엑셀 출력`(§6 결정 반영). 버튼명 인용 안내문도 일괄 갱신.
+  §10의 버튼 행 구성 표기는 이 명칭으로 대체됨.
+- **긴 작업 단계 문구** (P0-3 부분): marquee에 `모델 태그 인덱스 생성 중…`/`색상 적용 중…` 병기.
+  Hydrotest/Equipment/Sub-system 색칠 구간에 진행바 자체도 추가(Spool §10과 동일 try/finally).
+  건수/경과/중단은 보류 — 진행 콜백 설계 메모는 리뷰 문서에.
+- **색상 편집 접기 `UI/ColorEditCollapse.cs`** (P1): 기본 접힘 — 체크박스+스와치만 노출, ▼·투명도는
+  토글로. 탭 빌더 무수정(패널 트리 walk로 ComboBox·"▼"만 Visible 토글).
+- **저장 알림 `UI/SaveNotifier.cs`** (P2): CSV 저장 완료 MessageBox → 비모달 창(파일 열기/폴더 열기).
+- **Tools 탭 → "고급 진단"** 명칭 변경(P2 부분), **EIT Tray 기준일 행 제거**(비활성 노출 중단 —
+  날짜 컬럼 확보 시 §3 패턴으로 복원), Sub-system 검색폭 88→120 + **`이 탭 가시화 해제` 버튼 신설**
+  (§10 잔여 해소 — `ResetModule(VisualModule.SubSystem)`).
+- **보류(후속 우선순위)**: ① Overview/Preflight 탭(최우선 추천 — NwdScope 발견 여부 사전 점검),
+  ② 진행 콜백+중단, ③ DPI/반응형(Windows 실측 병행 필수), ④ 리스트·통계 통합, ⑤ Sub-system 선택
+  UX 재설계(§11 dual-list는 최근 사용자 결정이라 실사용 후), ⑥ empty-state 체크리스트, ⑦ 언어 통일.
+
 ## 레슨런 (하드 트러블슈팅 기록 — 다시 헤매지 말 것)
 
 ### L1. 단면(Clipping): **Section Box는 COM `ClippingPlanes()`에 없다** (가장 값진 교훈)

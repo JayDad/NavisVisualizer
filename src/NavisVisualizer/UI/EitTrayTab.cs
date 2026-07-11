@@ -15,7 +15,8 @@ namespace NavisVisualizer.UI
     /// <summary>
     /// EIT Tray 탭 — 트레이 설치 진척(Tray Number/BRANCH NO. 매칭, EIT nwd 스코프)을 % 기반 3단계
     /// (미착수/설치중/설치완료)로 시각화. 케이블 포설과는 무관(형상 Cable 탭이 별개). Excel↔OASIS
-    /// 이중 소스(EIT_Tray는 날짜 컬럼이 없어 % 기반 현재상태 판정 — 기준일 UI는 향후용으로 비활성).
+    /// 이중 소스. EIT_Tray는 날짜 컬럼이 없어 % 기반 현재상태 판정 — 기준일 UI는 실제 날짜 컬럼이
+    /// 생길 때까지 표시하지 않는다 (비활성 상태로 노출하면 "왜 안 되지" 혼란만 줌 — UX audit QW7).
     /// </summary>
     public class EitTrayTab : UserControl
     {
@@ -38,7 +39,6 @@ namespace NavisVisualizer.UI
         private HashSet<string> _scopeKeys;
 
         private DataSourcePanel _srcPanel;
-        private DateTimePicker _dtpReference;
         private TextBox _txtSearch;
         private TabControl _tabFilter;
         private ListView _listView;
@@ -51,6 +51,7 @@ namespace NavisVisualizer.UI
         private Button _btnNwd;
         private Label _lblStats;
         private Label _lblUnmatched;   // fixed 미매칭(모델 없음) count, pinned to the corner
+        private ApplyStatePanel _applyState;   // 3D 적용 상태 표시 (데이터↔3D 어긋남 경고 전담)
         private ProgressBar _progressBar;
 
         private int _sortColumn = -1;
@@ -77,6 +78,9 @@ namespace NavisVisualizer.UI
                 Padding = new Padding(4)
             };
 
+            // 색상 패널 핸들러가 참조하므로 먼저 생성 (버튼 연결은 버튼 행에서).
+            _applyState = new ApplyStatePanel();
+
             _srcPanel = new DataSourcePanel();
             _srcPanel.ExcelLoadClicked    += (s, e) => LoadExcel();
             _srcPanel.TemplateClicked     += (s, e) => ExportInputTemplate();
@@ -84,15 +88,8 @@ namespace NavisVisualizer.UI
             _srcPanel.ActiveSourceChanged += (s, e) => ApplyActiveSourceData(reapply: false);
             _srcPanel.CompareClicked      += (s, e) => ExportComparison();
 
-            // 기준일 — EIT_Tray/Excel 모두 날짜 컬럼이 없어 % 기반 판정. 향후 날짜 추가 대비 UI만 유지.
-            var datePanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 28, AutoSize = false };
-            _dtpReference = new DateTimePicker
-            {
-                Format = DateTimePickerFormat.Short, Value = DateTime.Today, Width = 110, Enabled = false,
-            };
-            datePanel.Controls.Add(new Label { Text = "기준일:", AutoSize = true, Padding = new Padding(0, 4, 0, 0) });
-            datePanel.Controls.Add(_dtpReference);
-            datePanel.Controls.Add(new Label { Text = "(향후 사용 — 날짜 컬럼 없음)", AutoSize = true, ForeColor = Color.Gray, Padding = new Padding(4, 4, 0, 0) });
+            // 기준일 UI 없음 — EIT_Tray/Excel 모두 날짜 컬럼이 없어 % 기반 현재상태 판정.
+            // 날짜 컬럼이 생기면(§3 Cable Stage 날짜화) Spool과 동일한 기준일 행을 되살릴 것.
 
             var colorPanel = BuildColorPanel();
 
@@ -101,7 +98,7 @@ namespace NavisVisualizer.UI
             _txtSearch = new TextBox { Width = 210, Text = "" };
             _txtSearch.TextChanged += (s, e) => FilterList();
             searchPanel.Controls.Add(_txtSearch);
-            var btnExport = new Button { Text = "매칭 Status 출력", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(8, 1, 8, 1) };
+            var btnExport = new Button { Text = "매칭 Status 엑셀 출력", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(8, 1, 8, 1) };
             btnExport.Click += BtnExport_Click;
             searchPanel.Controls.Add(btnExport);
 
@@ -160,12 +157,13 @@ namespace NavisVisualizer.UI
             _btnHideOthers = new Button { Text = "체크 단계 외 숨김", Width = 130 };
             _btnApply.Click      += BtnApply_Click;
             _btnHideOthers.Click += BtnHideOthers_Click;
-            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnHideOthers });
+            _applyState.AttachApplyButton(_btnApply);
+            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnHideOthers, _applyState });
 
-            // 2행(초기화)
+            // 2행(해제)
             var btnPanelReset = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 34, AutoSize = true };
-            _btnResetModule = new Button { Text = "공종 초기화", Width = 100 };
-            _btnReset       = new Button { Text = "전체 초기화", Width = 100 };
+            _btnResetModule = new Button { Text = "이 탭 가시화 해제", Width = 130 };
+            _btnReset       = new Button { Text = "전체 가시화 해제", Width = 130 };
             _btnResetModule.Click += BtnResetModule_Click;
             _btnReset.Click       += BtnReset_Click;
             btnPanelReset.Controls.AddRange(new Control[] { _btnResetModule, _btnReset });
@@ -181,9 +179,10 @@ namespace NavisVisualizer.UI
             _progressBar = new ProgressBar { Dock = DockStyle.Fill, Height = 12, Visible = false };
 
             layout.Controls.Add(_srcPanel);
-            layout.Controls.Add(datePanel);
             layout.Controls.Add(new Label { Text = "단계 & 색상", Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 18 });
             layout.Controls.Add(colorPanel);
+            // 색상 편집(▼·투명도)은 기본 접힘 — 체크박스·스와치만 상시 노출 (UX audit P1)
+            layout.Controls.Add(ColorEditCollapse.BuildToggleRow(colorPanel));
             layout.Controls.Add(btnPanel);
             layout.Controls.Add(btnPanelReset);
             layout.Controls.Add(btnPanel2);
@@ -217,6 +216,7 @@ namespace NavisVisualizer.UI
                 string label = EitStageInfo.Labels[stage];
 
                 var chk = new CheckBox { Text = label, Checked = true, AutoSize = true };
+                chk.CheckedChanged += (s, e) => _applyState.MarkStale("단계 선택 변경");
                 var colorBox = new Panel { Width = 32, Height = 20, BackColor = setting.DisplayColor, BorderStyle = BorderStyle.FixedSingle };
                 var colorBtn = new Button { Text = "▼", Width = 22, Height = 20, FlatStyle = FlatStyle.Flat };
                 colorBtn.FlatAppearance.BorderSize = 0;
@@ -318,7 +318,8 @@ namespace NavisVisualizer.UI
             try
             {
                 string path = InputTemplate.ExportEitTray();
-                MessageBox.Show($"입력 양식 저장 완료: {path}\n작성 후 Excel 형식(.xlsx)으로 저장해 Import 하세요.");
+                SaveNotifier.ShowSaved(this, "Template 출력", path,
+                    "작성 후 Excel 형식(.xlsx)으로 저장해 Import 하세요.");
             }
             catch (Exception ex)
             {
@@ -345,8 +346,9 @@ namespace NavisVisualizer.UI
             FilterList();
             UpdateStats();
 
-            if (!willReapply && _appliedOnce && _trays.Count > 0)
-                _lblStats.Text = "⚠ 화면 색상은 이전 소스 기준 — [가시화 적용]을 눌러 새 소스로 갱신하세요";
+            // 색이 이전 소스 기준으로 남아 있으면 상태 표시기로 경고 (통계 라벨은 통계만 — P0-1)
+            if (!willReapply)
+                _applyState.MarkStale("데이터 변경");
 
             if (willReapply) BtnApply_Click(null, EventArgs.Empty);
         }
@@ -371,7 +373,7 @@ namespace NavisVisualizer.UI
             string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
                 $"EitTray_Compare_{DateTime.Now:yyyyMMdd_HHmmss}.csv");
             File.WriteAllLines(path, lines, new System.Text.UTF8Encoding(true));
-            MessageBox.Show($"비교 결과 저장 완료: {path}");
+            SaveNotifier.ShowSaved(this, "Excel↔OASIS 비교 출력", path);
         }
 
         private void BtnExport_Click(object sender, EventArgs e)
@@ -395,7 +397,7 @@ namespace NavisVisualizer.UI
             string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
                 $"EitTray_Match_{DateTime.Now:yyyyMMdd_HHmmss}.csv");
             File.WriteAllLines(path, lines, System.Text.Encoding.UTF8);
-            MessageBox.Show($"저장 완료: {path}");
+            SaveNotifier.ShowSaved(this, "매칭 Status 엑셀 출력", path);
         }
 
         private void BuildIndex()
@@ -404,6 +406,8 @@ namespace NavisVisualizer.UI
             if (doc == null) return;
             _progressBar.Style = ProgressBarStyle.Marquee;
             _progressBar.Visible = true;
+            // 단순 marquee만으로는 무엇을 하는지 알 수 없어 단계 문구 병기 (UX audit P0-3)
+            _lblStats.Text = "모델 태그 인덱스 생성 중…";
             Application.DoEvents();
             // 레벨 타겟: 로드된 트레이 ID 셋으로 매칭 깊이만 인덱싱하고 그 아래(geometry)는 안 봄
             // — "매칭 → 하위 트리 무시 → 옆으로" (general walk의 자식 스캔 비용 제거, 최다 지연 대책).
@@ -438,6 +442,7 @@ namespace NavisVisualizer.UI
             _btnApply.Enabled = false;
             _progressBar.Style = ProgressBarStyle.Marquee;
             _progressBar.Visible = true;
+            _lblStats.Text = "색상 적용 중…";
             Application.DoEvents();
             try
             {
@@ -460,6 +465,8 @@ namespace NavisVisualizer.UI
             ReapplyCurrentScope(doc);
 
             _appliedOnce = true;
+            _applyState.SetApplied(
+                _srcPanel.ActiveSource == TabDataSource.Oasis ? "OASIS" : "Excel");
             UpdateTabCounts();
             UpdateStats(result);
             FilterList();
@@ -580,7 +587,7 @@ namespace NavisVisualizer.UI
             _tabFilter.TabPages[2].Text = $"미매칭 ({_unmatchedTrayNos.Count})";
         }
 
-        /// <summary>공종 초기화: 이 탭(EitTray) 색만 제거 — 다른 공종 색은 유지. 숨김도 복원.</summary>
+        /// <summary>이 탭 가시화 해제: 이 탭(EitTray) 색만 제거 — 다른 공종 색은 유지. 숨김도 복원.</summary>
         private void BtnResetModule_Click(object sender, EventArgs e)
         {
             var doc = _main.GetDocument();
@@ -592,7 +599,8 @@ namespace NavisVisualizer.UI
                 _btnHideOthers.Text = "체크 단계 외 숨김";
             }
             _main.OverrideEngine.ResetModule(doc, VisualModule.EitTray);
-            _lblStats.Text = "공종 초기화 완료 (EIT Tray 색만 제거)";
+            _lblStats.Text = "이 탭 가시화 해제 완료 (EIT Tray 색만 제거)";
+            _applyState.SetCleared();
         }
 
         private void BtnReset_Click(object sender, EventArgs e)
@@ -606,8 +614,9 @@ namespace NavisVisualizer.UI
                 _btnHideOthers.Text = "체크 단계 외 숨김";
             }
             _main.OverrideEngine.Reset(doc);
-            _lblStats.Text = "전체 초기화 완료";
+            _lblStats.Text = "전체 가시화 해제 완료";
             _lblUnmatched.Text = "";
+            _applyState.SetCleared();
         }
 
         private void BtnViewpoint_Click(object sender, EventArgs e)

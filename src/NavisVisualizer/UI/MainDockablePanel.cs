@@ -96,7 +96,8 @@ namespace NavisVisualizer.UI
             _subSystemTab.Dock = DockStyle.Fill;
             subSysPage.Controls.Add(_subSystemTab);
 
-            var toolPage = new TabPage("Tools");
+            // 개발·진단 전용 기능 모음 — 일반 업무 탭과 구분되도록 명칭으로 표시 (UX audit P2).
+            var toolPage = new TabPage("고급 진단");
             _toolsTab = new ToolsTab(this);
             _toolsTab.Dock = DockStyle.Fill;
             toolPage.Controls.Add(_toolsTab);
