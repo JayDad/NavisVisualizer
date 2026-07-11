@@ -168,6 +168,44 @@ namespace NavisVisualizer.Tests
             return path;
         }
 
+        [TestMethod]
+        public void LoadSpool_SkipsDuplicateIds_FirstRowWins()
+        {
+            var path = CreateSpoolTestFileWithDuplicates();
+            try
+            {
+                var spools = ExcelLoader.LoadSpool(path, out int duplicatesSkipped);
+
+                Assert.AreEqual(1, spools.Count);
+                Assert.AreEqual(1, duplicatesSkipped);
+                // 첫 행 유지 정책 (OASIS 로더와 동일) — 두 번째 행의 ISO는 무시된다.
+                Assert.AreEqual("ISO-FIRST", spools[0].IsoNo);
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        private static string CreateSpoolTestFileWithDuplicates()
+        {
+            var path = Path.Combine(Path.GetTempPath(), $"spool_dup_{Guid.NewGuid()}.xlsx");
+            using (var wb = new XLWorkbook())
+            {
+                var ws = wb.AddWorksheet("Spool");
+                ws.Cell(1, 1).Value = "Spool Number";
+                ws.Cell(1, 2).Value = "ISO No";
+
+                ws.Cell(2, 1).Value = "DUP-001";
+                ws.Cell(2, 2).Value = "ISO-FIRST";
+                ws.Cell(3, 1).Value = "DUP-001";
+                ws.Cell(3, 2).Value = "ISO-SECOND";
+
+                wb.SaveAs(path);
+            }
+            return path;
+        }
+
         private static string CreateSpoolTestFileWithGaps()
         {
             var path = Path.Combine(Path.GetTempPath(), $"spool_gaps_{Guid.NewGuid()}.xlsx");

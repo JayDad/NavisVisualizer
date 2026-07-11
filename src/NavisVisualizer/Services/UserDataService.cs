@@ -129,6 +129,7 @@ namespace NavisVisualizer.Services
             Dictionary<string, List<ModelItem>> searchResult,
             DateTime referenceDate)
         {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
             object comState = (object)ComApiBridge.State;
             ResolveEnums();
             var bf = BindingFlags.InvokeMethod | BindingFlags.Public | BindingFlags.Instance;
@@ -144,52 +145,32 @@ namespace NavisVisualizer.Services
 
                 var stage = spool.GetStageAtDate(referenceDate);
 
+                // 같은 스풀의 property vector는 아이템마다 재생성하지 않는다 (성능 audit §11 —
+                // 스풀 하나가 여러 아이템에 매칭되면 동일 내용 벡터를 반복 생성했었다).
+                // SetUserDefined가 벡터 내용을 노드로 복사한다는 가정(Equipment 경로와 동일) —
+                // Windows 실측 확인 대상. 쓰기 실패 시엔 벡터 자체가 문제일 수 있어 재생성.
+                object propVec = null;
+
                 foreach (var item in items)
                 {
                     attempted++;
                     try
                     {
-                        object comPath = (object)ComApiBridge.ToInwOaPath(item);
-                        object propNode = comState.GetType().InvokeMember(
-                            "GetGUIPropertyNode", bf, null, comState, new object[] { comPath, true });
-                        object propVec = comState.GetType().InvokeMember(
-                            "ObjectFactory", bf, null, comState, new object[] { _enumPropVec });
-
-                        // Spool Number
-                        AddProp(comState, propVec, bf, "SpoolNumber", "Spool Number", spool.SpoolId);
-
-                        // ISO No
-                        if (!string.IsNullOrEmpty(spool.IsoNo))
-                            AddProp(comState, propVec, bf, "IsoNo", "ISO No", spool.IsoNo);
-
-                        // Current Stage
-                        string stageLabel = SpoolStageInfo.Labels.TryGetValue(stage, out var lbl)
-                            ? lbl : stage.ToString();
-                        AddProp(comState, propVec, bf, "CurrentStage", "현재 단계", stageLabel);
-
-                        // All stage dates
-                        foreach (var s in SpoolStageInfo.OrderedStages)
-                        {
-                            string label = SpoolStageInfo.Labels[s];
-                            string dateStr = spool.StageDates.TryGetValue(s, out var date) && date.HasValue
-                                ? date.Value.ToString("yyyy-MM-dd") : "";
-                            AddProp(comState, propVec, bf, s.ToString(), label, dateStr);
-                        }
-
-                        // Write
-                        propNode.GetType().InvokeMember(
-                            "SetUserDefined", bf, null, propNode,
-                            new object[] { 0, CategoryInternalName, CategoryDisplayName, propVec });
+                        if (propVec == null)
+                            propVec = BuildSpoolPropVec(comState, bf, spool, stage);
+                        WriteToItem(comState, bf, item, propVec);
                         written++;
                     }
                     catch (Exception ex)
                     {
                         var inner = ex.InnerException;
                         lastError = (inner ?? ex).GetType().Name + ": " + (inner ?? ex).Message;
+                        propVec = null;
                     }
                 }
             }
 
+            PerfLog.Record("속성 쓰기(Spool)", sw.ElapsedMilliseconds, rows: spools.Count, items: written);
             if (attempted == 0)
                 throw new Exception("속성 삽입 대상이 없습니다.");
             if (written == 0 && lastError != null)
@@ -198,11 +179,41 @@ namespace NavisVisualizer.Services
             return written;
         }
 
+        private object BuildSpoolPropVec(object comState, BindingFlags bf, SpoolData spool, SpoolStage stage)
+        {
+            object propVec = comState.GetType().InvokeMember(
+                "ObjectFactory", bf, null, comState, new object[] { _enumPropVec });
+
+            // Spool Number
+            AddProp(comState, propVec, bf, "SpoolNumber", "Spool Number", spool.SpoolId);
+
+            // ISO No
+            if (!string.IsNullOrEmpty(spool.IsoNo))
+                AddProp(comState, propVec, bf, "IsoNo", "ISO No", spool.IsoNo);
+
+            // Current Stage
+            string stageLabel = SpoolStageInfo.Labels.TryGetValue(stage, out var lbl)
+                ? lbl : stage.ToString();
+            AddProp(comState, propVec, bf, "CurrentStage", "현재 단계", stageLabel);
+
+            // All stage dates
+            foreach (var s in SpoolStageInfo.OrderedStages)
+            {
+                string label = SpoolStageInfo.Labels[s];
+                string dateStr = spool.StageDates.TryGetValue(s, out var date) && date.HasValue
+                    ? date.Value.ToString("yyyy-MM-dd") : "";
+                AddProp(comState, propVec, bf, s.ToString(), label, dateStr);
+            }
+
+            return propVec;
+        }
+
         public int WriteEquipmentProperties(
             List<EquipmentData> equipments,
             Dictionary<string, List<ModelItem>> searchResult,
             DateTime referenceDate)
         {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
             object comState = (object)ComApiBridge.State;
             ResolveEnums();
             var bf = BindingFlags.InvokeMethod | BindingFlags.Public | BindingFlags.Instance;
@@ -218,12 +229,16 @@ namespace NavisVisualizer.Services
 
                 var stage = equip.GetStageAtDate(referenceDate);
 
+                // 같은 장비의 property vector는 아이템마다 재생성하지 않는다 (성능 audit §11).
+                object propVec = null;
+
                 foreach (var item in items)
                 {
                     attempted++;
                     try
                     {
-                        object propVec = BuildEquipmentPropVec(comState, bf, equip, stage);
+                        if (propVec == null)
+                            propVec = BuildEquipmentPropVec(comState, bf, equip, stage);
                         WriteToItem(comState, bf, item, propVec);
                         written++;
                     }
@@ -231,10 +246,12 @@ namespace NavisVisualizer.Services
                     {
                         var inner = ex.InnerException;
                         lastError = (inner ?? ex).GetType().Name + ": " + (inner ?? ex).Message;
+                        propVec = null;
                     }
                 }
             }
 
+            PerfLog.Record("속성 쓰기(Equipment)", sw.ElapsedMilliseconds, rows: equipments.Count, items: written);
             if (attempted == 0)
                 throw new Exception("속성 삽입 대상이 없습니다.");
             if (written == 0 && lastError != null)

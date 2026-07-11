@@ -37,8 +37,12 @@ namespace NavisVisualizer.UI
         private DataSourcePanel _srcPanel;
         private DateTimePicker _dtpReference;
         private TextBox  _txtSearch;
+        private Debouncer _searchDebounce;   // 키 입력마다 리스트 재계산 방지 (성능 audit P0-1)
         private TabControl _tabFilter;
         private ListView _listView;
+        // VirtualMode ListView의 백킹 행 — 화면에 보이는 행만 ListViewItem으로 만들어진다
+        // (성능 audit P0-2: 2만 행 전체 UI 객체 생성 제거). RetrieveVirtualItem이 이 리스트를 읽는다.
+        private List<SpoolData> _viewRows = new List<SpoolData>();
         private Button   _btnHideOthers;    // 체크된 단계 스풀만 남기고 나머지 3D 숨김 (토글)
         private Autodesk.Navisworks.Api.ModelItemCollection _spoolHiddenByStage; // 숨긴 것 복원용
         private Button   _btnApply;
@@ -115,7 +119,9 @@ namespace NavisVisualizer.UI
             var searchPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 28, AutoSize = false };
             searchPanel.Controls.Add(new Label { Text = "검색:", AutoSize = true, Padding = new Padding(0, 4, 0, 0) });
             _txtSearch = new TextBox { Width = 210, Text = "" };
-            _txtSearch.TextChanged += (s, e) => FilterList();
+            // 입력 즉시가 아니라 입력이 멈춘 뒤 1회만 필터 실행 (성능 audit P0-1)
+            _searchDebounce = new Debouncer(FilterList);
+            _txtSearch.TextChanged += (s, e) => _searchDebounce.Trigger();
             searchPanel.Controls.Add(_txtSearch);
 
             var btnExport = new Button { Text = "매칭 Status 엑셀 출력", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(8, 1, 8, 1) };
@@ -165,12 +171,22 @@ namespace NavisVisualizer.UI
                 FullRowSelect = true,
                 GridLines = true,
                 View = View.Details,
+                // 가상 모드: 보이는 행만 그때그때 생성 — 수만 행에서 전체 삭제·재생성 제거
+                // (성능 audit P0-2). SelectedItems/Items 열거는 못 쓰고 SelectedIndices만 사용.
+                VirtualMode = true,
+                VirtualListSize = 0,
             };
-            _listView.Columns.Add("#", 44);   // 자동 행번호 (표시 순서, 정렬 후 재부여)
+            _listView.Columns.Add("#", 44);   // 자동 행번호 (표시 순서 = 백킹 리스트 인덱스+1)
             _listView.Columns.Add("Spool ID", 140);
             _listView.Columns.Add("ISO No", 120);
             _listView.Columns.Add("단계", 80);
             _listView.Columns.Add("매칭", 45);
+            _listView.RetrieveVirtualItem += (s, e) =>
+            {
+                e.Item = (e.ItemIndex >= 0 && e.ItemIndex < _viewRows.Count)
+                    ? BuildRow(_viewRows[e.ItemIndex], e.ItemIndex)
+                    : new ListViewItem("");
+            };
             _listView.SelectedIndexChanged += ListView_SelectedIndexChanged;
             _listView.ColumnClick += ListView_ColumnClick;
             // ListView는 기본적으로 Ctrl+C를 지원하지 않으므로 공용 헬퍼로 배선.
@@ -322,9 +338,10 @@ namespace NavisVisualizer.UI
                 if (dlg.ShowDialog() != DialogResult.OK) return;
                 try
                 {
-                    var list = ExcelLoader.LoadSpool(dlg.FileName);
+                    var list = ExcelLoader.LoadSpool(dlg.FileName, out int dup);
                     _spoolsBySource[TabDataSource.Excel] = list;
-                    _srcPanel.SetLoaded(TabDataSource.Excel, list.Count, Path.GetFileName(dlg.FileName));
+                    _srcPanel.SetLoaded(TabDataSource.Excel, list.Count,
+                        Path.GetFileName(dlg.FileName) + (dup > 0 ? $" · 중복 {dup}건 제외" : ""));
                     if (_srcPanel.ActiveSource == TabDataSource.Excel)
                         ApplyActiveSourceData(reapply: false);
                 }
@@ -803,17 +820,17 @@ namespace NavisVisualizer.UI
 
         private void ListView_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (_listView.SelectedItems.Count == 0) return;
+            if (_listView.SelectedIndices.Count == 0) return;
 
             var doc = _main.GetDocument();
             if (doc == null || !_main.SpoolTagSearcher.IsIndexBuilt
                 || _needsIndexRebuild || _main.SpoolTagSearcher.NeedsRebuild(doc)) return;
 
             var collection = new Autodesk.Navisworks.Api.ModelItemCollection();
-            foreach (ListViewItem selected in _listView.SelectedItems)
+            foreach (int idx in _listView.SelectedIndices)
             {
-                var spool = selected.Tag as SpoolData;
-                if (spool == null) continue;
+                if (idx < 0 || idx >= _viewRows.Count) continue;
+                var spool = _viewRows[idx];
                 var found = _main.SpoolTagSearcher.FindBySpoolIds(new[] { spool.SpoolId });
                 foreach (var items in found.Values)
                     collection.AddRange(items);
@@ -842,28 +859,56 @@ namespace NavisVisualizer.UI
                 _sortColumn = e.Column;
                 _sortAscending = true;
             }
-            _listView.ListViewItemSorter = new ListViewItemComparer(_sortColumn, _sortAscending);
-            _listView.Sort();
-            RenumberRows();   // 정렬 후 표시 순서대로 # 재부여
+            // 가상 모드에선 ListView.Sort()가 지원되지 않는다 — 백킹 리스트를 정렬해 다시 표시.
+            FilterList();
         }
 
-        private class ListViewItemComparer : System.Collections.IComparer
+        /// <summary>정렬 키 추출 (열 번호 → 셀 텍스트와 동일 값) — 백킹 리스트 정렬용.</summary>
+        private Func<SpoolData, string> SortKeySelector(int column)
         {
-            private readonly int _col;
-            private readonly int _dir;
-            public ListViewItemComparer(int column, bool ascending) { _col = column; _dir = ascending ? 1 : -1; }
-            public int Compare(object x, object y)
+            var referenceDate = _dtpReference.Value;
+            bool hasApplied = _matchedSpoolIds.Count > 0 || _unmatchedSpoolIds.Count > 0;
+            switch (column)
             {
-                string a = ((ListViewItem)x).SubItems[_col].Text;
-                string b = ((ListViewItem)y).SubItems[_col].Text;
-                return string.Compare(a, b, StringComparison.OrdinalIgnoreCase) * _dir;
+                case 1: return s => s.SpoolId ?? "";
+                case 2: return s => s.IsoNo ?? "";
+                case 3: return s =>
+                {
+                    var st = s.GetStageAtDate(referenceDate);
+                    return SpoolStageInfo.Labels.TryGetValue(st, out var lbl) ? lbl : st.ToString();
+                };
+                case 4: return s => !hasApplied ? "-" : (_matchedSpoolIds.Contains(s.SpoolId) ? "O" : "X");
+                default: return s => "";
             }
+        }
+
+        /// <summary>가상 리스트의 한 행 생성 — RetrieveVirtualItem이 보이는 행에 대해서만 호출한다.</summary>
+        private ListViewItem BuildRow(SpoolData spool, int index)
+        {
+            var referenceDate = _dtpReference.Value;
+            var stage = spool.GetStageAtDate(referenceDate);
+            string stageLabel = SpoolStageInfo.Labels.TryGetValue(stage, out var lbl) ? lbl : stage.ToString();
+            bool hasApplied = _matchedSpoolIds.Count > 0 || _unmatchedSpoolIds.Count > 0;
+            string matchLabel = !hasApplied ? "-" : (_matchedSpoolIds.Contains(spool.SpoolId) ? "O" : "X");
+
+            var item = new ListViewItem((index + 1).ToString());
+            item.UseItemStyleForSubItems = false;
+            item.SubItems.Add(spool.SpoolId);
+            item.SubItems.Add(spool.IsoNo ?? "");
+            var stageSubItem = item.SubItems.Add(stageLabel);
+            if (_colorSettings.TryGetValue(stage, out var setting))
+                stageSubItem.ForeColor = setting.DisplayColor;
+            var matchSubItem = item.SubItems.Add(matchLabel);
+            if (matchLabel == "X")
+                matchSubItem.ForeColor = Color.Red;
+            item.Tag = spool;
+            return item;
         }
 
         private void FilterList()
         {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
             string keyword = _txtSearch?.Text?.Trim().ToUpperInvariant() ?? "";
-            var referenceDate = _dtpReference.Value;
             int tabIndex = _tabFilter.SelectedIndex; // 0=전체, 1=매칭, 2=미매칭
 
             var filtered = _spools.AsEnumerable();
@@ -878,44 +923,25 @@ namespace NavisVisualizer.UI
             if (_scopeKeys != null)
                 filtered = filtered.Where(s => InScope(s.SpoolId));
 
-            // Text search filter
+            // Text search filter (SearchKey = 로드 시 1회 대문자화한 캐시 — audit P0-3)
             if (!string.IsNullOrEmpty(keyword))
-                filtered = filtered.Where(s => s.SpoolId.ToUpperInvariant().Contains(keyword)
-                    || (s.IsoNo ?? "").ToUpperInvariant().Contains(keyword));
+                filtered = filtered.Where(s => s.SearchKey.Contains(keyword));
 
-            _listView.BeginUpdate();
-            _listView.Items.Clear();
-
-            foreach (var spool in filtered)
+            var rows = filtered.ToList();
+            if (_sortColumn > 0)
             {
-                var stage = spool.GetStageAtDate(referenceDate);
-                string stageLabel = SpoolStageInfo.Labels.TryGetValue(stage, out var lbl) ? lbl : stage.ToString();
-                bool hasApplied = _matchedSpoolIds.Count > 0 || _unmatchedSpoolIds.Count > 0;
-                string matchLabel = !hasApplied ? "-" : (_matchedSpoolIds.Contains(spool.SpoolId) ? "O" : "X");
-
-                var item = new ListViewItem("");   // col 0 = # (RenumberRows에서 채움)
-                item.UseItemStyleForSubItems = false;
-                item.SubItems.Add(spool.SpoolId);
-                item.SubItems.Add(spool.IsoNo ?? "");
-                var stageSubItem = item.SubItems.Add(stageLabel);
-                if (_colorSettings.TryGetValue(stage, out var setting))
-                    stageSubItem.ForeColor = setting.DisplayColor;
-                var matchSubItem = item.SubItems.Add(matchLabel);
-                if (matchLabel == "X")
-                    matchSubItem.ForeColor = Color.Red;
-                item.Tag = spool;
-                _listView.Items.Add(item);
+                var key = SortKeySelector(_sortColumn);
+                rows = (_sortAscending
+                    ? rows.OrderBy(key, StringComparer.OrdinalIgnoreCase)
+                    : rows.OrderByDescending(key, StringComparer.OrdinalIgnoreCase)).ToList();
             }
 
-            _listView.EndUpdate();   // 대기 중이던 정렬을 먼저 반영
-            RenumberRows();          // 그 뒤 표시 순서대로 # 부여
-        }
-
-        /// <summary>표시 순서(정렬 반영) 기준으로 # 열을 1..N으로 재부여. Add/Sort 이후 호출.</summary>
-        private void RenumberRows()
-        {
-            for (int i = 0; i < _listView.Items.Count; i++)
-                _listView.Items[i].SubItems[0].Text = (i + 1).ToString();
+            // 가상 모드: 백킹 리스트 교체 + 크기 통지만 — ListViewItem은 만들지 않는다.
+            _viewRows = rows;
+            _listView.SelectedIndices.Clear();
+            _listView.VirtualListSize = rows.Count;
+            _listView.Invalidate();
+            PerfLog.Record("리스트 갱신(Spool)", sw.ElapsedMilliseconds, rows: rows.Count);
         }
 
         private void UpdateStats(OverrideResult result = null)

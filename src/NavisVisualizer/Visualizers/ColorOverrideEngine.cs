@@ -4,6 +4,7 @@ using System.Linq;
 using Autodesk.Navisworks.Api;
 using NavisVisualizer.Models;
 using NavisVisualizer.Searchers;
+using NavisVisualizer.Services;
 using NwColor = Autodesk.Navisworks.Api.Color;
 
 namespace NavisVisualizer.Visualizers
@@ -84,6 +85,8 @@ namespace NavisVisualizer.Visualizers
             Dictionary<HydrotestStage, ColorSetting> colorSettings,
             DateTime referenceDate)
         {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            int paintedItems = 0;
             var result = new OverrideResult();
             var stageItems = new Dictionary<HydrotestStage, List<ModelItem>>();
 
@@ -124,9 +127,12 @@ namespace NavisVisualizer.Visualizers
                 {
                     ApplyOverride(doc, collection, setting);
                     AccumulatePainted(VisualModule.Hydrotest, collection);
+                    paintedItems += collection.Count;
                 }
             }
 
+            PerfLog.Record("가시화 적용(Hydrotest)", sw.ElapsedMilliseconds, rows: packages.Count,
+                items: paintedItems, note: $"매칭 {result.MatchedCount} · 미매칭 {result.UnmatchedIds.Count}");
             return result;
         }
 
@@ -136,6 +142,8 @@ namespace NavisVisualizer.Visualizers
             Dictionary<SpoolStage, ColorSetting> colorSettings,
             DateTime referenceDate)
         {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            int paintedItems = 0;
             var result = new OverrideResult();
             var stageItems = new Dictionary<SpoolStage, List<ModelItem>>();
 
@@ -177,9 +185,12 @@ namespace NavisVisualizer.Visualizers
                 {
                     ApplyOverride(doc, collection, setting);
                     AccumulatePainted(VisualModule.Spool, collection);
+                    paintedItems += collection.Count;
                 }
             }
 
+            PerfLog.Record("가시화 적용(Spool)", sw.ElapsedMilliseconds, rows: spools.Count,
+                items: paintedItems, note: $"매칭 {result.MatchedCount} · 미매칭 {result.UnmatchedIds.Count}");
             return result;
         }
 
@@ -189,6 +200,8 @@ namespace NavisVisualizer.Visualizers
             Dictionary<EquipmentStage, ColorSetting> colorSettings,
             DateTime referenceDate)
         {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            int paintedItems = 0;
             var result = new OverrideResult();
             var stageItems = new Dictionary<EquipmentStage, List<ModelItem>>();
 
@@ -230,9 +243,12 @@ namespace NavisVisualizer.Visualizers
                 {
                     ApplyOverride(doc, collection, setting);
                     AccumulatePainted(VisualModule.Equipment, collection);
+                    paintedItems += collection.Count;
                 }
             }
 
+            PerfLog.Record("가시화 적용(Equipment)", sw.ElapsedMilliseconds, rows: equipments.Count,
+                items: paintedItems, note: $"매칭 {result.MatchedCount} · 미매칭 {result.UnmatchedIds.Count}");
             return result;
         }
 
@@ -241,6 +257,8 @@ namespace NavisVisualizer.Visualizers
             List<EitTrayData> trays,
             Dictionary<EitStage, ColorSetting> colorSettings)
         {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            int paintedItems = 0;
             var result = new OverrideResult();
             var stageItems = new Dictionary<EitStage, List<ModelItem>>();
 
@@ -284,9 +302,12 @@ namespace NavisVisualizer.Visualizers
                 {
                     ApplyOverride(doc, collection, setting);
                     AccumulatePainted(VisualModule.EitTray, collection);
+                    paintedItems += collection.Count;
                 }
             }
 
+            PerfLog.Record("가시화 적용(EIT Tray)", sw.ElapsedMilliseconds, rows: trays.Count,
+                items: paintedItems, note: $"매칭 {result.MatchedCount} · 미매칭 {result.UnmatchedIds.Count}");
             return result;
         }
 
@@ -308,6 +329,8 @@ namespace NavisVisualizer.Visualizers
             Dictionary<string, ColorSetting> groupSettings,
             Func<SubSystemDiscipline, ModelItemSearcher> searcherFor)
         {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            int paintedItems = 0;
             var result = new OverrideResult();
             var groupItems = new Dictionary<string, List<ModelItem>>(StringComparer.OrdinalIgnoreCase);
 
@@ -351,9 +374,12 @@ namespace NavisVisualizer.Visualizers
                 {
                     ApplyOverride(doc, collection, setting);
                     AccumulatePainted(VisualModule.SubSystem, collection);
+                    paintedItems += collection.Count;
                 }
             }
 
+            PerfLog.Record("가시화 적용(Sub-system)", sw.ElapsedMilliseconds, rows: elements.Count,
+                items: paintedItems, note: $"매칭 {result.MatchedCount} · 미매칭 {result.UnmatchedIds.Count}");
             return result;
         }
 
@@ -377,6 +403,8 @@ namespace NavisVisualizer.Visualizers
             DateTime referenceDate,
             ColorSetting highlightOverride)
         {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            int paintedItems = 0;
             var result = new OverrideResult();
             var groupItems = new Dictionary<string, List<ModelItem>>(StringComparer.OrdinalIgnoreCase);
             var groupSettings = new Dictionary<string, ColorSetting>();
@@ -438,11 +466,15 @@ namespace NavisVisualizer.Visualizers
                 {
                     ApplyOverride(doc, collection, setting);
                     AccumulatePainted(VisualModule.CableLine, collection);
+                    paintedItems += collection.Count;
                 }
             }
 
             _cableLineGroupSettings = groupSettings;
             _cableLineFilterFocusActive = false;
+            PerfLog.Record("가시화 적용(Cable)", sw.ElapsedMilliseconds, rows: cables.Count,
+                items: paintedItems, note: $"매칭 {result.MatchedCount} · 미매칭 {result.UnmatchedIds.Count}"
+                    + (highlightOverride != null ? " · 하이라이트" : ""));
             return result;
         }
 
@@ -450,6 +482,7 @@ namespace NavisVisualizer.Visualizers
         public void SetCableLineFilterFocus(Document doc, IEnumerable<string> hitCableNos, double dimTransparency = 0.85)
         {
             if (_cableLineItems.Count == 0) return;
+            var sw = System.Diagnostics.Stopwatch.StartNew();
             var hits = new HashSet<string>(hitCableNos, StringComparer.OrdinalIgnoreCase);
 
             var dimItems = new ModelItemCollection();
@@ -478,6 +511,8 @@ namespace NavisVisualizer.Visualizers
                     doc.Models.OverridePermanentTransparency(kv.Value, setting.Transparency);
 
             _cableLineFilterFocusActive = true;
+            PerfLog.Record("Cable 필터 포커스", sw.ElapsedMilliseconds,
+                items: dimItems.Count, note: $"hit {hits.Count}");
         }
 
         public void ClearCableLineFilterFocus(Document doc)

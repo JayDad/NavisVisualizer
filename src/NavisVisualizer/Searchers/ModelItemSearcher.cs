@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Autodesk.Navisworks.Api;
+using NavisVisualizer.Services;
 
 namespace NavisVisualizer.Searchers
 {
@@ -43,26 +44,31 @@ namespace NavisVisualizer.Searchers
         /// </summary>
         public void BuildIndex(Document doc, NwdScope scope = null, Action<int, int> onProgress = null, bool hardScope = false)
         {
-            _index = new Dictionary<string, List<ModelItem>>(StringComparer.OrdinalIgnoreCase);
-            _isBuilt = false;
-            _lastDocumentId = GetDocumentId(doc);
-
-            var roots = ResolveScopeRoots(doc, scope, hardScope);
-            foreach (var root in roots)
-                WalkAndIndex(root);
-
-            // 스코프 모델은 찾았지만 인덱스가 비면 (파일은 규약대로인데 내용이 예상과 다른 경우)
-            // 규약 오판 가능성 — 전체 모델로 재시도. (하드 스코프는 이 fallback도 안 함.)
-            if (!hardScope && scope != null && !LastScopeFellBack && _lastScopeNarrowed && _index.Count == 0)
+            using (var perf = PerfLog.Time("인덱스 빌드(general walk)"))
             {
                 _index = new Dictionary<string, List<ModelItem>>(StringComparer.OrdinalIgnoreCase);
-                foreach (var model in doc.Models)
-                    WalkAndIndex(model.RootItem);
-                LastScopeFellBack = true;
-                LastScopeNote = $"스코프 {scope.Label}: 인덱스 0건 → 전체 모델 fallback";
-            }
+                _isBuilt = false;
+                _lastDocumentId = GetDocumentId(doc);
 
-            _isBuilt = true;
+                var roots = ResolveScopeRoots(doc, scope, hardScope);
+                foreach (var root in roots)
+                    WalkAndIndex(root);
+
+                // 스코프 모델은 찾았지만 인덱스가 비면 (파일은 규약대로인데 내용이 예상과 다른 경우)
+                // 규약 오판 가능성 — 전체 모델로 재시도. (하드 스코프는 이 fallback도 안 함.)
+                if (!hardScope && scope != null && !LastScopeFellBack && _lastScopeNarrowed && _index.Count == 0)
+                {
+                    _index = new Dictionary<string, List<ModelItem>>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var model in doc.Models)
+                        WalkAndIndex(model.RootItem);
+                    LastScopeFellBack = true;
+                    LastScopeNote = $"스코프 {scope.Label}: 인덱스 0건 → 전체 모델 fallback";
+                }
+
+                _isBuilt = true;
+                perf.Items = _index.Count;
+                perf.Note = LastScopeNote;
+            }
         }
 
         /// <summary>
@@ -182,95 +188,112 @@ namespace NavisVisualizer.Searchers
         /// </summary>
         public void BuildIndexForTags(Document doc, HashSet<string> knownTags, NwdScope scope = null, bool hardScope = false)
         {
-            _index = new Dictionary<string, List<ModelItem>>(StringComparer.OrdinalIgnoreCase);
-            _isBuilt = false;
-            _lastDocumentId = GetDocumentId(doc);
-
-            // Normalize tags for comparison
-            var normalizedTags = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var tag in knownTags)
+            using (var perf = PerfLog.Time("인덱스 빌드(레벨 타겟)"))
             {
-                string t = tag.Trim().TrimStart('/').ToUpperInvariant();
-                if (!string.IsNullOrEmpty(t))
-                    normalizedTags.Add(t);
+                _index = new Dictionary<string, List<ModelItem>>(StringComparer.OrdinalIgnoreCase);
+                _isBuilt = false;
+                _lastDocumentId = GetDocumentId(doc);
+                perf.Rows = knownTags.Count;
+
+                // Normalize tags for comparison
+                var normalizedTags = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var tag in knownTags)
+                {
+                    string t = tag.Trim().TrimStart('/').ToUpperInvariant();
+                    if (!string.IsNullOrEmpty(t))
+                        normalizedTags.Add(t);
+                }
+
+                var roots = ResolveScopeRoots(doc, scope, hardScope);
+
+                // Step 1: Find the depth where first tag match occurs
+                // (depth는 각 루트 기준 상대값 — 탐지와 인덱싱이 같은 roots를 쓰므로 일관됨)
+                int targetDepth = FindTagDepthInRoots(roots, normalizedTags);
+
+                // 스코프 모델 안에서 태그를 못 찾으면 스코프 오판 가능성 — 전체 모델로 재탐지 (하드 스코프 제외)
+                if (targetDepth < 0 && !hardScope && scope != null && !LastScopeFellBack && _lastScopeNarrowed)
+                {
+                    roots = new List<ModelItem>();
+                    foreach (var model in doc.Models)
+                        roots.Add(model.RootItem);
+                    LastScopeFellBack = true;
+                    LastScopeNote = $"스코프 {scope.Label}: 태그 미발견 → 전체 모델 fallback";
+                    targetDepth = FindTagDepthInRoots(roots, normalizedTags);
+                }
+
+                if (targetDepth < 0)
+                {
+                    if (hardScope)
+                    {
+                        // 하드 스코프: 스코프 안에서 태그 깊이를 못 찾아도 general walk로 그 nwd
+                        // 전체를 훑지 않는다 (성능 audit 4-3 — 태그 형식이 규약과 다르면 종전엔
+                        // EIT nwd 전체 COM 순회가 일어났다). 인덱스 0건 + 진단 노트로 드러낸다.
+                        LastScopeNote = (LastScopeNote ?? "") +
+                            " → 태그 미발견: 하드 스코프라 general walk 안 함 (태그/파일명 규약 확인)";
+                    }
+                    else
+                    {
+                        // No tags found — fallback to general index
+                        foreach (var root in roots)
+                            WalkAndIndex(root);
+                    }
+                }
+                else
+                {
+                    // Step 2: Index only at the target depth
+                    foreach (var root in roots)
+                        IndexAtDepth(root, 0, targetDepth, normalizedTags);
+                }
+
+                _isBuilt = true;
+                perf.Items = _index.Count;
+                perf.Note = $"depth={targetDepth} · {LastScopeNote}";
             }
-
-            var roots = ResolveScopeRoots(doc, scope, hardScope);
-
-            // Step 1: Find the depth where first tag match occurs
-            // (depth는 각 루트 기준 상대값 — 탐지와 인덱싱이 같은 roots를 쓰므로 일관됨)
-            int targetDepth = FindTagDepthInRoots(roots, normalizedTags);
-
-            // 스코프 모델 안에서 태그를 못 찾으면 스코프 오판 가능성 — 전체 모델로 재탐지 (하드 스코프 제외)
-            if (targetDepth < 0 && !hardScope && scope != null && !LastScopeFellBack && _lastScopeNarrowed)
-            {
-                roots = new List<ModelItem>();
-                foreach (var model in doc.Models)
-                    roots.Add(model.RootItem);
-                LastScopeFellBack = true;
-                LastScopeNote = $"스코프 {scope.Label}: 태그 미발견 → 전체 모델 fallback";
-                targetDepth = FindTagDepthInRoots(roots, normalizedTags);
-            }
-
-            if (targetDepth < 0)
-            {
-                // No tags found — fallback to general index
-                foreach (var root in roots)
-                    WalkAndIndex(root);
-            }
-            else
-            {
-                // Step 2: Index only at the target depth
-                foreach (var root in roots)
-                    IndexAtDepth(root, 0, targetDepth);
-            }
-
-            _isBuilt = true;
         }
 
+        /// <summary>
+        /// 태그가 있는 가장 얕은 깊이를 level-order(BFS)로 찾는다 (성능 audit 4-1).
+        /// 구 DFS는 첫 분기가 태그 없는 대형 geometry 서브트리면 그 안을 깊이 한도(20)까지
+        /// 헛순회한 뒤에야 다음 분기로 넘어갔다 — BFS는 얕은 깊이부터 전 분기를 확인하므로
+        /// 대상 깊이 위쪽 노드만 방문한다(= IndexAtDepth가 어차피 방문할 집합).
+        /// 태그가 여러 깊이에 있으면 가장 얕은 깊이가 결정적으로 선택된다
+        /// (구 DFS는 순회 순서에 따라 달라짐 — "첫 매칭 깊이만 인덱싱" 리스크 자체는 §2 그대로).
+        /// </summary>
         private int FindTagDepthInRoots(List<ModelItem> roots, HashSet<string> normalizedTags)
         {
-            foreach (var root in roots)
+            var current = new List<ModelItem>(roots);
+            for (int depth = 0; depth <= 20 && current.Count > 0; depth++)
             {
-                int found = FindTagDepth(root, normalizedTags, 0);
-                if (found >= 0) return found;
+                var next = new List<ModelItem>();
+                foreach (var item in current)
+                {
+                    if (item == null) continue;
+                    string name = item.DisplayName?.Trim();
+                    if (!string.IsNullOrEmpty(name))
+                    {
+                        string key = name.TrimStart('/').Trim().ToUpperInvariant();
+                        // Check exact match or prefix match (tag/VENSKID → tag)
+                        if (normalizedTags.Contains(key))
+                            return depth;
+                        int slash = key.IndexOf('/');
+                        if (slash > 0 && normalizedTags.Contains(key.Substring(0, slash)))
+                            return depth;
+                    }
+                    foreach (var child in item.Children)
+                        next.Add(child);
+                }
+                current = next;
             }
             return -1;
         }
 
         /// <summary>
-        /// Walk tree to find the depth where a known tag first appears.
+        /// Index nodes at the target depth only — 알려진 태그와 일치하는 노드만 담는다
+        /// (성능 audit 4-2). 대상 깊이의 전 노드를 담으면 사전이 데이터와 무관한 노드로
+        /// 부풀어 메모리·빌드 시간을 낭비한다. 레벨 타겟 인덱스는 소스 전환 시 재빌드되므로
+        /// (_needsIndexRebuild) 활성 소스의 태그만으로 충분하다.
         /// </summary>
-        private int FindTagDepth(ModelItem item, HashSet<string> tags, int depth)
-        {
-            string name = item.DisplayName?.Trim();
-            if (!string.IsNullOrEmpty(name))
-            {
-                string key = name.TrimStart('/').Trim().ToUpperInvariant();
-                // Check exact match or prefix match (tag/VENSKID → tag)
-                if (tags.Contains(key))
-                    return depth;
-                int slash = key.IndexOf('/');
-                if (slash > 0 && tags.Contains(key.Substring(0, slash)))
-                    return depth;
-            }
-
-            // Recurse into children (but limit depth to avoid going too deep)
-            if (depth > 20) return -1;
-
-            foreach (var child in item.Children)
-            {
-                int found = FindTagDepth(child, tags, depth + 1);
-                if (found >= 0) return found;
-            }
-
-            return -1;
-        }
-
-        /// <summary>
-        /// Index all nodes at the target depth only.
-        /// </summary>
-        private void IndexAtDepth(ModelItem item, int currentDepth, int targetDepth)
+        private void IndexAtDepth(ModelItem item, int currentDepth, int targetDepth, HashSet<string> knownTags)
         {
             if (currentDepth == targetDepth)
             {
@@ -282,11 +305,16 @@ namespace NavisVisualizer.Searchers
                     if (!string.IsNullOrEmpty(key))
                     {
                         key = key.ToUpperInvariant();
-                        AddToIndex(key, item);
+                        if (knownTags.Contains(key))
+                            AddToIndex(key, item);
 
                         int slash = key.IndexOf('/');
                         if (slash > 0)
-                            AddToIndex(key.Substring(0, slash), item);
+                        {
+                            string prefix = key.Substring(0, slash);
+                            if (knownTags.Contains(prefix))
+                                AddToIndex(prefix, item);
+                        }
                     }
                 }
                 return; // Don't go deeper
@@ -294,7 +322,7 @@ namespace NavisVisualizer.Searchers
 
             // Haven't reached target depth yet — keep going
             foreach (var child in item.Children)
-                IndexAtDepth(child, currentDepth + 1, targetDepth);
+                IndexAtDepth(child, currentDepth + 1, targetDepth, knownTags);
         }
 
         private void WalkAndIndex(ModelItem item)
@@ -329,22 +357,25 @@ namespace NavisVisualizer.Searchers
             // 많은 스코프에서 인덱스 빌드(= 첫 가시화 적용)가 가장 느렸던 원인. 인덱스가
             // 필요로 하는 태그는 컴포지트 노드 이름이고 "태그는 geometry 인스턴스 아래에
             // 없다"는 가정은 태그 노드 정지 규칙이 이미 쓰던 것과 동일하다.
+            // 자식은 한 번만 열거한다 (성능 audit 4-4) — Navisworks ModelItem.Children 열거는
+            // 관리형 리스트보다 비싸서, 종전의 "판단 루프 + 하강 루프" 이중 열거가 walk 비용을
+            // 키웠다. descend가 확정된 뒤에는 나머지 자식의 HasGeometry/Children.Any() 검사도 생략.
+            var children = new List<ModelItem>();
             bool descend = false;
             foreach (var child in item.Children)
             {
+                children.Add(child);
+                if (descend) continue;
                 string childName = child.DisplayName?.Trim();
                 bool childTagLike = !string.IsNullOrEmpty(childName) && ContainsDigit(childName);
                 if (childTagLike || (!child.HasGeometry && child.Children.Any()))
-                {
                     descend = true;
-                    break;
-                }
             }
 
             if (!descend)
                 return;
 
-            foreach (var child in item.Children)
+            foreach (var child in children)
                 WalkAndIndex(child);
         }
 

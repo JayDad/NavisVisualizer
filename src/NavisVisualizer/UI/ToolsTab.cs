@@ -200,7 +200,58 @@ namespace NavisVisualizer.UI
             btnVertexDump.Click += BtnVertexDump_Click;
             layout.Controls.Add(btnVertexDump);
 
+            // --- 성능 계측 (PerfLog) ---
+            layout.Controls.Add(new Label { Height = 10, Dock = DockStyle.Fill });
+            layout.Controls.Add(new Label
+            {
+                Text = "성능 계측 (Perf Log)",
+                Font = new Font(Font, FontStyle.Bold),
+                Dock = DockStyle.Fill,
+                Height = 20
+            });
+            layout.Controls.Add(new Label
+            {
+                Text = "데이터 로드/인덱스 빌드/색상 적용/리스트 갱신/범위 판정 소요시간 기록 — 병목 판별용",
+                Dock = DockStyle.Fill,
+                Height = 20,
+                ForeColor = Color.Gray
+            });
+            var perfPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 34, AutoSize = true };
+            var btnPerfCsv = new Button { Text = "계측 로그 CSV 출력", Width = 150, Height = 30 };
+            btnPerfCsv.Click += BtnPerfCsv_Click;
+            var btnPerfClear = new Button { Text = "계측 로그 지우기", Width = 130, Height = 30 };
+            btnPerfClear.Click += (s, e) =>
+            {
+                Services.PerfLog.Clear();
+                _lblStatus.Text = "성능 계측 로그를 지웠습니다.";
+            };
+            perfPanel.Controls.Add(btnPerfCsv);
+            perfPanel.Controls.Add(btnPerfClear);
+            layout.Controls.Add(perfPanel);
+
             Controls.Add(layout);
+        }
+
+        private void BtnPerfCsv_Click(object sender, EventArgs e)
+        {
+            if (Services.PerfLog.Count == 0)
+            {
+                MessageBox.Show("기록된 계측이 없습니다. 데이터 로드/가시화 적용 등을 실행한 뒤 다시 시도하세요.");
+                return;
+            }
+            try
+            {
+                string path = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
+                    $"PerfLog_{DateTime.Now:yyyyMMdd_HHmmss}.csv");
+                File.WriteAllText(path, Services.PerfLog.ToCsv(), new System.Text.UTF8Encoding(true));
+                _lblStatus.Text = $"성능 계측 {Services.PerfLog.Count}건 저장: {path}";
+                SaveNotifier.ShowSaved(this, "성능 계측 로그", path);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"저장 실패:\n{ex.Message}", "오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
 
         // -------------------------------------------------------

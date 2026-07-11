@@ -87,7 +87,10 @@ namespace NavisVisualizer.Services
                 return null;
             }
 
+            var sw = System.Diagnostics.Stopwatch.StartNew();
             var result = Compute(doc, scope, itemsByKey, volumeJudge);
+            PerfLog.Record($"범위 판정({MatchScopeInfo.Label(scope)})", sw.ElapsedMilliseconds,
+                rows: itemsByKey?.Count ?? 0, items: result.Count, note: Diagnostics);
             CurrentScope = scope;
             return result;
         }

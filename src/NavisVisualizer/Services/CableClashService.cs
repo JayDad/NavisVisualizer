@@ -18,8 +18,11 @@ namespace NavisVisualizer.Services
     {
         private class Cached
         {
+            /// <summary>관리형 BoundingBox 합집합 (pre-cull용). 형상 파생이라 모델당 정적 — 캐시 가능.</summary>
+            public double[] BoundingAabb; // {minX,minY,minZ,maxX,maxY,maxZ} — null = bbox 조회 실패
+            /// <summary>추출된 world 세그먼트. null = 아직 미추출 (pre-cull만 통과한 상태).</summary>
             public List<double[]> Segments;
-            public double[] Aabb; // {minX,minY,minZ,maxX,maxY,maxZ}
+            public double[] Aabb; // 세그먼트 AABB {minX,minY,minZ,maxX,maxY,maxZ}
         }
 
         private readonly Dictionary<string, Cached> _cache =
@@ -77,15 +80,23 @@ namespace NavisVisualizer.Services
             string key = cableNo ?? "";
             if (!_cache.TryGetValue(key, out var cached))
             {
-                var bb = ItemsBoundingAabb(items);
-                if (bb != null && ClashMath.AabbOutside(bb, planes, keepPositive))
+                // 관리형 bbox도 형상 파생(모델당 정적)이라 캐시한다 (성능 audit 7-1) —
+                // 종전엔 pre-cull로 배제된 케이블은 아무것도 안 남겨서, 다른 단면 볼륨으로
+                // 다시 실행할 때마다 2만 케이블 전부의 BoundingBox를 재조회했다.
+                cached = new Cached { BoundingAabb = ItemsBoundingAabb(items) };
+                _cache[key] = cached;
+            }
+            if (cached.Segments == null)
+            {
+                if (cached.BoundingAabb != null &&
+                    ClashMath.AabbOutside(cached.BoundingAabb, planes, keepPositive))
                 {
                     LastPreCulled++;
-                    return false;   // 캐시 안 함 — 다른 볼륨에서 후보가 되면 그때 추출
+                    return false;   // 세그먼트 미추출 유지 — 다른 볼륨에서 후보가 되면 그때 추출
                 }
-                cached = GetOrExtract(key, items);
+                Extract(cached, items);
             }
-            if (cached == null || cached.Segments.Count == 0) return false;
+            if (cached.Segments.Count == 0) return false;
 
             if (ClashMath.AabbOutside(cached.Aabb, planes, keepPositive))
             {
@@ -135,21 +146,18 @@ namespace NavisVisualizer.Services
             return any ? new[] { minX, minY, minZ, maxX, maxY, maxZ } : null;
         }
 
-        private Cached GetOrExtract(string cableNo, IList<ModelItem> items)
+        /// <summary>COM으로 world 세그먼트를 추출해 캐시 엔트리를 채운다 (케이블당 1회).</summary>
+        private void Extract(Cached cached, IList<ModelItem> items)
         {
-            string key = cableNo ?? "";
-            if (_cache.TryGetValue(key, out var c)) return c;
-
             var segs = new List<double[]>();
             if (items != null)
                 foreach (var item in items)
                     if (item != null)
                         segs.AddRange(GeometryProbe.ExtractWorldSegments(item));
 
-            c = new Cached { Segments = segs, Aabb = ClashMath.SegmentsAabb(segs) };
-            _cache[key] = c;
+            cached.Segments = segs;
+            cached.Aabb = ClashMath.SegmentsAabb(segs);
             LastExtracted++;
-            return c;
         }
 
         private static string DocId(Document doc)

@@ -67,9 +67,12 @@ namespace NavisVisualizer.UI
         private DataSourcePanel _srcPanel;
         private DateTimePicker _dtpReference;
         private TextBox _txtSearch;
+        private Debouncer _searchDebounce;   // 키 입력마다 리스트 재계산 방지 (성능 audit P0-1)
         private CheckBox _chkFocus;
         private TabControl _tabFilter;
         private ListView _listView;
+        // VirtualMode ListView의 백킹 행 — 보이는 행만 ListViewItem으로 생성 (성능 audit P0-2).
+        private List<CableLineData> _viewRows = new List<CableLineData>();
         private Button _btnApply;
         private Button _btnHideOthers;   // 체크 단계 외 숨김
         private Button _btnIsolateSel;   // 선택 케이블만 보기
@@ -174,10 +177,25 @@ namespace NavisVisualizer.UI
             var searchPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 28, AutoSize = false };
             searchPanel.Controls.Add(new Label { Text = "검색(Cable/Equip):", AutoSize = true, Padding = new Padding(0, 4, 0, 0) });
             _txtSearch = new TextBox { Width = 170 };
-            _txtSearch.TextChanged += (s, e) => { FilterList(); RefreshFocusIfActive(); };
+            // 리스트 필터는 debounce로만, 3D 필터 포커스 재적용은 Enter로만 (성능 audit P0 —
+            // 종전엔 키 입력마다 전체 케이블 투명도를 다시 적용해 실시간 병목 1순위였다).
+            _searchDebounce = new Debouncer(FilterList);
+            _txtSearch.TextChanged += (s, e) => _searchDebounce.Trigger();
+            _txtSearch.KeyDown += (s, e) =>
+            {
+                if (e.KeyCode == Keys.Enter)
+                {
+                    _searchDebounce.Flush();
+                    RefreshFocusIfActive();
+                    e.Handled = true;
+                    e.SuppressKeyPress = true;
+                }
+            };
             searchPanel.Controls.Add(_txtSearch);
             _chkFocus = new CheckBox { Text = "필터 포커스", AutoSize = true, Padding = new Padding(6, 5, 0, 0) };
             _chkFocus.CheckedChanged += ChkFocus_CheckedChanged;
+            new System.Windows.Forms.ToolTip().SetToolTip(_chkFocus,
+                "검색 결과 외 케이블을 투명 처리합니다.\n검색어를 바꾼 뒤에는 Enter로 3D에 반영하세요 (키 입력마다 재적용하지 않음 — 성능).");
             searchPanel.Controls.Add(_chkFocus);
             var btnClash = new Button { Text = "이 단면 지나가는 케이블 추출", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(6, 0, 6, 0) };
             btnClash.Click += BtnClash_Click;
@@ -216,6 +234,8 @@ namespace NavisVisualizer.UI
             {
                 Dock = DockStyle.Fill, FullRowSelect = true, GridLines = true,
                 View = View.Details, HideSelection = false,
+                // 가상 모드 (성능 audit P0-2) — 2만 케이블에서 보이는 행만 생성.
+                VirtualMode = true, VirtualListSize = 0,
             };
             _listView.Columns.Add("#", 40);
             _listView.Columns.Add("Cable No", 150);
@@ -226,6 +246,12 @@ namespace NavisVisualizer.UI
             _listView.Columns.Add("Pulled", 60);
             _listView.Columns.Add("%", 46);
             _listView.Columns.Add("매칭", 40);
+            _listView.RetrieveVirtualItem += (s, e) =>
+            {
+                e.Item = (e.ItemIndex >= 0 && e.ItemIndex < _viewRows.Count)
+                    ? BuildRow(_viewRows[e.ItemIndex], e.ItemIndex)
+                    : new ListViewItem("");
+            };
             _listView.SelectedIndexChanged += ListView_SelectedIndexChanged;
             _listView.ColumnClick += ListView_ColumnClick;
             // ListView는 기본적으로 Ctrl+C를 지원하지 않으므로 공용 헬퍼로 배선.
@@ -571,8 +597,8 @@ namespace NavisVisualizer.UI
             if (_matchedCableNos.Count == 0) { MessageBox.Show("먼저 가시화 적용을 실행하세요."); return; }
 
             var keep = ResolveSelectedCableNos(doc);
-            foreach (ListViewItem it in _listView.SelectedItems)
-                if (it.Tag is CableLineData c) keep.Add(c.CableNo);
+            foreach (int i in _listView.SelectedIndices)
+                if (i >= 0 && i < _viewRows.Count) keep.Add(_viewRows[i].CableNo);
             if (keep.Count == 0) { MessageBox.Show("3D 뷰나 목록에서 케이블을 선택하세요."); return; }
 
             var toHide = new ModelItemCollection();
@@ -721,9 +747,8 @@ namespace NavisVisualizer.UI
 
         private static bool CableMatchesKeyword(CableLineData c, string keywordUpper)
         {
-            return (c.CableNo ?? "").ToUpperInvariant().Contains(keywordUpper)
-                || (c.FromEquip ?? "").ToUpperInvariant().Contains(keywordUpper)
-                || (c.ToEquip ?? "").ToUpperInvariant().Contains(keywordUpper);
+            // SearchKey = 로드 시 1회 대문자화한 캐시 (audit P0-3 — 검색마다 3필드 ToUpper 방지)
+            return c.SearchKey.Contains(keywordUpper);
         }
 
         // ----- 현황 집계 범위 (Clipping = clash) -----
@@ -975,8 +1000,8 @@ namespace NavisVisualizer.UI
 
         private void FilterList()
         {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
             string keyword = _txtSearch?.Text?.Trim().ToUpperInvariant() ?? "";
-            var referenceDate = _dtpReference.Value;
             int tabIndex = _tabFilter.SelectedIndex;
 
             var filtered = _cables.AsEnumerable();
@@ -992,34 +1017,68 @@ namespace NavisVisualizer.UI
             if (!string.IsNullOrEmpty(keyword))
                 filtered = filtered.Where(c => CableMatchesKeyword(c, keyword));
 
-            _listView.BeginUpdate();
-            _listView.Items.Clear();
-            bool hasApplied = _matchedCableNos.Count > 0 || _unmatchedCableNos.Count > 0;
-            int seq = 1;
-            foreach (var c in filtered)
+            var rows = filtered.ToList();
+            if (_sortColumn > 0)
             {
-                var stage = c.GetStageAtDate(referenceDate);
-                string stageLabel = _lastHighlightMode && hasApplied ? "하이라이트" : CableLineStageInfo.Labels[stage];
-                string matchLabel = !hasApplied ? "-" : (_matchedCableNos.Contains(c.CableNo) ? "O" : "X");
-                string pct = c.PullingProgress.HasValue ? $"{c.PullingProgress.Value * 100:0}%" : "-";
-
-                var item = new ListViewItem((seq++).ToString());
-                item.UseItemStyleForSubItems = false;
-                item.SubItems.Add(c.CableNo ?? "");
-                var stageSub = item.SubItems.Add(stageLabel);
-                if (!_lastHighlightMode && _colorSettings.TryGetValue(stage, out var setting))
-                    stageSub.ForeColor = setting.DisplayColor;
-                item.SubItems.Add(FromText(c));
-                item.SubItems.Add(ToText(c));
-                item.SubItems.Add(c.DesignLth?.ToString("0.##") ?? "-");
-                item.SubItems.Add(c.PulledLth?.ToString("0.##") ?? "-");
-                item.SubItems.Add(pct);
-                var matchSub = item.SubItems.Add(matchLabel);
-                if (matchLabel == "X") matchSub.ForeColor = Color.Red;
-                item.Tag = c;
-                _listView.Items.Add(item);
+                var key = SortKeySelector(_sortColumn);
+                rows = (_sortAscending
+                    ? rows.OrderBy(key, StringComparer.OrdinalIgnoreCase)
+                    : rows.OrderByDescending(key, StringComparer.OrdinalIgnoreCase)).ToList();
             }
-            _listView.EndUpdate();
+
+            // 가상 모드: 백킹 리스트 교체 + 크기 통지만 — ListViewItem은 만들지 않는다.
+            _viewRows = rows;
+            _listView.SelectedIndices.Clear();
+            _listView.VirtualListSize = rows.Count;
+            _listView.Invalidate();
+            PerfLog.Record("리스트 갱신(Cable)", sw.ElapsedMilliseconds, rows: rows.Count);
+        }
+
+        /// <summary>가상 리스트의 한 행 생성 — RetrieveVirtualItem이 보이는 행에 대해서만 호출한다.</summary>
+        private ListViewItem BuildRow(CableLineData c, int index)
+        {
+            var referenceDate = _dtpReference.Value;
+            bool hasApplied = _matchedCableNos.Count > 0 || _unmatchedCableNos.Count > 0;
+            var stage = c.GetStageAtDate(referenceDate);
+            string stageLabel = _lastHighlightMode && hasApplied ? "하이라이트" : CableLineStageInfo.Labels[stage];
+            string matchLabel = !hasApplied ? "-" : (_matchedCableNos.Contains(c.CableNo) ? "O" : "X");
+            string pct = c.PullingProgress.HasValue ? $"{c.PullingProgress.Value * 100:0}%" : "-";
+
+            var item = new ListViewItem((index + 1).ToString());
+            item.UseItemStyleForSubItems = false;
+            item.SubItems.Add(c.CableNo ?? "");
+            var stageSub = item.SubItems.Add(stageLabel);
+            if (!_lastHighlightMode && _colorSettings.TryGetValue(stage, out var setting))
+                stageSub.ForeColor = setting.DisplayColor;
+            item.SubItems.Add(FromText(c));
+            item.SubItems.Add(ToText(c));
+            item.SubItems.Add(c.DesignLth?.ToString("0.##") ?? "-");
+            item.SubItems.Add(c.PulledLth?.ToString("0.##") ?? "-");
+            item.SubItems.Add(pct);
+            var matchSub = item.SubItems.Add(matchLabel);
+            if (matchLabel == "X") matchSub.ForeColor = Color.Red;
+            item.Tag = c;
+            return item;
+        }
+
+        /// <summary>정렬 키 추출 (열 번호 → 셀 텍스트와 동일 값) — 백킹 리스트 정렬용.</summary>
+        private Func<CableLineData, string> SortKeySelector(int column)
+        {
+            var referenceDate = _dtpReference.Value;
+            bool hasApplied = _matchedCableNos.Count > 0 || _unmatchedCableNos.Count > 0;
+            switch (column)
+            {
+                case 1: return c => c.CableNo ?? "";
+                case 2: return c => _lastHighlightMode && hasApplied
+                    ? "하이라이트" : CableLineStageInfo.Labels[c.GetStageAtDate(referenceDate)];
+                case 3: return c => FromText(c);
+                case 4: return c => ToText(c);
+                case 5: return c => c.DesignLth?.ToString("0.##") ?? "-";
+                case 6: return c => c.PulledLth?.ToString("0.##") ?? "-";
+                case 7: return c => c.PullingProgress.HasValue ? $"{c.PullingProgress.Value * 100:0}%" : "-";
+                case 8: return c => !hasApplied ? "-" : (_matchedCableNos.Contains(c.CableNo) ? "O" : "X");
+                default: return c => "";
+            }
         }
 
         private static string FromText(CableLineData c) =>
@@ -1063,15 +1122,15 @@ namespace NavisVisualizer.UI
 
         private void ListView_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (_suppressSelectionSync || _listView.SelectedItems.Count == 0) return;
+            if (_suppressSelectionSync || _listView.SelectedIndices.Count == 0) return;
             var doc = _main.GetDocument();
             if (doc == null) return;
 
             var combined = new ModelItemCollection();
-            foreach (ListViewItem it in _listView.SelectedItems)
+            foreach (int i in _listView.SelectedIndices)
             {
-                if (!(it.Tag is CableLineData c)) continue;
-                var col = _main.OverrideEngine.GetCableLineItems(c.CableNo);
+                if (i < 0 || i >= _viewRows.Count) continue;
+                var col = _main.OverrideEngine.GetCableLineItems(_viewRows[i].CableNo);
                 if (col != null) foreach (ModelItem mi in col) combined.Add(mi);
             }
             if (combined.Count == 0) return;
@@ -1093,18 +1152,8 @@ namespace NavisVisualizer.UI
             if (e.Column == 0) return;
             if (e.Column == _sortColumn) _sortAscending = !_sortAscending;
             else { _sortColumn = e.Column; _sortAscending = true; }
-            _listView.ListViewItemSorter = new ListViewItemComparer(_sortColumn, _sortAscending);
-            _listView.Sort();
-            for (int i = 0; i < _listView.Items.Count; i++)
-                _listView.Items[i].SubItems[0].Text = (i + 1).ToString();
-        }
-
-        private class ListViewItemComparer : System.Collections.IComparer
-        {
-            private readonly int _col; private readonly int _dir;
-            public ListViewItemComparer(int c, bool asc) { _col = c; _dir = asc ? 1 : -1; }
-            public int Compare(object x, object y) =>
-                string.Compare(((ListViewItem)x).SubItems[_col].Text, ((ListViewItem)y).SubItems[_col].Text, StringComparison.OrdinalIgnoreCase) * _dir;
+            // 가상 모드에선 ListView.Sort()가 지원되지 않는다 — 백킹 리스트를 정렬해 다시 표시.
+            FilterList();
         }
 
         /// <summary>3D 선택 → cable-no 해석: 각 선택 아이템 + 조상 DisplayName을 정규화해 매칭 케이블과 대조.</summary>
@@ -1159,14 +1208,14 @@ namespace NavisVisualizer.UI
             _suppressSelectionSync = true;
             try
             {
-                foreach (ListViewItem item in _listView.Items)
-                    if (item.Tag is CableLineData c && string.Equals(c.CableNo, first, StringComparison.OrdinalIgnoreCase))
-                    {
-                        _listView.SelectedItems.Clear();
-                        item.Selected = true;
-                        item.EnsureVisible();
-                        break;
-                    }
+                int idx = _viewRows.FindIndex(
+                    c => string.Equals(c.CableNo, first, StringComparison.OrdinalIgnoreCase));
+                if (idx >= 0)
+                {
+                    _listView.SelectedIndices.Clear();
+                    _listView.SelectedIndices.Add(idx);
+                    _listView.EnsureVisible(idx);
+                }
             }
             finally { _suppressSelectionSync = false; }
         }

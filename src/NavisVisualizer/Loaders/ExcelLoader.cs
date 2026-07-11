@@ -5,13 +5,22 @@ using System.IO;
 using System.Linq;
 using ExcelDataReader;
 using NavisVisualizer.Models;
+using NavisVisualizer.Services;
 
 namespace NavisVisualizer.Loaders
 {
     public static class ExcelLoader
     {
-        public static List<TestPackageData> LoadHydrotest(string filePath)
+        public static List<TestPackageData> LoadHydrotest(string filePath) =>
+            LoadHydrotest(filePath, out _);
+
+        /// <summary>중복 Pkg ID는 첫 행만 유지 (OASIS 로더와 동일 정책 — 성능 audit §10:
+        /// 중복 행이 stage 그룹·override 컬렉션·통계를 중복 부풀렸다). 제외 건수는 out으로 보고.</summary>
+        public static List<TestPackageData> LoadHydrotest(string filePath, out int duplicatesSkipped)
         {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            duplicatesSkipped = 0;
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var packages = new List<TestPackageData>();
             var pkgHeaderNames = new[] { "Test Package No.", "Test Package No", "TestPkgId", "Test Pkg No" };
 
@@ -58,6 +67,7 @@ namespace NavisVisualizer.Loaders
                     var row = table.Rows[r];
                     string pkgId = row[pkgCol]?.ToString()?.Trim();
                     if (string.IsNullOrEmpty(pkgId)) continue;
+                    if (!seen.Add(pkgId)) { duplicatesSkipped++; continue; }
 
                     var pkg = new TestPackageData
                     {
@@ -75,11 +85,20 @@ namespace NavisVisualizer.Loaders
                 }
             }
 
+            PerfLog.Record("Excel 로드(Hydrotest)", sw.ElapsedMilliseconds, rows: packages.Count,
+                note: duplicatesSkipped > 0 ? $"중복 {duplicatesSkipped}건 제외" : "");
             return packages;
         }
 
-        public static List<SpoolData> LoadSpool(string filePath)
+        public static List<SpoolData> LoadSpool(string filePath) =>
+            LoadSpool(filePath, out _);
+
+        /// <summary>중복 Spool ID는 첫 행만 유지 (OASIS 로더와 동일 정책 — 성능 audit §10).</summary>
+        public static List<SpoolData> LoadSpool(string filePath, out int duplicatesSkipped)
         {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            duplicatesSkipped = 0;
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var spools = new List<SpoolData>();
             var spoolHeaderNames = new[] { "Spool Number", "SpoolId", "Spool No", "SpoolNumber" };
 
@@ -131,6 +150,7 @@ namespace NavisVisualizer.Loaders
                     var row = table.Rows[r];
                     string spoolId = row[spoolCol]?.ToString()?.Trim();
                     if (string.IsNullOrEmpty(spoolId)) continue;
+                    if (!seen.Add(spoolId)) { duplicatesSkipped++; continue; }
 
                     var spool = new SpoolData
                     {
@@ -147,11 +167,20 @@ namespace NavisVisualizer.Loaders
                 }
             }
 
+            PerfLog.Record("Excel 로드(Spool)", sw.ElapsedMilliseconds, rows: spools.Count,
+                note: duplicatesSkipped > 0 ? $"중복 {duplicatesSkipped}건 제외" : "");
             return spools;
         }
 
-        public static List<EquipmentData> LoadEquipment(string filePath)
+        public static List<EquipmentData> LoadEquipment(string filePath) =>
+            LoadEquipment(filePath, out _);
+
+        /// <summary>중복 Tag No는 첫 행만 유지 (OASIS 로더와 동일 정책 — 성능 audit §10).</summary>
+        public static List<EquipmentData> LoadEquipment(string filePath, out int duplicatesSkipped)
         {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            duplicatesSkipped = 0;
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var items = new List<EquipmentData>();
             var tagHeaderNames = new[] { "Tag No.", "Tag No", "TagNo", "Tag Number" };
 
@@ -197,6 +226,7 @@ namespace NavisVisualizer.Loaders
                     var row = table.Rows[r];
                     string tagNo = row[tagCol]?.ToString()?.Trim();
                     if (string.IsNullOrEmpty(tagNo)) continue;
+                    if (!seen.Add(tagNo)) { duplicatesSkipped++; continue; }
 
                     string deliveryStatus = deliveryCol >= 0 ? row[deliveryCol]?.ToString()?.Trim() ?? "" : "";
                     DateTime? eta = etaCol >= 0 ? ParseCellValue(row[etaCol]) : null;
@@ -224,6 +254,8 @@ namespace NavisVisualizer.Loaders
                 }
             }
 
+            PerfLog.Record("Excel 로드(Equipment)", sw.ElapsedMilliseconds, rows: items.Count,
+                note: duplicatesSkipped > 0 ? $"중복 {duplicatesSkipped}건 제외" : "");
             return items;
         }
 
@@ -298,6 +330,7 @@ namespace NavisVisualizer.Loaders
         /// </summary>
         public static List<CableLineData> LoadCable(string filePath)
         {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
             var cableHeaders = new[] { "Cable No", "Cable No.", "CableNo", "CABLE NO" };
             var byCable = new Dictionary<string, CableLineData>(StringComparer.OrdinalIgnoreCase);
             var order = new List<string>();
@@ -381,6 +414,7 @@ namespace NavisVisualizer.Loaders
 
             var result = new List<CableLineData>(order.Count);
             foreach (var k in order) result.Add(byCable[k]);
+            PerfLog.Record("Excel 로드(Cable)", sw.ElapsedMilliseconds, rows: result.Count);
             return result;
         }
 

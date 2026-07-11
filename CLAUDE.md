@@ -612,6 +612,74 @@ master 기준 UX audit의 항목별 판정·근거·보류 목록은 **`docs/UX_
   ③ 리스트·통계 통합, ④ Sub-system 선택 UX 재설계(§11 dual-list는 최근 사용자 결정이라 실사용 후),
   ⑤ empty-state 체크리스트(Overview가 정보원 — 각 탭 오류 메시지에 이식), ⑥ 언어 통일.
 
+### 15. 성능 audit 반영 (2026-07 — 구현됨, Windows 검증 대기)
+
+성능 audit(2026-07)의 주장들을 코드 대조로 검증 후, **정확성 리스크가 낮고 체감 효과가 큰
+항목만** 반영. audit의 핵심 통찰("모델을 더 빨리 찾는 것보다, 찾은 결과를 매번 전부 다시
+UI/3D에 그리지 않는 것")은 타당함을 확인.
+
+**반영됨 (1차·2차 패키지)**
+- **검색 debounce 300ms** (`UI/Debouncer.cs`, 전 탭 + Sub-system 좌측/상세 창): 키 입력마다
+  전체 리스트 재계산하던 것을 입력 멈춘 뒤 1회로.
+- **Cable 필터 포커스 = Enter로만 3D 재적용**: 종전엔 TextChanged마다 전체 케이블 투명도
+  재적용(실시간 병목 1순위). 리스트는 debounce로 갱신, 3D는 검색창 Enter(또는 체크 시점)에만.
+  체크박스 툴팁으로 안내.
+- **ListView VirtualMode (Spool·Cable 탭)**: 보이는 행만 `RetrieveVirtualItem`으로 생성 —
+  2만 행 전체 ListViewItem 생성/삭제 제거. 백킹 리스트 `_viewRows` + `BuildRow(row, index)`
+  (# 열 = 인덱스+1, RenumberRows 소멸). **주의: virtual mode에선 `SelectedItems`/`Items` 열거·
+  `Sort()`가 예외** → `SelectedIndices`+백킹 리스트 조회, 정렬은 백킹 리스트 OrderBy 후 재표시
+  (`ListViewClipboard`도 인덱스 기반으로 변경 — 양 모드 호환). 나머지 탭(행 수 작음)은 classic 유지.
+- **SearchKey 캐시** (SpoolData/CableLineData): 검색마다 전 행 ToUpperInvariant 재변환 제거
+  (지연 생성 1회 — 로더가 채운 뒤 필드 불변 가정).
+- **FindTagDepth DFS→BFS** (`FindTagDepthInRoots`): 태그 없는 첫 분기 geometry 서브트리를
+  깊이 20까지 헛순회하던 것 제거. 태그가 여러 깊이면 **가장 얕은 깊이가 결정적으로 선택**됨
+  (구 DFS는 순회 순서 의존 — 첫 깊이만 인덱싱 리스크 자체는 §2 그대로).
+- **IndexAtDepth = known tag만 인덱싱**: 대상 깊이의 전 노드 대신 활성 소스 태그와 일치하는
+  노드만. `GetItemsExcept`/`GetIndexedKeys`는 호출부 없음 확인 → 안전. **Overview의 인덱스
+  건수 의미가 "그 깊이 전 노드"→"매칭 태그 노드"로 바뀜**(진단 시 참고).
+- **하드 스코프 + 태그 미발견 → general walk 금지**: 종전엔 hardScope여도 스코프 루트 안에서
+  전체 walk fallback이 돌았다(태그 형식 불일치 시 EIT nwd 전 트리 COM 순회). 이제 인덱스 0건
+  + LastScopeNote 진단. (비-hardScope의 fallback 체인은 불변.)
+- **WalkAndIndex 자식 단일 열거**: 판단 루프+하강 루프 이중 열거 → 1회 열거로 (descend 확정
+  후엔 자식 검사도 생략).
+- **CableClash pre-cull AABB 캐시**: 배제된 케이블도 관리형 bbox를 캐시(형상 파생 = 모델당
+  정적, L2 위배 아님) — 다른 단면 볼륨으로 재실행 시 2만 케이블 bbox 재조회 제거. 세그먼트는
+  여전히 후보가 될 때만 추출.
+- **Excel 중복 ID 제거 (Spool/Hydrotest/Equipment)**: OASIS 로더와 동일한 first-wins 정책 +
+  `out duplicatesSkipped` → 소스 라벨에 "중복 N건 제외" 표기. (Cable/EitTray는 기존에 이미 제거.)
+- **속성 쓰기 propVec 재사용**: 같은 스풀/장비의 property vector를 아이템마다 재생성하지 않음
+  (`BuildSpoolPropVec` 추출). SetUserDefined가 벡터를 복사한다는 가정 — **Windows 실측 확인 대상**
+  (실패 시 catch에서 벡터 재생성).
+- **성능 계측 `Services/PerfLog.cs`** (audit P0 "계측 필수"): 데이터 로드(Excel/SQL)·인덱스
+  빌드(스코프 노트·depth 포함)·가시화 적용(모듈별 painted 수)·리스트 갱신·범위 판정·필터
+  포커스·속성 쓰기를 소요 ms+건수로 기록(링 500건). 고급 진단 탭 `[계측 로그 CSV 출력]`.
+  Windows 실측에서 이 CSV로 병목 순위를 확정한 뒤 다음 라운드 결정.
+
+**검증 게이트 (Windows 실측)**
+1. VirtualMode: 정렬(컬럼 클릭)·다중 선택→3D 선택·3D→리스트 sync(EnsureVisible)·클립보드
+   복사·탭 이동이 전부 동작하는가. 특히 SelectedIndices 사용부에서 예외 없는지.
+2. BFS 깊이 선택: general walk 시절과 매칭 건수 대조 (§2와 동일 성격 — 얕은 우연 일치 이름이
+   태그 셋에 있으면 깊이 오선택 가능).
+3. propVec 재사용: 속성이 노드별로 정상 기록되는지 (공유 참조로 저장되면 마지막 값만 남는
+   증상이 날 것 — 그 경우 아이템별 생성으로 복귀).
+4. 하드 스코프 fail-fast: EIT 탭에서 인덱스 0건 시 매칭 Status의 스코프 노트로 원인이 보이는지.
+
+**검증 후 판단·보류 (audit 항목 중)**
+- **Excel/SQL background 로드 (audit 5)**: 타당하나 WinForms 스레딩+Navisworks STA 제약 검증이
+  필요해 보류 — PerfLog로 로드 시간 실측 후 착수 판단.
+- **Stage Diff 증분 색칠 (audit 3)**: 현 전량 리셋+재도색은 §10에서 의도적으로 채택한 정확성
+  우선 설계. diff 엔진은 체크 해제/기준일 변경/소스 전환의 상태 조합 관리가 복잡해 보류 —
+  PerfLog로 Reset/Override 구간이 실제 지배적인지 확인 후.
+- **Sub-system 경량 Cable 쿼리 (audit 6)**: SELECT 컬럼 축소 효과는 네트워크 왕복 대비 소폭 +
+  SQL 계약 이원화 유지비 → 보류.
+- ScopeFilter BoundingBox memoization / Cable ModelItemCollection 중복 축소 / segment 캐시
+  메모리 상한 (audit 8·9·7-2): P2 — 실측 후.
+- **audit 검증 결과**: 주요 주장(검색 시 전체 재생성·focus 실시간 병목·IndexAtDepth 전 노드
+  인덱싱·hardScope 내 general walk·pre-cull 미캐시·Excel 중복 미제거·propVec 반복 생성)은
+  전부 코드와 일치. "OASIS 로드 UI 정지"도 사실이나 marquee+버튼 비활성으로 이미 완화돼 있음.
+- (부수 발견) `ExcelLoaderTests`의 Hydrotest 테스트 2건이 구 스키마(`HydrotestStatus`/`SpoolIds`)
+  참조로 현재 모델과 불일치 — 테스트 프로젝트가 컴파일되지 않는 기존 문제. 정리 필요.
+
 ## 레슨런 (하드 트러블슈팅 기록 — 다시 헤매지 말 것)
 
 ### L1. 단면(Clipping): **Section Box는 COM `ClippingPlanes()`에 없다** (가장 값진 교훈)

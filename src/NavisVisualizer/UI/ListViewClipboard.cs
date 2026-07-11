@@ -21,15 +21,19 @@ namespace NavisVisualizer.UI
         {
             if (lv == null || lv.Items.Count == 0) return 0;
 
-            var rows = lv.SelectedItems.Count > 0
-                ? lv.SelectedItems.Cast<ListViewItem>()
-                : lv.Items.Cast<ListViewItem>();
+            // 인덱스 기반 접근 — VirtualMode ListView는 SelectedItems/Items 열거가
+            // 지원되지 않는다(예외). SelectedIndices + Items[i]는 두 모드 모두 동작
+            // (virtual에서는 RetrieveVirtualItem으로 그때그때 행을 만들어 준다).
+            var indices = lv.SelectedIndices.Count > 0
+                ? lv.SelectedIndices.Cast<int>()
+                : Enumerable.Range(0, lv.Items.Count);
 
             var sb = new StringBuilder();
             sb.AppendLine(string.Join("\t", lv.Columns.Cast<ColumnHeader>().Select(c => c.Text)));
             int count = 0;
-            foreach (var item in rows)
+            foreach (int i in indices)
             {
+                var item = lv.Items[i];
                 sb.AppendLine(string.Join("\t",
                     item.SubItems.Cast<ListViewItem.ListViewSubItem>().Select(si => si.Text)));
                 count++;

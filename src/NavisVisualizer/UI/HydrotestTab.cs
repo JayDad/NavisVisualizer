@@ -33,6 +33,7 @@ namespace NavisVisualizer.UI
         private DataSourcePanel _srcPanel;
         private DateTimePicker _dtpReference;
         private TextBox _txtSearch;
+        private Debouncer _searchDebounce;   // 키 입력마다 리스트 재계산 방지 (성능 audit P0-1)
         private TabControl _tabFilter;
         private ListView _listView;
         private Button _btnApply;
@@ -102,7 +103,9 @@ namespace NavisVisualizer.UI
             var searchPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 28, AutoSize = false };
             searchPanel.Controls.Add(new Label { Text = "검색:", AutoSize = true, Padding = new Padding(0, 4, 0, 0) });
             _txtSearch = new TextBox { Width = 210, Text = "" };
-            _txtSearch.TextChanged += (s, e) => FilterList();
+            // 입력 즉시가 아니라 입력이 멈춘 뒤 1회만 필터 실행 (성능 audit P0-1)
+            _searchDebounce = new Debouncer(FilterList);
+            _txtSearch.TextChanged += (s, e) => _searchDebounce.Trigger();
             searchPanel.Controls.Add(_txtSearch);
             var btnExport = new Button { Text = "매칭 Status 엑셀 출력", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(8, 1, 8, 1) };
             btnExport.Click += BtnExport_Click;
@@ -287,9 +290,10 @@ namespace NavisVisualizer.UI
                 if (dlg.ShowDialog() != DialogResult.OK) return;
                 try
                 {
-                    var list = ExcelLoader.LoadHydrotest(dlg.FileName);
+                    var list = ExcelLoader.LoadHydrotest(dlg.FileName, out int dup);
                     _packagesBySource[TabDataSource.Excel] = list;
-                    _srcPanel.SetLoaded(TabDataSource.Excel, list.Count, Path.GetFileName(dlg.FileName));
+                    _srcPanel.SetLoaded(TabDataSource.Excel, list.Count,
+                        Path.GetFileName(dlg.FileName) + (dup > 0 ? $" · 중복 {dup}건 제외" : ""));
                     if (_srcPanel.ActiveSource == TabDataSource.Excel)
                         ApplyActiveSourceData(reapply: false);
                 }

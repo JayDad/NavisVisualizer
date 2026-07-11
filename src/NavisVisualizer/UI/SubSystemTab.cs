@@ -137,6 +137,7 @@ namespace NavisVisualizer.UI
         private Panel _stagePanel;
         private Panel _progressPanel;
         private TextBox _txtFilter;
+        private Debouncer _filterDebounce;   // 키 입력마다 좌측 목록 재생성 방지 (성능 audit P0-1)
         private Button _btnDelayed;
         private Button _btnDetail;
         private ListView _lvAll;
@@ -349,7 +350,9 @@ namespace NavisVisualizer.UI
             var leftTop = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = Padding.Empty };
             leftTop.Controls.Add(new Label { Text = "검색:", AutoSize = true, Padding = new Padding(0, 6, 0, 0) });
             _txtFilter = new TextBox { Width = 120, Margin = new Padding(0, 3, 3, 0) };
-            _txtFilter.TextChanged += (s, e) => RefreshLeftList();
+            // 입력 즉시가 아니라 입력이 멈춘 뒤 1회만 목록 갱신 (성능 audit P0-1)
+            _filterDebounce = new Debouncer(RefreshLeftList);
+            _txtFilter.TextChanged += (s, e) => _filterDebounce.Trigger();
             leftTop.Controls.Add(_txtFilter);
             _btnDelayed = new Button
             {
@@ -1193,7 +1196,10 @@ namespace NavisVisualizer.UI
                 lblSummary.Text = $"요소 {shown:N0}건";
             };
 
-            txtSearch.TextChanged += (s, e) => populate(txtSearch.Text.Trim());
+            // 상세 창 검색도 debounce — 요소 수천 건 그리드 재생성이 키 입력마다 돌지 않게.
+            var detailDebounce = new Debouncer(() => populate(txtSearch.Text.Trim()));
+            txtSearch.TextChanged += (s, e) => detailDebounce.Trigger();
+            form.Disposed += (s, e) => detailDebounce.Dispose();
             btnCsv.Click += (s, e) => ExportDetailCsv(names, referenceDate);
             btnCopyDetail.Click += (s, e) => ListViewClipboard.CopySelectedOrAll(lv);
 

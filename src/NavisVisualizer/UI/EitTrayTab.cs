@@ -40,6 +40,7 @@ namespace NavisVisualizer.UI
 
         private DataSourcePanel _srcPanel;
         private TextBox _txtSearch;
+        private Debouncer _searchDebounce;   // 키 입력마다 리스트 재계산 방지 (성능 audit P0-1)
         private TabControl _tabFilter;
         private ListView _listView;
         private Button _btnApply;
@@ -96,7 +97,9 @@ namespace NavisVisualizer.UI
             var searchPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 28, AutoSize = false };
             searchPanel.Controls.Add(new Label { Text = "검색:", AutoSize = true, Padding = new Padding(0, 4, 0, 0) });
             _txtSearch = new TextBox { Width = 210, Text = "" };
-            _txtSearch.TextChanged += (s, e) => FilterList();
+            // 입력 즉시가 아니라 입력이 멈춘 뒤 1회만 필터 실행 (성능 audit P0-1)
+            _searchDebounce = new Debouncer(FilterList);
+            _txtSearch.TextChanged += (s, e) => _searchDebounce.Trigger();
             searchPanel.Controls.Add(_txtSearch);
             var btnExport = new Button { Text = "매칭 Status 엑셀 출력", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(8, 1, 8, 1) };
             btnExport.Click += BtnExport_Click;

@@ -411,6 +411,8 @@ FROM [Navis].[EIT_Cable]";
             if (filter)
                 sql += $"\nWHERE [{projectColumn}] = @prj";
 
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            int rowCount = 0;
             using (var conn = new SqlConnection(settings.BuildConnectionString()))
             using (var cmd = new SqlCommand(sql, conn))
             {
@@ -420,9 +422,17 @@ FROM [Navis].[EIT_Cable]";
                 using (var reader = cmd.ExecuteReader())
                 {
                     while (reader.Read())
+                    {
+                        rowCount++;
                         rowHandler(reader);
+                    }
                 }
             }
+
+            // 계측 노트 = 대상 테이블 (baseSql 마지막 FROM 절)
+            int fromIdx = baseSql.LastIndexOf("FROM", StringComparison.OrdinalIgnoreCase);
+            NavisVisualizer.Services.PerfLog.Record("SQL 조회", sw.ElapsedMilliseconds, rows: rowCount,
+                note: fromIdx >= 0 ? baseSql.Substring(fromIdx + 4).Trim() : "");
         }
 
         private static string GetString(IDataRecord r, string column)

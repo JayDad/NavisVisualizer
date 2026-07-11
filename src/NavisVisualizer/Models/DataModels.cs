@@ -230,6 +230,12 @@ namespace NavisVisualizer.Models
         public string IsoNo { get; set; }
         public Dictionary<SpoolStage, DateTime?> StageDates { get; set; } = new Dictionary<SpoolStage, DateTime?>();
 
+        private string _searchKey;
+        /// <summary>검색용 정규화 키(대문자, 지연 생성 후 캐시 — 성능 audit P0-3: 검색마다
+        /// 전 행 ToUpperInvariant 재변환·GC 방지). 로더가 채운 뒤 필드가 불변이라는 가정.</summary>
+        public string SearchKey =>
+            _searchKey ?? (_searchKey = ((SpoolId ?? "") + "\t" + (IsoNo ?? "")).ToUpperInvariant());
+
         public SpoolStage GetStageAtDate(DateTime referenceDate)
         {
             var stages = SpoolStageInfo.OrderedStages;
@@ -683,6 +689,13 @@ namespace NavisVisualizer.Models
         public string OutDia { get; set; }
         public string TraySys { get; set; }
         public string Route { get; set; }
+
+        private string _searchKey;
+        /// <summary>검색용 정규화 키(Cable No/From Equip/To Equip, 대문자, 지연 생성 후 캐시 —
+        /// 성능 audit P0-3). 로더가 채운 뒤 필드가 불변이라는 가정.</summary>
+        public string SearchKey =>
+            _searchKey ?? (_searchKey =
+                ((CableNo ?? "") + "\t" + (FromEquip ?? "") + "\t" + (ToEquip ?? "")).ToUpperInvariant());
 
         /// <summary>stage 날짜가 하나라도 있는가 — 없으면 하이라이트 전용 모드.</summary>
         public bool HasAnyStageDate
