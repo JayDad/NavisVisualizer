@@ -12,7 +12,7 @@ using NavisVisualizer.Visualizers;
 
 namespace NavisVisualizer.UI
 {
-    public class HydrotestTab : UserControl
+    public class HydrotestTab : UserControl, IOverviewSource
     {
         private readonly MainDockablePanel _main;
 
@@ -503,6 +503,26 @@ namespace NavisVisualizer.UI
 
         private string SourceLabel() =>
             _srcPanel.ActiveSource == TabDataSource.Oasis ? "OASIS" : "Excel";
+
+        /// <summary>Overview 탭 상태 노출 — 인메모리 조회만 (IOverviewSource).</summary>
+        public OverviewStatus GetOverviewStatus()
+        {
+            bool hasApplied = _matchedPkgIds.Count > 0 || _unmatchedPkgIds.Count > 0;
+            return new OverviewStatus
+            {
+                DataLoaded = _packages.Count > 0,
+                DataText = _packages.Count > 0 ? $"{SourceLabel()} {_packages.Count:N0}건" : "미로드",
+                IndexText = _main.HydroTagSearcher.IsIndexBuilt
+                    ? _main.HydroTagSearcher.IndexedCount.ToString("N0") : "-",
+                ApplyStateText = _applyState.Text,
+                ApplyStale = _applyState.IsStale,
+                MatchedText = hasApplied ? _matchedPkgIds.Count.ToString("N0") : "-",
+                UnmatchedText = hasApplied ? _unmatchedPkgIds.Count.ToString("N0") : "-",
+                UnmatchedCount = hasApplied ? _unmatchedPkgIds.Count : 0,
+                ScopeNote = _main.HydroTagSearcher.LastScopeNote ?? "-",
+                ScopeFellBack = _main.HydroTagSearcher.LastScopeFellBack,
+            };
+        }
 
         // ----- 현황 집계 범위 (aggregation scope) -----
 

@@ -28,7 +28,7 @@ namespace NavisVisualizer.UI
     /// - 선택 UI: 좌측 검색+상태 테이블(~400개) ↔ [▶ ◀ ▶▶ ◀◀] ↔ 우측 선택 누적
     ///   테이블 + 하단 개수 라벨. 다중 선택 후 화살표로 이동
     /// </summary>
-    public class SubSystemTab : UserControl
+    public class SubSystemTab : UserControl, IOverviewSource
     {
         private enum ApplyMode { Stage, Progress }
 
@@ -79,6 +79,34 @@ namespace NavisVisualizer.UI
             if (_eitEqSearcher.IsIndexBuilt)  parts.Add($"EIT EQ[{_eitEqSearcher.LastScopeNote}]");
             if (_cableSearcher.IsIndexBuilt)  parts.Add($"Cable[{_cableSearcher.LastScopeNote}]");
             return parts.Count > 0 ? string.Join(" · ", parts) : "-";
+        }
+
+        /// <summary>Overview 탭 상태 노출 — 인메모리 조회만 (IOverviewSource). 인덱스는 공종별 4개 합산.</summary>
+        public OverviewStatus GetOverviewStatus()
+        {
+            int idx = 0;
+            bool anyBuilt = false, fellBack = false;
+            foreach (var s in new[] { _eqSearcher, _pipingSearcher, _eitEqSearcher, _cableSearcher })
+            {
+                if (!s.IsIndexBuilt) continue;
+                anyBuilt = true;
+                idx += s.IndexedCount;
+                fellBack |= s.LastScopeFellBack;
+            }
+            return new OverviewStatus
+            {
+                DataLoaded = _elements.Count > 0,
+                DataText = _elements.Count > 0
+                    ? $"OASIS 요소 {_elements.Count:N0}건 · SS {_subSystemNames.Count}개" : "미로드",
+                IndexText = anyBuilt ? idx.ToString("N0") : "-",
+                ApplyStateText = _applyState.Text,
+                ApplyStale = _applyState.IsStale,
+                MatchedText = _appliedOnce ? _matchedIds.Count.ToString("N0") : "-",
+                UnmatchedText = _appliedOnce ? _unmatchedIds.Count.ToString("N0") : "-",
+                UnmatchedCount = _appliedOnce ? _unmatchedIds.Count : 0,
+                ScopeNote = ScopeNotes(),
+                ScopeFellBack = fellBack,
+            };
         }
         /// <summary>null = 마스터 미구성(요소 파생 fallback).</summary>
         private Dictionary<string, SubSystemMasterData> _master;

@@ -24,7 +24,7 @@ namespace NavisVisualizer.UI
     /// 케이블 추출(clash), ④ 겹침 완화(숨김 isolate + 투명 필터 포커스). 미매칭은 스코프와
     /// 직교(전역 고정, 코너 라벨 — §7/L3).
     /// </summary>
-    public class CableLineTab : UserControl
+    public class CableLineTab : UserControl, IOverviewSource
     {
         private readonly MainDockablePanel _main;
 
@@ -937,6 +937,27 @@ namespace NavisVisualizer.UI
         }
 
         // ----- List / selection -----
+
+        /// <summary>Overview 탭 상태 노출 — 인메모리 조회만 (IOverviewSource).</summary>
+        public OverviewStatus GetOverviewStatus()
+        {
+            bool hasApplied = _matchedCableNos.Count > 0 || _unmatchedCableNos.Count > 0;
+            string src = _srcPanel.ActiveSource == TabDataSource.Oasis ? "OASIS" : "Excel";
+            return new OverviewStatus
+            {
+                DataLoaded = _cables.Count > 0,
+                DataText = _cables.Count > 0 ? $"{src} {_cables.Count:N0}건" : "미로드",
+                IndexText = _main.CableLineSearcher.IsIndexBuilt
+                    ? _main.CableLineSearcher.IndexedCount.ToString("N0") : "-",
+                ApplyStateText = _applyState.Text,
+                ApplyStale = _applyState.IsStale,
+                MatchedText = hasApplied ? _matchedCableNos.Count.ToString("N0") : "-",
+                UnmatchedText = hasApplied ? _unmatchedCableNos.Count.ToString("N0") : "-",
+                UnmatchedCount = hasApplied ? _unmatchedCableNos.Count : 0,
+                ScopeNote = _main.CableLineSearcher.LastScopeNote ?? "-",
+                ScopeFellBack = _main.CableLineSearcher.LastScopeFellBack,
+            };
+        }
 
         private bool InScope(string id) =>
             _scopeKeys == null || !_matchedCableNos.Contains(id) || _scopeKeys.Contains(id);

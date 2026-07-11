@@ -600,9 +600,17 @@ master 기준 UX audit의 항목별 판정·근거·보류 목록은 **`docs/UX_
 - **Tools 탭 → "고급 진단"** 명칭 변경(P2 부분), **EIT Tray 기준일 행 제거**(비활성 노출 중단 —
   날짜 컬럼 확보 시 §3 패턴으로 복원), Sub-system 검색폭 88→120 + **`이 탭 가시화 해제` 버튼 신설**
   (§10 잔여 해소 — `ResetModule(VisualModule.SubSystem)`).
-- **보류(후속 우선순위)**: ① Overview/Preflight 탭(최우선 추천 — NwdScope 발견 여부 사전 점검),
-  ② 진행 콜백+중단, ③ DPI/반응형(Windows 실측 병행 필수), ④ 리스트·통계 통합, ⑤ Sub-system 선택
-  UX 재설계(§11 dual-list는 최근 사용자 결정이라 실사용 후), ⑥ empty-state 체크리스트, ⑦ 언어 통일.
+- **Overview 탭 `UI/OverviewTab.cs` + `Services/ScopePreflight.cs`** (P1 — 후속 1순위였던 것,
+  사용자 요청으로 구현): 첫 번째 탭. ① 공종 현황 표 — 6개 탭이 `IOverviewSource.GetOverviewStatus()`
+  로 {데이터 소스·건수 / 인덱스 건수 / 3D 적용 상태(ApplyStatePanel의 IsStale·Text 재사용) /
+  매칭·미매칭 / 인덱스 스코프 노트·fallback}을 노출, 행 더블클릭 = 그 탭으로 이동.
+  ② NWD Preflight — `ScopePreflight.Probe`가 ResolveScopeRoots의 2단계 매칭(모델 파일명 →
+  파일 노드 depth≤3)을 **읽기 전용으로 미러링**해 인덱스 빌드 없이 스코프 파일 발견 여부 판정
+  (searcher의 LastScopeNote를 안 건드리는 별도 구현 — 점검이 진단값을 덮으면 안 됨).
+  상태 캐시 없음(L2 취지) — Overview 탭 선택 시 자동 재조회 + [새로고침].
+- **보류(후속 우선순위)**: ① 진행 콜백+중단, ② DPI/반응형(Windows 실측 병행 필수),
+  ③ 리스트·통계 통합, ④ Sub-system 선택 UX 재설계(§11 dual-list는 최근 사용자 결정이라 실사용 후),
+  ⑤ empty-state 체크리스트(Overview가 정보원 — 각 탭 오류 메시지에 이식), ⑥ 언어 통일.
 
 ## 레슨런 (하드 트러블슈팅 기록 — 다시 헤매지 말 것)
 

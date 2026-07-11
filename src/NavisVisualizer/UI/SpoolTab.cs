@@ -12,7 +12,7 @@ using NavisVisualizer.Visualizers;
 
 namespace NavisVisualizer.UI
 {
-    public class SpoolTab : UserControl
+    public class SpoolTab : UserControl, IOverviewSource
     {
         private readonly MainDockablePanel _main;
 
@@ -550,6 +550,26 @@ namespace NavisVisualizer.UI
 
         private string SourceLabel() =>
             _srcPanel.ActiveSource == TabDataSource.Oasis ? "OASIS" : "Excel";
+
+        /// <summary>Overview 탭 상태 노출 — 인메모리 조회만 (IOverviewSource).</summary>
+        public OverviewStatus GetOverviewStatus()
+        {
+            bool hasApplied = _matchedSpoolIds.Count > 0 || _unmatchedSpoolIds.Count > 0;
+            return new OverviewStatus
+            {
+                DataLoaded = _spools.Count > 0,
+                DataText = _spools.Count > 0 ? $"{SourceLabel()} {_spools.Count:N0}건" : "미로드",
+                IndexText = _main.SpoolTagSearcher.IsIndexBuilt
+                    ? _main.SpoolTagSearcher.IndexedCount.ToString("N0") : "-",
+                ApplyStateText = _applyState.Text,
+                ApplyStale = _applyState.IsStale,
+                MatchedText = hasApplied ? _matchedSpoolIds.Count.ToString("N0") : "-",
+                UnmatchedText = hasApplied ? _unmatchedSpoolIds.Count.ToString("N0") : "-",
+                UnmatchedCount = hasApplied ? _unmatchedSpoolIds.Count : 0,
+                ScopeNote = _main.SpoolTagSearcher.LastScopeNote ?? "-",
+                ScopeFellBack = _main.SpoolTagSearcher.LastScopeFellBack,
+            };
+        }
 
         /// <summary>
         /// 체크된 단계에 해당하는(기준일 기준) 매칭 스풀만 남기고 나머지 매칭 스풀을 3D에서 숨긴다.

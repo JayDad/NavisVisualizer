@@ -43,6 +43,7 @@ namespace NavisVisualizer.UI
         public SectionService SectionSvc { get; } = new SectionService();
 
         private TabControl _tabControl;
+        private OverviewTab _overviewTab;
         private HydrotestTab _hydrotestTab;
         private SpoolTab _spoolTab;
         private EquipmentTab _equipmentTab;
@@ -62,6 +63,13 @@ namespace NavisVisualizer.UI
         private void InitializeComponent()
         {
             _tabControl = new TabControl { Dock = DockStyle.Fill };
+
+            // 첫 화면 = Overview (UX audit P1): 공종별 데이터/인덱스/3D 적용 상태 + NWD
+            // 파일명 규약 preflight를 한 표로 — 각 탭을 열어보지 않아도 현재 상태를 알 수 있다.
+            var ovPage = new TabPage("Overview");
+            _overviewTab = new OverviewTab(this);
+            _overviewTab.Dock = DockStyle.Fill;
+            ovPage.Controls.Add(_overviewTab);
 
             var htPage = new TabPage("Hydrotest");
             _hydrotestTab = new HydrotestTab(this);
@@ -102,6 +110,7 @@ namespace NavisVisualizer.UI
             _toolsTab.Dock = DockStyle.Fill;
             toolPage.Controls.Add(_toolsTab);
 
+            _tabControl.TabPages.Add(ovPage);
             _tabControl.TabPages.Add(htPage);
             _tabControl.TabPages.Add(spPage);
             _tabControl.TabPages.Add(eqPage);
@@ -109,6 +118,23 @@ namespace NavisVisualizer.UI
             _tabControl.TabPages.Add(cableLinePage);
             _tabControl.TabPages.Add(subSysPage);
             _tabControl.TabPages.Add(toolPage);
+
+            // Overview 상태 조회 대상 + 행 더블클릭 이동 배선. 상태는 캐시하지 않으므로
+            // Overview 탭이 선택될 때마다 자동 재조회한다 (숨김/문서 전환 이벤트 없이도 최신).
+            _overviewTab.Configure(_tabControl, new (string, IOverviewSource, TabPage)[]
+            {
+                ("Hydrotest",  _hydrotestTab, htPage),
+                ("Spool",      _spoolTab,     spPage),
+                ("Equipment",  _equipmentTab, eqPage),
+                ("EIT Tray",   _eitTrayTab,   eitPage),
+                ("Cable",      _cableLineTab, cableLinePage),
+                ("Sub-system", _subSystemTab, subSysPage),
+            });
+            _tabControl.SelectedIndexChanged += (s, e) =>
+            {
+                if (_tabControl.SelectedTab == ovPage)
+                    _overviewTab.RefreshOverview();
+            };
 
             Controls.Add(_tabControl);
         }

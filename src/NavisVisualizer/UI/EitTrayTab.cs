@@ -18,7 +18,7 @@ namespace NavisVisualizer.UI
     /// 이중 소스. EIT_Tray는 날짜 컬럼이 없어 % 기반 현재상태 판정 — 기준일 UI는 실제 날짜 컬럼이
     /// 생길 때까지 표시하지 않는다 (비활성 상태로 노출하면 "왜 안 되지" 혼란만 줌 — UX audit QW7).
     /// </summary>
-    public class EitTrayTab : UserControl
+    public class EitTrayTab : UserControl, IOverviewSource
     {
         private readonly MainDockablePanel _main;
 
@@ -753,6 +753,27 @@ namespace NavisVisualizer.UI
             var clone = new Dictionary<EitStage, ColorSetting>();
             foreach (var kv in defaults) clone[kv.Key] = kv.Value.Clone();
             return clone;
+        }
+
+        /// <summary>Overview 탭 상태 노출 — 인메모리 조회만 (IOverviewSource).</summary>
+        public OverviewStatus GetOverviewStatus()
+        {
+            bool hasApplied = _matchedTrayNos.Count > 0 || _unmatchedTrayNos.Count > 0;
+            string src = _srcPanel.ActiveSource == TabDataSource.Oasis ? "OASIS" : "Excel";
+            return new OverviewStatus
+            {
+                DataLoaded = _trays.Count > 0,
+                DataText = _trays.Count > 0 ? $"{src} {_trays.Count:N0}건" : "미로드",
+                IndexText = _main.ElecTagSearcher.IsIndexBuilt
+                    ? _main.ElecTagSearcher.IndexedCount.ToString("N0") : "-",
+                ApplyStateText = _applyState.Text,
+                ApplyStale = _applyState.IsStale,
+                MatchedText = hasApplied ? _matchedTrayNos.Count.ToString("N0") : "-",
+                UnmatchedText = hasApplied ? _unmatchedTrayNos.Count.ToString("N0") : "-",
+                UnmatchedCount = hasApplied ? _unmatchedTrayNos.Count : 0,
+                ScopeNote = _main.ElecTagSearcher.LastScopeNote ?? "-",
+                ScopeFellBack = _main.ElecTagSearcher.LastScopeFellBack,
+            };
         }
     }
 }

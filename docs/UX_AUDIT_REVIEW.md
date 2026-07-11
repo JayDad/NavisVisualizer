@@ -11,7 +11,7 @@ DLL 부재로 컴파일 불가 — 개발 규칙 참조).
 | P0-1 데이터 상태 ↔ 3D 적용 상태 분리 | **구현 (경량형)** | `ApplyStatePanel` — 아래 상세 |
 | P0-2 "적용" 버튼 명칭 구분 | **구현 (일부 변형)** | 가시화 적용 / 범위 적용 / 가시화 해제 |
 | P0-3 긴 작업 단계·진행 표시 | **부분 구현** | 단계 문구 병기. 건수/경과/중단은 보류 |
-| P1 Overview/Preflight 첫 화면 | 보류 (후속 1순위 추천) | 설계 스케치 아래 |
+| P1 Overview/Preflight 첫 화면 | **구현 (후속 반영, 2026-07)** | `OverviewTab` + `ScopePreflight` — 아래 상세 |
 | P1 색상 설정 접기 | **구현** | `ColorEditCollapse`, 기본 접힘 |
 | P1 반응형 레이아웃 | 보류 | Windows DPI 실측과 함께 진행해야 안전 |
 | P1 리스트·통계·필터 통합 | 보류 | 검증된 현행 구조 유지, 실사용 피드백 후 |
@@ -98,25 +98,40 @@ Audit 원안 중 **미채택**:
 - **Sub-system**: 검색창 88→120px, `이 탭 가시화 해제` 버튼 신설(§10 잔여 해소 —
   `ResetModule(VisualModule.SubSystem)`), 색칠 구간 진행바
 
+### P1. Overview 탭 — `UI/OverviewTab.cs` + `Services/ScopePreflight.cs` (후속 반영, 신규)
+
+첫 심사에서 보류했던 항목을 사용자 요청으로 구현. 첫 번째 탭으로 배치:
+
+- **공종 현황 표** — 6개 공종 탭이 `IOverviewSource.GetOverviewStatus()`(인메모리 스냅샷)로
+  {데이터 소스·건수 / 인덱스 건수 / 3D 적용 상태 / 매칭·미매칭 / 인덱스 스코프 노트}를 노출.
+  3D 상태·stale 여부는 `ApplyStatePanel`(P0-1) 상태를 그대로 재사용 — 정보원이 하나.
+  행 더블클릭 = 해당 탭으로 이동. 미매칭>0 빨강, stale 주황, 스코프 fallback 주황.
+- **NWD Preflight 표** — `ScopePreflight.Probe`가 공종별 스코프 체인(SPL→HYDROPKG / HYDROPKG /
+  MEQ / EIT / CABLE)의 대상 파일 발견 여부를 **인덱스 빌드 없이** 판정.
+  `ResolveScopeRoots`의 2단계 매칭(① Model.FileName/RootItem DisplayName ② 파일 노드 depth≤3
+  얕은 하강)을 읽기 전용으로 미러링 — searcher의 `LastScopeNote`/`LastScopeFellBack`을 건드리지
+  않는 별도 구현 (사전 점검이 실제 빌드 진단값을 덮어쓰면 안 되므로). 파일 노드만 따라가
+  geometry walk가 없어 대형 모델에서도 즉시 수준.
+- **갱신 정책**: 상태 캐시 없음(레슨런 L2 취지 — 라이브 상태는 캐시 금지). Overview 탭이
+  선택될 때 자동 재조회(`TabControl.SelectedIndexChanged`) + [새로고침] 버튼.
+- audit 원안의 "Action 버튼(열기/업데이트/OASIS 로드)" 열은 미채택 — 행 더블클릭 이동으로 대체
+  (그 탭에 가면 어떤 액션이 필요한지 ApplyStatePanel·DataSourcePanel이 이미 보여줌).
+
 ## 보류 항목 상세 (후속 우선순위 제안)
 
-1. **Overview/Preflight 탭 (audit P1)** — 가장 가치 있는 미구현 항목. 공종별 {데이터 로드 여부,
-   대상 nwd 발견 여부(`NwdScope` 키워드 매칭 — `ResolveScopeRoots` 재사용), 마지막 적용 시각
-   (ApplyStatePanel 상태 노출), 매칭률}를 한 표로. 파일명 규약+하드 스코프 구조라 "대상 nwd
-   미발견"을 사전에 잡는 효과가 큼. 각 탭 상태를 읽을 인터페이스(예: `ITabStatus`)만 정의하면
-   기존 구조 위에 얹을 수 있음.
-2. **진행 콜백 + 중단** (P0-3 잔여) — 위 설계 메모 참조.
-3. **반응형/DPI (P1)** — 절대폭이 전면에 깔려 있어(DataSourcePanel 100/105/18px 등) 일괄 수정은
+1. **진행 콜백 + 중단** (P0-3 잔여) — 위 설계 메모 참조.
+2. **반응형/DPI (P1)** — 절대폭이 전면에 깔려 있어(DataSourcePanel 100/105/18px 등) 일괄 수정은
    Windows 125/150% 실측과 병행해야 안전. Linux에서 맹수정하면 검증 불가 리스크만 커짐.
-4. **리스트·통계·필터 통합 (P1)** — 전체/매칭/미매칭 TabControl → Segmented 필터 + KPI 클릭
+3. **리스트·통계·필터 통합 (P1)** — 전체/매칭/미매칭 TabControl → Segmented 필터 + KPI 클릭
    필터링. 동작엔 문제 없는 영역이라 실사용 피드백 후. (ListView를 탭 간 이동시키는 현재 구현은
    특이하지만 동작 검증됨.)
-5. **Sub-system 선택 UX (P1)** — dual-list는 2026-07에 체크박스에서 전환한 지 얼마 안 된 사용자
+4. **Sub-system 선택 UX (P1)** — dual-list는 2026-07에 체크박스에서 전환한 지 얼마 안 된 사용자
    결정(§11)이라 재재설계는 실사용 후. Quick Filter(MCC 지연은 이미 있음 — Punch/ITR 미완료 추가),
    Detail Pane은 상세 현황 창이 대체 중.
-6. **Empty state 체크리스트 / 오류 메시지 구체화 (P2)** — Preflight와 같은 정보원 (모델 열림 /
-   데이터 로드 / 스코프 nwd 발견). Overview 구현 시 같은 헬퍼로 해결 권장.
-7. **UI 언어 통일 (P2)** — 고급 진단 탭 영어 혼용. 낮은 우선순위.
+5. **Empty state 체크리스트 / 오류 메시지 구체화 (P2)** — Overview/Preflight가 정보원 확보됨.
+   각 탭의 "데이터를 먼저 로드하고 모델을 열어주세요"류 메시지를 조건별 체크리스트로 바꾸는
+   것은 `ScopePreflight` + `GetOverviewStatus` 재사용으로 후속 가능.
+6. **UI 언어 통일 (P2)** — 고급 진단 탭 영어 혼용. 낮은 우선순위.
 
 ## Windows 검증 게이트 (이번 변경분)
 
@@ -126,3 +141,7 @@ Audit 원안 중 **미채택**:
    `explorer /select` 경로(공백 포함) 동작
 4. Sub-system `이 탭 가시화 해제`가 다른 공종 색을 건드리지 않는지 (`_paintedByModule` 경로)
 5. 단계 문구가 marquee 동안 실제로 갱신되어 보이는지 (DoEvents 타이밍)
+6. Overview: federated NWD에서 Preflight 판정이 실제 인덱스 빌드의 `인덱스 스코프` 노트와
+   일치하는지 (`ScopePreflight`가 ResolveScopeRoots를 미러하므로 어긋나면 미러 누락 의심),
+   문서 미열림/문서 전환 직후 새로고침 시 예외 없이 "모델 미열림" 표시되는지,
+   행 더블클릭 탭 이동 동작

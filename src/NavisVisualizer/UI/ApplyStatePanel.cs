@@ -23,6 +23,12 @@ namespace NavisVisualizer.UI
         private Button _applyButton;
         private bool _appliedOnce;
 
+        /// <summary>Overview 탭 노출용 — 마지막 적용 이후 어긋남이 표시된 상태인가.</summary>
+        public bool IsStale { get; private set; }
+
+        /// <summary>Overview 탭 노출용 — 적용 이력이 있는가 (해제 시 false 복귀).</summary>
+        public bool IsApplied => _appliedOnce;
+
         public ApplyStatePanel()
         {
             AutoSize = true;
@@ -42,6 +48,7 @@ namespace NavisVisualizer.UI
         public void SetApplied(string basis)
         {
             _appliedOnce = true;
+            IsStale = false;
             ForeColor = AppliedColor;
             Text = $"3D: {basis} · {DateTime.Now:HH:mm} 적용됨";
             Highlight(false);
@@ -51,6 +58,7 @@ namespace NavisVisualizer.UI
         public void MarkStale(string reason)
         {
             if (!_appliedOnce) return;
+            IsStale = true;
             ForeColor = StaleColor;
             Text = $"⚠ 3D 업데이트 필요 ({reason})";
             Highlight(true);
@@ -60,6 +68,7 @@ namespace NavisVisualizer.UI
         public void SetCleared()
         {
             _appliedOnce = false;
+            IsStale = false;
             ForeColor = Color.Gray;
             Text = "3D: 미적용";
             Highlight(false);

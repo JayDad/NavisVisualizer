@@ -12,7 +12,7 @@ using NavisVisualizer.Visualizers;
 
 namespace NavisVisualizer.UI
 {
-    public class EquipmentTab : UserControl
+    public class EquipmentTab : UserControl, IOverviewSource
     {
         private readonly MainDockablePanel _main;
 
@@ -545,6 +545,26 @@ namespace NavisVisualizer.UI
 
         private string SourceLabel() =>
             _srcPanel.ActiveSource == TabDataSource.Oasis ? "OASIS" : "Excel";
+
+        /// <summary>Overview 탭 상태 노출 — 인메모리 조회만 (IOverviewSource).</summary>
+        public OverviewStatus GetOverviewStatus()
+        {
+            bool hasApplied = _matchedTagNos.Count > 0 || _unmatchedTagNos.Count > 0;
+            return new OverviewStatus
+            {
+                DataLoaded = _equipments.Count > 0,
+                DataText = _equipments.Count > 0 ? $"{SourceLabel()} {_equipments.Count:N0}건" : "미로드",
+                IndexText = _main.EquipmentSearcher.IsIndexBuilt
+                    ? _main.EquipmentSearcher.IndexedCount.ToString("N0") : "-",
+                ApplyStateText = _applyState.Text,
+                ApplyStale = _applyState.IsStale,
+                MatchedText = hasApplied ? _matchedTagNos.Count.ToString("N0") : "-",
+                UnmatchedText = hasApplied ? _unmatchedTagNos.Count.ToString("N0") : "-",
+                UnmatchedCount = hasApplied ? _unmatchedTagNos.Count : 0,
+                ScopeNote = _main.EquipmentSearcher.LastScopeNote ?? "-",
+                ScopeFellBack = _main.EquipmentSearcher.LastScopeFellBack,
+            };
+        }
 
         // ----- 현황 집계 범위 (aggregation scope) -----
 
