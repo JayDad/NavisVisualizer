@@ -18,17 +18,22 @@ namespace NavisVisualizer.UI
         /// <summary>Hydrotest 전용 — 스코프 HYDROPKG.</summary>
         public ModelItemSearcher HydroTagSearcher { get; } = new ModelItemSearcher();
 
-        /// <summary>EIT Tray 전용 — 스코프 EIT.</summary>
+        /// <summary>EIT Tray 전용 — 스코프 EIT (레벨 타겟, 트레이 ID 셋 기반).</summary>
         public ModelItemSearcher ElecTagSearcher { get; } = new ModelItemSearcher();
-
-        /// <summary>Sub-system 전용 — Equipment TAG + Piping PKG를 모두 찾아야 하므로 스코프 MEQ·SPL·HYDROPKG.</summary>
-        public ModelItemSearcher SubSystemSearcher { get; } = new ModelItemSearcher();
 
         /// <summary>Dedicated level-targeted index for Equipment (different match strategy) — 스코프 MEQ.</summary>
         public ModelItemSearcher EquipmentSearcher { get; } = new ModelItemSearcher();
 
-        /// <summary>Dedicated index for Cable Pull boxes (key = prefix before "-BOX") — 스코프 CABLE.</summary>
+        /// <summary>Cable node box 인덱스 (key = "-BOX" 앞 접두, 스코프 CABLE) — Tools 탭
+        /// box 중복 검사 전용 (구 Cable(Node) 탭은 2026-07 삭제됨).</summary>
         public ModelItemSearcher CableBoxSearcher { get; } = new ModelItemSearcher();
+
+        /// <summary>Cable(형상) 탭 — cable-no를 컴포넌트에 직접 매칭 (레벨 타겟, 스코프 CABLE).
+        /// CableBoxSearcher와 매칭 전략이 달라(box 접두 vs cable-no 정확 일치) 별도 인스턴스.</summary>
+        public ModelItemSearcher CableLineSearcher { get; } = new ModelItemSearcher();
+
+        // Sub-system 탭의 공종별 매칭 searcher(Equipment/Piping/EIT EQ/Cable)는 그 탭이
+        // 사유(私有)한다 — 각자 자기 nwd 하나만 레벨 타겟이라 다른 탭과 공유 불가(§11).
 
         public ColorOverrideEngine OverrideEngine { get; }
         public ExportService ExportSvc { get; } = new ExportService();
@@ -38,25 +43,33 @@ namespace NavisVisualizer.UI
         public SectionService SectionSvc { get; } = new SectionService();
 
         private TabControl _tabControl;
+        private OverviewTab _overviewTab;
         private HydrotestTab _hydrotestTab;
         private SpoolTab _spoolTab;
         private EquipmentTab _equipmentTab;
         private EitTrayTab _eitTrayTab;
-        private CableTab _cableTab;
+        private CableLineTab _cableLineTab;
         private SubSystemTab _subSystemTab;
         private ToolsTab _toolsTab;
 
         public MainDockablePanel()
         {
             OverrideEngine = new ColorOverrideEngine(
-                SpoolTagSearcher, HydroTagSearcher, ElecTagSearcher, SubSystemSearcher,
-                EquipmentSearcher, CableBoxSearcher);
+                SpoolTagSearcher, HydroTagSearcher, ElecTagSearcher,
+                EquipmentSearcher, CableLineSearcher);
             InitializeComponent();
         }
 
         private void InitializeComponent()
         {
             _tabControl = new TabControl { Dock = DockStyle.Fill };
+
+            // 첫 화면 = Overview (UX audit P1): 공종별 데이터/인덱스/3D 적용 상태 + NWD
+            // 파일명 규약 preflight를 한 표로 — 각 탭을 열어보지 않아도 현재 상태를 알 수 있다.
+            var ovPage = new TabPage("Overview");
+            _overviewTab = new OverviewTab(this);
+            _overviewTab.Dock = DockStyle.Fill;
+            ovPage.Controls.Add(_overviewTab);
 
             var htPage = new TabPage("Hydrotest");
             _hydrotestTab = new HydrotestTab(this);
@@ -78,28 +91,50 @@ namespace NavisVisualizer.UI
             _eitTrayTab.Dock = DockStyle.Fill;
             eitPage.Controls.Add(_eitTrayTab);
 
-            var cablePage = new TabPage("Cable Pull");
-            _cableTab = new CableTab(this);
-            _cableTab.Dock = DockStyle.Fill;
-            cablePage.Controls.Add(_cableTab);
+            // 형상 탭 — 07_Trion_All_Cable.nwd의 cable-no 컴포넌트를 직접 매칭·하이라이트.
+            // (구 노드/박스 집계 탭 Cable(Node)은 2026-07 사용자 결정으로 삭제 — DB에 노드
+            //  route가 없어 존재 의의가 사라짐. Tools 탭 box 중복 검사는 유지.)
+            var cableLinePage = new TabPage("Cable");
+            _cableLineTab = new CableLineTab(this);
+            _cableLineTab.Dock = DockStyle.Fill;
+            cableLinePage.Controls.Add(_cableLineTab);
 
             var subSysPage = new TabPage("Sub-system");
             _subSystemTab = new SubSystemTab(this);
             _subSystemTab.Dock = DockStyle.Fill;
             subSysPage.Controls.Add(_subSystemTab);
 
-            var toolPage = new TabPage("Tools");
+            // 개발·진단 전용 기능 모음 — 일반 업무 탭과 구분되도록 명칭으로 표시 (UX audit P2).
+            var toolPage = new TabPage("고급 진단");
             _toolsTab = new ToolsTab(this);
             _toolsTab.Dock = DockStyle.Fill;
             toolPage.Controls.Add(_toolsTab);
 
+            _tabControl.TabPages.Add(ovPage);
             _tabControl.TabPages.Add(htPage);
             _tabControl.TabPages.Add(spPage);
             _tabControl.TabPages.Add(eqPage);
             _tabControl.TabPages.Add(eitPage);
-            _tabControl.TabPages.Add(cablePage);
+            _tabControl.TabPages.Add(cableLinePage);
             _tabControl.TabPages.Add(subSysPage);
             _tabControl.TabPages.Add(toolPage);
+
+            // Overview 상태 조회 대상 + 행 더블클릭 이동 배선. 상태는 캐시하지 않으므로
+            // Overview 탭이 선택될 때마다 자동 재조회한다 (숨김/문서 전환 이벤트 없이도 최신).
+            _overviewTab.Configure(_tabControl, new (string, IOverviewSource, TabPage)[]
+            {
+                ("Hydrotest",  _hydrotestTab, htPage),
+                ("Spool",      _spoolTab,     spPage),
+                ("Equipment",  _equipmentTab, eqPage),
+                ("EIT Tray",   _eitTrayTab,   eitPage),
+                ("Cable",      _cableLineTab, cableLinePage),
+                ("Sub-system", _subSystemTab, subSysPage),
+            });
+            _tabControl.SelectedIndexChanged += (s, e) =>
+            {
+                if (_tabControl.SelectedTab == ovPage)
+                    _overviewTab.RefreshOverview();
+            };
 
             Controls.Add(_tabControl);
         }

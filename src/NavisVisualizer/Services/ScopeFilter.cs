@@ -68,9 +68,17 @@ namespace NavisVisualizer.Services
         /// <paramref name="scope"/>, or null for FullModel (= no filtering).
         /// A key with no items (not found in the model) is never in scope.
         /// Always recomputes — see the class-level recompute policy.
+        ///
+        /// <paramref name="volumeJudge"/> (optional): only the Cable(형상) tab passes this.
+        /// When set and scope == ClippingVolume, a key's clip-membership is decided by
+        /// <c>volumeJudge(key, notHiddenItems, planes)</c> (segment-vs-volume clash) instead
+        /// of the per-item BoundingBox().Center point test — a long cable's center is
+        /// meaningless. The 비숨김(not-hidden) gate is still applied first (§7 semantics).
+        /// Other tabs pass null → unchanged center-based behaviour.
         /// </summary>
         public HashSet<string> Apply(Document doc, MatchScope scope,
-            Dictionary<string, List<ModelItem>> itemsByKey)
+            Dictionary<string, List<ModelItem>> itemsByKey,
+            Func<string, List<ModelItem>, IList<ClipPlane>, bool> volumeJudge = null)
         {
             if (scope == MatchScope.FullModel)
             {
@@ -79,7 +87,7 @@ namespace NavisVisualizer.Services
                 return null;
             }
 
-            var result = Compute(doc, scope, itemsByKey);
+            var result = Compute(doc, scope, itemsByKey, volumeJudge);
             CurrentScope = scope;
             return result;
         }
@@ -101,7 +109,8 @@ namespace NavisVisualizer.Services
         public void Reset() => SetFullModel();
 
         private HashSet<string> Compute(Document doc, MatchScope scope,
-            Dictionary<string, List<ModelItem>> itemsByKey)
+            Dictionary<string, List<ModelItem>> itemsByKey,
+            Func<string, List<ModelItem>, IList<ClipPlane>, bool> volumeJudge = null)
         {
             var inScope = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             if (doc == null || itemsByKey == null || itemsByKey.Count == 0)
@@ -136,6 +145,20 @@ namespace NavisVisualizer.Services
             {
                 var items = kv.Value;
                 if (items == null || items.Count == 0) { noItem++; continue; }
+
+                // Cable(형상) clash path: segment-vs-volume decides clip membership (a long
+                // cable's center is meaningless). 비숨김 gate first, then the volume predicate.
+                if (scope == MatchScope.ClippingVolume && volumeJudge != null)
+                {
+                    var notHidden = new List<ModelItem>();
+                    foreach (var it in items)
+                        if (it != null && !SectionService.IsEffectivelyHidden(it))
+                            notHidden.Add(it);
+                    if (notHidden.Count == 0) { hiddenOut++; continue; }
+                    if (volumeJudge(kv.Key, notHidden, planes)) inScope.Add(kv.Key);
+                    else clippedOut++;
+                    continue;
+                }
 
                 bool pass = false, anyNotHidden = false;
                 foreach (var item in items)

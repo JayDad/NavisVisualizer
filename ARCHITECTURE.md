@@ -84,16 +84,17 @@ Excel (.xlsx/.xls/.xlsb)          OASIS SQL Server ([Navis] 스키마)
   Sub-system 축으로 감싼다 (`SqlLoader.LoadSubSystemElements`). Equipment `SUB-SYSTEM`→TAG NO,
   Piping `Sub-System`→PKGNO. Sub-system 미지정 행은 제외(건수 보고). PKG 노드 색칠이
   하위 스풀/배관을 커버하므로 배관은 PKG 단위로 충분
-- **Sub-system 마스터**: `SqlLoader.LoadSubSystemMaster` ← `[Navis].[SubSystem_Master]`
-  (`SUB-SYSTEM/DESCRIPTION` + `MCC Plan`(계획일) + 마일스톤 실적일 `Walkdown/Partial MCC/MCC/PCC` +
-  `A/B/C-ITR TOTAL·DONE`, `PUNCH A/B TOTAL·CLOSED`, `PJTNO` 필터 — 계약은 CLAUDE.md 11번).
+- **Sub-system 마스터**: `SqlLoader.LoadSubSystemMaster` ← `[Navis].[System_Summary]`
+  (`Sub-System/Sub-System Des` + `MCC Plan`(계획일) + 마일스톤 실적일 `WD/Partial MCC/MCC/PCC Actual` +
+  `A/B/C-ITR Total·Complete`, `A/B Punch Total·Closed`, `PJTNO` 필터 — 실측 스키마는 CLAUDE.md 9·11번).
   요소 로드와 별도 try — **테이블 미구성이면 요소 파생 목록으로 자동 fallback**
   (단계별 가시화 모드만 비활성). MCC 계획일 경과 + P-MCC/MCC 실적 미입력 = `IsDelayed`(지연) —
   색으로는 표시 안 하고(달성 단계 그대로 칠함) 테이블 텍스트·`[MCC 지연 담기]` 버튼·리포트로만 노출
-- EIT Tray / Cable 탭은 OASIS 미지원 — 트레이 진척 테이블 부재, EIT_Cable에 Node 매핑 부재
-  (상세: `docs/SQL_DB_CONNECTION_ANALYSIS.md`)
+- EIT Tray(`EIT_Tray` %기반)·Cable(형상) 탭(`EIT_Cable` — 철자 실측 확정 2026-07)도 OASIS
+  듀얼소스 지원. 구 Cable(Node) 탭은 삭제됨(EIT_Route에 Node 매핑 부재 — CLAUDE.md §9,
+  상세: `docs/SQL_DB_CONNECTION_ANALYSIS.md`)
 
-**이중 소스 UI (`UI/DataSourcePanel.cs`)** — Spool/Hydrotest/Equipment 탭 상단 공용 블록:
+**이중 소스 UI (`UI/DataSourcePanel.cs`)** — Spool/Hydrotest/Equipment/EIT Tray/Cable(형상) 탭 상단 공용 블록:
 - [Excel 로드] [OASIS 로드] + 소스별 ● 상태(건수·출처·시각)
 - "적용 기준" 라디오: 로드된 소스만 활성, 첫 로드 자동 선택. 전환 시 매칭 셋 초기화 +
   적용 이력이 있으면 자동 재적용 (Equipment는 태그 셋 기반 레벨 타겟 인덱스도 재빌드)
@@ -194,7 +195,8 @@ Apply:
 - 각 `Apply*`는 자기 모듈 캐시만 Clear/채움 → 다른 공종 적용 후에도 자기 색 미세조정 가능
 - `Apply*`는 전체 Reset 없이 자기 매칭 아이템만 칠하므로 공종 간 색은 뷰에서 공존
   (Tray 노드와 Cable `-BOX`는 물리적으로 다른 객체)
-- "전체 초기화"만 문서 전체 리셋 (공종별 초기화는 CLAUDE.md 향후 고려사항 7 참조)
+- "전체 가시화 해제"(구 "전체 초기화")만 문서 전체 리셋, "이 탭 가시화 해제"(구 "공종 초기화")는
+  그 공종 누적 painted만 리셋 (CLAUDE.md §10)
 
 **성능 최적화 이력:**
 
@@ -220,16 +222,27 @@ Apply:
 
 ### 6. UI Architecture (`UI/`)
 
-**탭 구성:** Hydrotest | Spool | Equipment | EIT Tray | Cable Pull | Sub-system | Tools
+**탭 구성:** Overview | Hydrotest | Spool | Equipment | EIT Tray | Cable(형상) | Sub-system | 고급 진단(구 Tools)
+(구 Cable Pull/Cable(Node) 노드·박스 집계 탭은 2026-07 삭제 — 고급 진단의 box 중복 검사만 유지)
+
+**Overview 탭 (`UI/OverviewTab.cs`, 첫 화면):**
+- 공종 현황 표: 각 탭이 `IOverviewSource.GetOverviewStatus()`로 노출하는 스냅샷
+  (데이터 소스·건수 / 인덱스 건수 / 3D 적용 상태 / 매칭·미매칭 / 인덱스 스코프·fallback).
+  행 더블클릭 = 해당 탭 이동. 상태 캐시 없음 — Overview 탭 선택 시 자동 재조회 + [새로고침]
+- NWD Preflight: `Services/ScopePreflight.Probe`가 스코프 체인(SPL→HYDROPKG/HYDROPKG/MEQ/EIT/CABLE)별
+  대상 파일 발견 여부를 인덱스 빌드 없이 판정 (ResolveScopeRoots 2단계 매칭의 읽기 전용 미러 —
+  searcher 진단 상태를 안 건드림). 파일명 규약·하드 스코프 불일치를 적용 전에 노출
 
 **공통 패턴 (날짜 기반 탭 동일):**
 - DateTimePicker (기준일, 기본: 오늘)
-- 2열 색상 패널 (색상 피커 + 투명도 드롭다운)
+- 2열 색상 패널 (색상 피커 + 투명도 드롭다운 — 편집 컨트롤은 기본 접힘, `ColorEditCollapse` 토글)
 - 색상 변경 시 증분 업데이트 (캐시 활용)
 - 전체/매칭/미매칭 탭 필터 (건수 표시)
-- 검색 + "매칭 Status 출력" CSV Export
+- 검색 + "매칭 Status 엑셀 출력" CSV Export (저장 완료는 `SaveNotifier` 비모달 알림 — 파일/폴더 열기)
 - ListView 컬럼 정렬 (오름차순/내림차순)
-- 적용 / 전체 초기화 / 속성 쓰기 / Viewpoint 저장 / NWD Export
+- 가시화 적용 / 이 탭·전체 가시화 해제 / 속성 쓰기 / Viewpoint 저장 / NWD Export
+- 가시화 버튼 행의 `ApplyStatePanel`이 3D 적용 상태(미적용/적용됨/업데이트 필요+사유)를 상시 표시
+  — 소스·기준일·단계 체크·선택 변경 시 MarkStale, 적용 시 SetApplied (2026-07 UX audit P0-1)
 
 **Sub-system 탭 (`UI/SubSystemTab.cs`):**
 - OASIS 전용 로드 (단일 소스 — DataSourcePanel 미사용). 요소 + 마스터를 한 번에 로드,

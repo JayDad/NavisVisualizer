@@ -12,7 +12,7 @@ using NavisVisualizer.Visualizers;
 
 namespace NavisVisualizer.UI
 {
-    public class SpoolTab : UserControl
+    public class SpoolTab : UserControl, IOverviewSource
     {
         private readonly MainDockablePanel _main;
 
@@ -49,6 +49,7 @@ namespace NavisVisualizer.UI
         private Button   _btnNwd;
         private Label    _lblStats;
         private Label    _lblUnmatched;   // fixed 미매칭(모델 없음) count, pinned to the corner
+        private ApplyStatePanel _applyState;   // 3D 적용 상태 표시 (데이터↔3D 어긋남 경고 전담)
         private ProgressBar _progressBar;
 
         private int _sortColumn = -1;
@@ -75,6 +76,9 @@ namespace NavisVisualizer.UI
                 Padding = new Padding(4)
             };
 
+            // 색상 패널·기준일 핸들러가 참조하므로 먼저 생성 (버튼 연결은 버튼 행에서).
+            _applyState = new ApplyStatePanel();
+
             _srcPanel = new DataSourcePanel();
             _srcPanel.ExcelLoadClicked    += (s, e) => LoadExcel();
             _srcPanel.TemplateClicked     += (s, e) => ExportInputTemplate();
@@ -99,6 +103,7 @@ namespace NavisVisualizer.UI
                 {
                     FilterList();
                     UpdateStats();
+                    _applyState.MarkStale("기준일 변경");
                 }
             };
             datePanel.Controls.Add(dateLabel);
@@ -113,9 +118,14 @@ namespace NavisVisualizer.UI
             _txtSearch.TextChanged += (s, e) => FilterList();
             searchPanel.Controls.Add(_txtSearch);
 
-            var btnExport = new Button { Text = "매칭 Status 출력", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(8, 1, 8, 1) };
+            var btnExport = new Button { Text = "매칭 Status 엑셀 출력", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(8, 1, 8, 1) };
             btnExport.Click += BtnExport_Click;
             searchPanel.Controls.Add(btnExport);
+
+            // 선택 행(없으면 표시 중인 전체 행)을 클립보드로 복사 — Ctrl+C 대체 버튼.
+            var btnCopy = new Button { Text = "클립보드 복사", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(8, 1, 8, 1) };
+            btnCopy.Click += (s, e) => CopyListToClipboard();
+            searchPanel.Controls.Add(btnCopy);
 
             // Stats row: scoped stage/match stats on the left, the fixed 미매칭(모델 없음)
             // count pinned to the right corner. 미매칭 is data present in Excel/OASIS but
@@ -163,6 +173,8 @@ namespace NavisVisualizer.UI
             _listView.Columns.Add("매칭", 45);
             _listView.SelectedIndexChanged += ListView_SelectedIndexChanged;
             _listView.ColumnClick += ListView_ColumnClick;
+            // ListView는 기본적으로 Ctrl+C를 지원하지 않으므로 공용 헬퍼로 배선.
+            ListViewClipboard.EnableCtrlC(_listView, ShowCopied);
 
             // ListView goes into the first tab, but we'll manage it by moving it
             tabAll.Controls.Add(_listView);
@@ -176,18 +188,19 @@ namespace NavisVisualizer.UI
                 }
             };
 
-            // 1행(가시화): 적용 · 체크 단계 외 숨김
+            // 1행(가시화): 가시화 적용 · 체크 단계 외 숨김 · 3D 적용 상태
             var btnPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 34, AutoSize = true };
-            _btnApply      = new Button { Text = "적용",             Width = 80  };
+            _btnApply      = new Button { Text = "가시화 적용",       Width = 90  };
             _btnHideOthers = new Button { Text = "체크 단계 외 숨김", Width = 140 };
             _btnApply.Click      += BtnApply_Click;
             _btnHideOthers.Click += BtnHideOthers_Click;
-            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnHideOthers });
+            _applyState.AttachApplyButton(_btnApply);
+            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnHideOthers, _applyState });
 
-            // 2행(초기화): 공종 초기화(이 공종 색만) · 전체 초기화(모든 공종)
+            // 2행(해제): 이 탭 가시화 해제(이 공종 색만) · 전체 가시화 해제(모든 공종)
             var btnPanelReset = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 34, AutoSize = true };
-            _btnResetModule = new Button { Text = "공종 초기화", Width = 100 };
-            _btnReset       = new Button { Text = "전체 초기화", Width = 100 };
+            _btnResetModule = new Button { Text = "이 탭 가시화 해제", Width = 130 };
+            _btnReset       = new Button { Text = "전체 가시화 해제", Width = 130 };
             _btnResetModule.Click += BtnResetModule_Click;
             _btnReset.Click       += BtnReset_Click;
             btnPanelReset.Controls.AddRange(new Control[] { _btnResetModule, _btnReset });
@@ -210,6 +223,8 @@ namespace NavisVisualizer.UI
             layout.Controls.Add(colorPanels.fabPanel);
             layout.Controls.Add(new Label { Text = "Install", Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 18 });
             layout.Controls.Add(colorPanels.instPanel);
+            // 색상 편집(▼·투명도)은 기본 접힘 — 체크박스·스와치만 상시 노출 (UX audit P1)
+            layout.Controls.Add(ColorEditCollapse.BuildToggleRow(colorPanels.fabPanel, colorPanels.instPanel));
             layout.Controls.Add(btnPanel);
             layout.Controls.Add(btnPanelReset);
             layout.Controls.Add(btnPanel2);
@@ -251,6 +266,7 @@ namespace NavisVisualizer.UI
                 string label = SpoolStageInfo.Labels[stage];
 
                 var chk             = new CheckBox { Text = label, Checked = true, AutoSize = true };
+                chk.CheckedChanged += (s, e) => _applyState.MarkStale("단계 선택 변경");
                 var colorBox        = new Panel    { Width = 32, Height = 20, BackColor = setting.DisplayColor, BorderStyle = BorderStyle.FixedSingle };
                 var colorBtn        = new Button   { Text = "▼", Width = 22, Height = 20, FlatStyle = FlatStyle.Flat };
                 colorBtn.FlatAppearance.BorderSize = 0;
@@ -325,7 +341,8 @@ namespace NavisVisualizer.UI
             try
             {
                 string path = InputTemplate.ExportSpool();
-                MessageBox.Show($"입력 양식 저장 완료: {path}\n작성 후 Excel 형식(.xlsx)으로 저장해 Import 하세요.");
+                SaveNotifier.ShowSaved(this, "Template 출력", path,
+                    "작성 후 Excel 형식(.xlsx)으로 저장해 Import 하세요.");
             }
             catch (Exception ex)
             {
@@ -383,9 +400,10 @@ namespace NavisVisualizer.UI
             FilterList();
             UpdateStats();
 
-            // 색상이 이전 소스 기준으로 화면에 남아 있으면 경고 — 자동 재색칠은 안 함(§6).
-            if (!willReapply && _appliedOnce && _spools.Count > 0)
-                _lblStats.Text = "⚠ 화면 색상은 이전 소스 기준 — [적용]을 눌러 새 소스로 갱신하세요";
+            // 색상이 이전 소스 기준으로 화면에 남아 있으면 상태 표시기로 경고 —
+            // 자동 재색칠은 안 함(§6). 통계 라벨은 통계만 표시한다 (UX audit P0-1).
+            if (!willReapply)
+                _applyState.MarkStale("데이터 변경");
 
             if (willReapply)
                 BtnApply_Click(null, EventArgs.Empty);
@@ -421,7 +439,7 @@ namespace NavisVisualizer.UI
             string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
                 $"Spool_Compare_{DateTime.Now:yyyyMMdd_HHmmss}.csv");
             File.WriteAllLines(path, lines, new System.Text.UTF8Encoding(true));
-            MessageBox.Show($"비교 결과 저장 완료: {path}");
+            SaveNotifier.ShowSaved(this, "Excel↔OASIS 비교 출력", path);
         }
 
         private void IncrementalUpdate(string stageKey)
@@ -453,7 +471,7 @@ namespace NavisVisualizer.UI
             string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
                 $"Spool_Match_{DateTime.Now:yyyyMMdd_HHmmss}.csv");
             File.WriteAllLines(path, lines, System.Text.Encoding.UTF8);
-            MessageBox.Show($"저장 완료: {path}");
+            SaveNotifier.ShowSaved(this, "매칭 Status 엑셀 출력", path);
         }
 
         private void BuildIndex()
@@ -462,6 +480,8 @@ namespace NavisVisualizer.UI
             if (doc == null) return;
             _progressBar.Style = ProgressBarStyle.Marquee;
             _progressBar.Visible = true;
+            // 단순 marquee만으로는 무엇을 하는지 알 수 없어 단계 문구 병기 (UX audit P0-3)
+            _lblStats.Text = "모델 태그 인덱스 생성 중…";
             Application.DoEvents();
 
             // 레벨 타겟 인덱싱 (Equipment와 동일): 스풀 id가 처음 매칭되는 트리 깊이만
@@ -498,6 +518,7 @@ namespace NavisVisualizer.UI
             _btnApply.Enabled = false;
             _progressBar.Style = ProgressBarStyle.Marquee;
             _progressBar.Visible = true;
+            _lblStats.Text = "색상 적용 중…";
             Application.DoEvents();
             try
             {
@@ -521,9 +542,33 @@ namespace NavisVisualizer.UI
             ReapplyCurrentScope(doc);
 
             _appliedOnce = true;
+            _applyState.SetApplied($"{SourceLabel()} · 기준일 {referenceDate:MM-dd}");
             UpdateTabCounts();
             UpdateStats(result);
             FilterList();
+        }
+
+        private string SourceLabel() =>
+            _srcPanel.ActiveSource == TabDataSource.Oasis ? "OASIS" : "Excel";
+
+        /// <summary>Overview 탭 상태 노출 — 인메모리 조회만 (IOverviewSource).</summary>
+        public OverviewStatus GetOverviewStatus()
+        {
+            bool hasApplied = _matchedSpoolIds.Count > 0 || _unmatchedSpoolIds.Count > 0;
+            return new OverviewStatus
+            {
+                DataLoaded = _spools.Count > 0,
+                DataText = _spools.Count > 0 ? $"{SourceLabel()} {_spools.Count:N0}건" : "미로드",
+                IndexText = _main.SpoolTagSearcher.IsIndexBuilt
+                    ? _main.SpoolTagSearcher.IndexedCount.ToString("N0") : "-",
+                ApplyStateText = _applyState.Text,
+                ApplyStale = _applyState.IsStale,
+                MatchedText = hasApplied ? _matchedSpoolIds.Count.ToString("N0") : "-",
+                UnmatchedText = hasApplied ? _unmatchedSpoolIds.Count.ToString("N0") : "-",
+                UnmatchedCount = hasApplied ? _unmatchedSpoolIds.Count : 0,
+                ScopeNote = _main.SpoolTagSearcher.LastScopeNote ?? "-",
+                ScopeFellBack = _main.SpoolTagSearcher.LastScopeFellBack,
+            };
         }
 
         /// <summary>
@@ -547,12 +592,12 @@ namespace NavisVisualizer.UI
 
             if (_matchedSpoolIds.Count == 0)
             {
-                MessageBox.Show("먼저 적용(가시화)을 실행하세요. 숨김은 매칭된 스풀에 적용됩니다.");
+                MessageBox.Show("먼저 [가시화 적용]을 실행하세요. 숨김은 매칭된 스풀에 적용됩니다.");
                 return;
             }
             if (_needsIndexRebuild || _main.SpoolTagSearcher.NeedsRebuild(doc))
             {
-                MessageBox.Show("모델 또는 데이터 소스가 변경되었습니다. 적용(가시화)을 다시 실행한 뒤 사용하세요.");
+                MessageBox.Show("모델 또는 데이터 소스가 변경되었습니다. [가시화 적용]을 다시 실행한 뒤 사용하세요.");
                 return;
             }
 
@@ -609,12 +654,12 @@ namespace NavisVisualizer.UI
                 var doc = _main.GetDocument();
                 if (doc == null || _matchedSpoolIds.Count == 0)
                 {
-                    MessageBox.Show("먼저 적용(가시화)을 실행하세요. 집계 범위는 매칭된 항목에 적용됩니다.");
+                    MessageBox.Show("먼저 [가시화 적용]을 실행하세요. 집계 범위는 매칭된 항목에 적용됩니다.");
                     return;
                 }
                 if (_needsIndexRebuild || _main.SpoolTagSearcher.NeedsRebuild(doc))
                 {
-                    MessageBox.Show("모델 또는 데이터 소스가 변경되었습니다. 적용(가시화)을 다시 실행한 뒤 범위를 선택하세요.");
+                    MessageBox.Show("모델 또는 데이터 소스가 변경되었습니다. [가시화 적용]을 다시 실행한 뒤 범위를 선택하세요.");
                     return;
                 }
 
@@ -700,7 +745,7 @@ namespace NavisVisualizer.UI
             }
         }
 
-        /// <summary>공종 초기화: 이 탭(Spool) 색만 제거 — 다른 공종 색은 유지. 숨김도 복원.</summary>
+        /// <summary>이 탭 가시화 해제: 이 탭(Spool) 색만 제거 — 다른 공종 색은 유지. 숨김도 복원.</summary>
         private void BtnResetModule_Click(object sender, EventArgs e)
         {
             var doc = _main.GetDocument();
@@ -712,7 +757,8 @@ namespace NavisVisualizer.UI
                 _btnHideOthers.Text = "체크 단계 외 숨김";
             }
             _main.OverrideEngine.ResetModule(doc, VisualModule.Spool);
-            _lblStats.Text = "공종 초기화 완료 (Spool 색만 제거)";
+            _lblStats.Text = "이 탭 가시화 해제 완료 (Spool 색만 제거)";
+            _applyState.SetCleared();
         }
 
         private void BtnReset_Click(object sender, EventArgs e)
@@ -727,8 +773,9 @@ namespace NavisVisualizer.UI
                 _btnHideOthers.Text = "체크 단계 외 숨김";
             }
             _main.OverrideEngine.Reset(doc);
-            _lblStats.Text = "전체 초기화 완료";
+            _lblStats.Text = "전체 가시화 해제 완료";
             _lblUnmatched.Text = "";
+            _applyState.SetCleared();
         }
 
         private void BtnViewpoint_Click(object sender, EventArgs e)
@@ -775,6 +822,14 @@ namespace NavisVisualizer.UI
             if (collection.Count == 0) return;
             doc.CurrentSelection.CopyFrom(collection);
             doc.ActiveView.FocusOnCurrentSelection();
+        }
+
+        /// <summary>[클립보드 복사] 버튼 → 공용 헬퍼 호출 후 결과 표시.</summary>
+        private void CopyListToClipboard() => ShowCopied(ListViewClipboard.CopySelectedOrAll(_listView));
+
+        private void ShowCopied(int n)
+        {
+            if (n > 0) _lblStats.Text = $"클립보드에 {n}행 복사됨";
         }
 
         private void ListView_ColumnClick(object sender, ColumnClickEventArgs e)

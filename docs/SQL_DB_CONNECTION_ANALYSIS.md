@@ -277,3 +277,6 @@ SQL 조인/뷰가 키당 여러 행을 주면 리스트 중복, 통계 이중 �
 `A-ITR DONE`→`A-ITR Complete`, `PUNCH A TOTAL`→`A Punch Total`). 추가로 `Area`/`System`/`MCC Fcst`/
 `PCC Plan`/`%` 컬럼 신설. Sub-system 탭 적용 시 `LoadSubSystemMaster`의 테이블명+컬럼 재매핑 필요.
 (이번 3-탭 범위 밖 — 별도 진행.)
+
+> **[해결됨 2026-07]** `LoadSubSystemMaster`가 `[Navis].[System_Summary]` 실측 컬럼으로 재매핑됨
+> (CLAUDE.md §9·§11 참조). Windows 실 서버 검증만 잔여.

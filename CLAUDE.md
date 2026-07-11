@@ -44,6 +44,13 @@ BuildIndexForTags / BuildIndexForBoxes에 `NwdScope` 파라미터, null = 전체
 - 3중 자동 fallback (규약 깨져도 동작 유지): 체인 전체 대상 모델 없음 / Equipment 스코프 내
   태그 미발견 / 스코프 인덱스 0건 → 전체 모델 재인덱싱. `LastScopeNote`/`LastScopeFellBack`로
   노출되어 각 탭 매칭 Status CSV `인덱스 스코프` 행 + Tools 탭 박스 중복 검사에서 확인 가능
+- **하드 스코프(`BuildIndex(..., hardScope: true)` — 2026-07)**: EIT Tray 탭은 "EIT nwd에서만"이
+  요구라 위 전체-모델 fallback을 끈다. 스코프 파일 미발견/인덱스 0건이어도 전체 트리를 walk하지
+  않고 빈 인덱스 + 진단 노트("하드 스코프: 전체 fallback 안 함 — 파일명 규약 확인")를 남긴다
+  (federated 매칭이 어긋날 때 전 트리 순회로 인한 지연 방지 — EIT 적용 최다 지연 대책의 짝).
+  `EitTrayTab`·`SubSystemTab` EIT EQ 빌드 둘 다 hardScope(ElecTagSearcher 공유 인스턴스라 일관 유지).
+  스코프 키워드 "EIT"는 granular 복수 파일명(`05-02-01_..._EIT_Tray`, `05-02-02_LQRooms_EIT_Tray`)을
+  전부 부분일치로 수집 — `ResolveScopeRoots`가 전 모델 순회라 파일 수 무관.
 
 **잔여 / 주의**
 - **Windows 실측 검증 필요**: federated NWD를 열었을 때 하위 파일이 `doc.Models` 복수로
@@ -58,8 +65,11 @@ BuildIndexForTags / BuildIndexForBoxes에 `NwdScope` 파라미터, null = 전체
 **[해결됨] digit 보유 파일 노드로 인한 조기 정지**
 federated 구조에서 `MEBTray1.nwc`(파일명에 digit)가 `/SM/MEB/ELEC` → `/.../PCVTRAY`(digit 없는 범주) 위에 있으면, "tag-like인데 자식에 digit 없음 → STOP"이 depth 1에서 발동해 하위 ELEC 트레이가 통째로 미인덱싱 → 매칭 0건이 되던 문제. 현재 `WalkAndIndex`는 tag-like 노드라도 **구조 컨테이너(geometry 없고 자식 있는 자식)**가 있으면 계속 내려가고, 자식이 전부 geometry leaf일 때만 정지하도록 수정됨.
 
-**[잔여] 과다 방문**
-`/CM/PDA/ELEC/PCVTRAY-STW`처럼 digit 없는 범주 노드 바로 아래에 geometry가 직접 붙으면, 그 노드는 애초에 tag-like가 아니라 정지 로직을 안 타고 geometry까지 방문. 단일 NWD에서 최적화가 필요하면 `BuildIndexForTrayIds`(Equipment의 `BuildIndexForTags`와 동일 방식)를 추가하는 방안 검토.
+**[해결됨 2026-07 — Windows 검증 대기] 과다 방문 (EIT Tray 가시화 적용이 가장 느렸던 원인)**
+`/CM/PDA/ELEC/PCVTRAY-STW`처럼 digit 없는 범주 노드 바로 아래에 geometry가 직접 붙으면, 그 노드는 tag-like가 아니라서 정지 게이트를 안 타고 **geometry 서브트리 전체를 COM으로 순회**했다. EIT nwd(트레이+소형기기+서포트)는 이 구조가 많아 ElecTagSearcher 일반 walk(= EIT Tray 탭 첫 [적용])가 전 탭에서 가장 느렸다. `WalkAndIndex`의 하강 게이트("자식 중 tag-like 또는 구조 컨테이너가 있을 때만 하강, 전부 geometry면 정지")를 **비태그 노드에도 동일 적용**해 geometry 숲 진입을 차단 — 일반 walk를 쓰는 모든 searcher(Hydro/ElecTag/SubSystem)가 공통 수혜.
+- **전제(기존 태그 노드 정지 규칙과 동일)**: 태그는 컴포지트 노드 이름이며 geometry 인스턴스 아래에는 없다. Navisworks에서 `HasGeometry`는 leaf 인스턴스에서만 true라 컴포지트는 구조 컨테이너로 계속 하강된다.
+- **리스크(Windows 실측 대조 필요)**: 종전엔 digit 보유 **geometry 노드 이름도 인덱싱**됐다. 만약 어떤 모델이 태그를 컴포지트가 아닌 geometry leaf 이름에만 갖고 있으면 이제 미매칭이 된다 — 매칭 건수를 수정 전과 대조할 것. 인덱스 0건이면 기존 3중 fallback이 동작하나 부분 누락은 못 잡는다(§2 레벨 타겟과 동일 성격).
+- **[전환됨 2026-07 — Windows 검증 대기] EIT Tray = 레벨 타겟으로 전환**: general walk가 여전히 느려(자식 스캔 비용) `EitTrayTab.BuildIndex`를 `BuildIndex`→`BuildIndexForTags(trayIdSet, EIT, hardScope: true)`로 교체. "매칭 깊이 인덱싱 → 하위 geometry 트리 무시 → 옆으로"라 general walk의 자식 스캔이 사라짐. Sub-system EIT EQ가 별개 사유 searcher로 분리되면서 ElecTagSearcher는 이제 EIT Tray 전용 → 공유 충돌 없음. 소스 전환 시 `_needsIndexRebuild`(레벨 타겟은 트레이 셋 기반). **리스크(ELEC 트리 깊이 불균일 — MEBTray 사례)**: 트레이가 여러 깊이에 섞이면 첫 매칭 깊이만 인덱싱 → 일부 미색칠. Windows에서 general walk 시절 매칭 건수와 대조 필수. 되돌리려면 `BuildIndex(doc, NwdScope.EitTray, hardScope: true)` 한 줄로 복귀.
 
 **[변경됨] Spool 인덱스 = 레벨 타겟으로 전환 (2026-07 — 성능 극대화)**
 2만 스풀 기준 general `WalkAndIndex`가 스풀마다 "하강할지" 판단하려고 자식(전부 geometry인 경우 끝까지)을 COM으로 스캔 → 첫 빌드 ~1분. `SpoolTab.BuildIndex`를 `BuildIndex(NwdScope.Spool)`에서 **`BuildIndexForTags(spoolIdSet, NwdScope.Spool)`**(Equipment와 동일 레벨 타겟)로 교체. 스풀 id가 처음 매칭되는 깊이만 `IndexAtDepth`로 인덱싱하고 그 노드의 geometry 자식은 아예 안 건드림 → 자식 스캔 비용 제거.
@@ -292,14 +302,30 @@ EIT_Cable, EIT_EQ, EIT_Route, EIT_Tray, Mech_EQ, Piping_HydrotestPKG, Piping_Spo
 - **EIT Tray**: 진척 테이블 `[Navis].[EIT_Tray]` **존재 확인**(`BRANCH NO.`/`TRAY Install %`/`PJTNO`).
   단 **날짜 컬럼 없음**(`Tray install date` 부재) → 기준일 필터 불가, %기반 현재상태 판정으로 로더 설계 필요.
   `BRANCH NO.` 선행 `/` → `NormalizeId` 적용. (이번 3-탭 범위 밖.)
-- **Cable**: `[Navis].[EIT_Cable]`에 여전히 Node 컬럼 부재. `[Navis].[EIT_Route]`(ROUTE↔CABLE_NO)가
-  생겼으나 홉 순서(SEQ) + ROUTE→트레이NodeId 변환이 없어 노드단위 집계 불가 — CableTab 대공사 필요(보류).
-  날짜(`PULLING START/END`, `FROM/TO CONN`)는 신설됨. `PULLING LTH` 의미(실적 vs 발주)도 확인 필요.
+  **후행 `.` 장식(2026-07 실측)**: DB TRAY ID가 `X.`처럼 끝에 '.'이 붙은 행이 있어 매칭 실패 —
+  `EitTrayData.NormalizeId`가 후행 '.'도 제거하도록 수정(+ Sql/Excel 로더 중복 제거를 정규화 키로).
+  모델 DisplayName엔 이 장식이 없다는 가정 — 모델 쪽에도 붙어 있으면 인덱스 키 정규화 확장 필요.
+- **Cable**: **[부분 해결 — Cable(형상) 탭 개통]** `EIT_Cable` 컬럼 철자 실측 확정(2026-07 사용자
+  제공: 날짜 4개는 ` DATE` 접미사 — `PULLING START/END DATE`, `FROM/TO CONN DATE`) →
+  `SqlLoader.LoadCable` 철자 교체 + 표시 필드(FROM/TO MODULE·EQUIP, TYPE/CORE/SIZE, OUT DIA,
+  TRAY SYS, SYSTEM, Pulling %) 매핑 + `CableLineTab` DataSourcePanel 듀얼소스 배선 완료.
+  `PULLING LTH`는 샘플상 포설 실적 길이로 보이나(0/189=0%, 37/37=100%) 오너 확정 전까지 표시 전용
+  유지(§13-6). 프로젝트 컬럼 없음 → 전체 로드. 미사용: INSTALL_MODULE, SYSTEM DES, SUB-SYSTEM(+DES).
+  **노드단위 집계는 폐기 — Cable(Node) 탭 삭제(2026-07 사용자 결정)**: `EIT_Route`에 홉 순서
+  (SEQ)·NodeId 변환이 없어 개통 불가였고 형상 탭이 역할을 대체. `ApplyCable`/`CableNodeData`/
+  `CableStage`/`LoadCablePull`/노드 필터포커스·박스숨김 일괄 제거. Tools 탭 box 중복 검사(§5)와
+  `CableBoxSearcher`는 유지(박스 생성 매크로 QA — 탭과 무관).
 - **EIT_EQ**: `[Navis].[EIT_EQ]` 컬럼 확장됨 — `WRKDTE`→`INSTALL DTE`(설치 실적일), `SUB-SYSTEM` +
-  AITR/Punch 수치 보유. 단일 단계(미착수/설치완료) + TagSearcher 재사용 유력. Sub-system 요소 편입도 가능.
-- **System_Summary = SubSystem_Master 대체**: 실 DB엔 `SubSystem_Master` 없음. `[Navis].[System_Summary]`가
-  마스터 역할이나 컬럼명 전면 상이(§11 계약과 불일치) → 현 `LoadSubSystemMaster`는 예외. Sub-system 탭
-  적용 시 테이블명+컬럼 재매핑 필요(부록 참조).
+  AITR/Punch 수치 보유. **Sub-system 요소로 편입됨(2026-07 — §11)**: 단일 단계(미착수/설치완료) +
+  ElecTagSearcher 재사용. 전용 탭 신설은 여전히 미정(AITR/Punch 수치 미사용).
+- **System_Summary = SubSystem_Master 대체**: **[해결됨]** 실 DB엔 `SubSystem_Master` 없음 —
+  `LoadSubSystemMaster`를 `[Navis].[System_Summary]` 실측 스키마(2026-07 사용자 제공)로 재매핑 완료.
+  매핑: `Sub-System`→SubSystemNo / `Sub-System Des`→Description / `MCC Plan` 동일 /
+  `WD Actual`→Walkdown / `Partial MCC Actual`→P-MCC / `MCC Actual`→MCC / `PCC Actual`→PCC /
+  `A-ITR Total·Complete` 등 ITR 3종 / `A·B Punch Total·Closed`. 프로젝트 필터 = `PJTNO`(기존 유지).
+  **미사용 컬럼(확장 후보)**: `Area`/`System`/`System Des`(상위 그룹핑 축), `PCC Plan`/`MCC Fcst`
+  (계획·예측일 — 현재 지연 판정은 MCC Plan만 사용), `%` 계열(Total/Complete 수치로 대체 가능해 제외).
+  §11의 CREATE TABLE 계약은 폐기 — 실 테이블이 이미 존재.
 
 ### 10. 공종(모듈)별 초기화 — 메커니즘 구현됨 (Spool 배선, 나머지 탭 잔여)
 
@@ -321,8 +347,9 @@ EIT_Cable, EIT_EQ, EIT_Route, EIT_Tray, Mech_EQ, Piping_HydrotestPKG, Piping_Spo
   `ResetAllPermanentMaterials`.
 
 **잔여**:
-- Cable/Sub-system 탭 `Apply*`에 `ResetModule`+`AccumulatePainted` 미이식(누적 문제 잔존) +
-  공종 초기화 버튼 미배치. Cable은 색+숨김+필터포커스+cable캐시까지 리셋해야 해 별도 설계.
+- ~~Cable(Node) 탭 `ApplyCable` 이식~~ — **탭 삭제(2026-07)로 소멸** (§9 Cable 참조).
+  (Sub-system은 2026-07 `ApplySubSystem`에 이식 완료 — §11. Sub-system/Cable(형상)/EIT Tray의
+  `공종 초기화` 버튼 배치는 잔여.)
 
 **설계 메모(유지)**:
 - API: `DocumentModels.ResetPermanentMaterials(ModelItemCollection)` (아이템 단위 리셋).
@@ -341,7 +368,7 @@ Piping `Sub-System`→PKGNO, 미지정 행 제외 + 건수 보고). 매칭은 �
 재사용 (Equipment 태그도 digit 포함 정확 일치라 전체 워크 인덱스로 조회됨 —
 EquipmentSearcher의 레벨 타겟 인덱스는 건드리지 않음).
 
-- **마스터 기준 목록**: `[Navis].[SubSystem_Master]` 로드 성공 시 좌측 목록 = 마스터 ∪
+- **마스터 기준 목록**: `[Navis].[System_Summary]` 로드 성공 시 좌측 목록 = 마스터 ∪
   요소 파생 (요소 0건은 회색, 마스터 외 요소 그룹은 "(마스터 외)" + 건수 진단).
   **테이블 미구성이면 요소 파생 목록으로 자동 fallback** + 단계 모드 비활성.
 - **가시화 2모드**: ① Sub-system 단계별 — 선택한 sub-system의 요소 전체가 그 sub-system의
@@ -367,43 +394,51 @@ EquipmentSearcher의 레벨 타겟 인덱스는 건드리지 않음).
   다중 선택 + 더블클릭 지원. 체크박스 방식에서 전환됨.
 - CSV 현황 리포트(8번 단기안): 헤더 블록 + 요약(Description/단계/ITR/Punch 병기) + 상세.
 
-**마스터 테이블 계약 (제안 — DB 생성 시 이 형태로)**
-```sql
-CREATE TABLE [Navis].[SubSystem_Master](
-  [PJTNO]        varchar(10)   NOT NULL,  -- 프로젝트 필터 (EQ 계열과 동일 컬럼명)
-  [SUB-SYSTEM]   varchar(20)   NOT NULL,  -- 요소 테이블의 SUB-SYSTEM/Sub-System 값과 일치
-  [DESCRIPTION]  nvarchar(200) NULL,
-  [MCC Plan]     date NULL,               -- MCC 계획일 (핵심 기점) — 지연 판정 기준
-  [Walkdown]     date NULL,               -- 이하 마일스톤 실적일 (지난 날짜 = 달성)
-  [Partial MCC]  date NULL,               -- 별도 RFCC 없음 — MCC/P-MCC = Ready for Commissioning
-  [MCC]          date NULL,               -- MCC 실적일 (계획일과 별개)
-  [PCC]          date NULL,
-  [A-ITR TOTAL]  int NULL, [A-ITR DONE]     int NULL,  -- ITR: 카테고리별 전체/완료 수
-  [B-ITR TOTAL]  int NULL, [B-ITR DONE]     int NULL,
-  [C-ITR TOTAL]  int NULL, [C-ITR DONE]     int NULL,
-  [PUNCH A TOTAL] int NULL, [PUNCH A CLOSED] int NULL, -- Punch: 전체/종결 수 (open = 차)
-  [PUNCH B TOTAL] int NULL, [PUNCH B CLOSED] int NULL,
-  CONSTRAINT PK_SubSystem_Master PRIMARY KEY ([PJTNO],[SUB-SYSTEM]));
+**마스터 테이블 = `[Navis].[System_Summary]` (실측 스키마 — 구 SubSystem_Master 계약 폐기)**
 ```
+Area, System, System Des, Sub-System, Sub-System Des,
+PCC Plan, PCC Actual, MCC Plan, MCC Fcst, WD Actual, Partial MCC Actual, MCC Actual,
+A-ITR Total, A-ITR Complete, A-ITR%, B-ITR Total, B-ITR Complete, B-ITR%,
+C-ITR Total, C-ITR Complete, C-ITR%,
+A Punch Total, A Punch Closed, A Punch %, B Punch Total, B Punch Closed, B Punch %, PJTNO
+```
+- 마일스톤 실적일 = `WD/Partial MCC/MCC/PCC Actual`, 지연 판정 기준 = `MCC Plan` (Fcst·PCC Plan 미사용).
+- 미사용 컬럼: `Area`/`System`/`System Des`(상위 그룹핑 확장 후보), `MCC Fcst`/`PCC Plan`, `%` 계열.
 - 컬럼명을 바꾸면 `SqlLoader.LoadSubSystemMaster`의 SELECT만 같이 수정 (명시 매핑이라 즉시 오류로 드러남).
 - ITR/Punch가 수치가 아니라 %로 오면 GetInt 대신 ParsePercentage 계열 추가 검토 (§2.2 스케일 함정 참조).
 - 화면 표기는 전부 "완료(종결)/전체" — 좌측 테이블 A-ITR/B-ITR/C-ITR/P.A/P.B 컬럼 + 리포트 요약.
 - `MCC Plan` 미보유(null)면 지연 판정 안 함 — 계획일 없는 sub-system은 지연 대상에서 제외.
-- 마일스톤 날짜가 실적일인지 계획일인지: `MCC Plan`만 계획, 나머지(Walkdown/P-MCC/MCC/PCC)는 실적 가정.
+- 마일스톤 날짜 성격은 실 컬럼명으로 확정 — `MCC Plan`만 계획, 나머지는 `Actual` 접미사(실적일).
 
 **확장 잔여 (결정/데이터 대기)**
-- **마스터 테이블 실물 생성/적재**: 위 계약으로 DB에 생성 + OASIS 적재 파이프라인은
-  데이터 오너 몫. 마일스톤 날짜가 실적일인지 계획일인지 확정 필요 (현재 로직은 실적일 가정).
+- **마스터 로더 Windows 실측 검증**: `System_Summary` 재매핑(2026-07) 후 실 서버 대상
+  로드·지연 판정 확인. 날짜 컬럼이 varchar로 오면 `GetDate` 문자열 파싱 경로로 처리됨(yyyy-MM-dd 확인됨).
 - **Spool 단위 sub-system**: 현재 배관은 PKG 노드 색칠이 하위 스풀을 커버. 개별 스풀
   granularity가 필요해지면 `Piping_Spool`에 Sub-System 컬럼 계약 확정 후
   `LoadSubSystemElements`에 추가 (Discipline enum 확장).
-- **EIT Tray / Cable 편입**: OASIS 테이블 자체가 없음 — 9번 항목 해소 후 동일 패턴으로 추가.
+- **EIT EQ / Cable 편입**: **[구현됨 2026-07 — Windows 검증 대기]** 요소 4공종으로 확장.
+  `LoadSubSystemElements`가 `EIT_EQ`(TAG NO/INSTALL DTE 단일 단계 미착수·설치완료)·
+  `EIT_Cable`(CABLE NO/날짜 4종, SUB-SYSTEM 실측 확정)을 공종별 try/catch로 편입
+  (컬럼 미구성 시 그 공종만 제외 + 라벨 사유). **EIT Tray는 편입 안 함 — EIT_Tray에
+  Sub-system 매핑 컬럼이 없음(2026-07 사용자 확정). 컬럼 추가 시 EIT EQ 패턴으로 재편입.**
+  ApplySubSystem에 §10 ResetModule/AccumulatePainted도 이식(선택 축소 재적용 잔존 해결).
+- **공종별 1:1 스코프 + 레벨 타겟 (2026-07 재설계 — Windows 검증 대기)**: 구 설계는 Equipment+Piping을
+  한 `SubSystemSearcher`(union 스코프 MEQ·SPL·HYDROPKG) **general walk**로 묶어 부정확·저속이었다.
+  **각 공종이 자기 nwd 하나만 자기 태그 셋으로 레벨 타겟**하도록 분리 — Equipment=MEQ / Piping=HYDROPKG /
+  EIT EQ=EIT / Cable=CABLE, 전부 `BuildIndexForTags(..., hardScope: true)`(그 nwd에서만, general walk 없음).
+  각 공종이 별개 태그 셋이라 4개 **사유(私有) searcher**를 `SubSystemTab`이 소유(다른 탭·서로 공유 불가) —
+  엔진 `ApplySubSystem`은 `Func<Discipline, Searcher>` 리졸버(`SearcherFor`)를 주입받아 엔진이 searcher를
+  안 들고 있음. 구 `SubSystemSearcher`/`SubSystemCableSearcher`/`SearcherForSubSystem`/`NwdScope.SubSystem`
+  모두 제거. 인덱스 최신성은 탭의 `IndexStale(doc)`(데이터 재로드 `_needsIndexRebuild` + 모델 sig)로 판정.
+  리포트 `인덱스 스코프` 행은 공종별 노트 결합(`ScopeNotes`) — 공종마다 fallback 여부 개별 확인.
+  **§2 리스크(수용)**: 레벨 타겟은 첫 매칭 깊이만 인덱싱 — 요소가 여러 깊이에 섞이면 일부 미매칭.
+  Spool/Equipment/Cable이 이미 수용한 리스크와 동일. Windows에서 general walk 시절과 매칭 건수 대조.
 - **Excel 소스**: 미지원 (OASIS 전용). 필요 시 DataSourcePanel 이중 소스로 확장 —
   Excel에 Sub-system 컬럼 계약이 먼저.
 - **집계 범위(ScopePanel) 미배선** — 필요 시 7번 공용 컴포넌트 그대로 연결 가능.
 - **팔레트 색 사용자 지정 없음** (자동 배정만). 색은 선택 순서 기준 배정, 세션 내 유지.
-- **선택 축소 후 재적용 시 이전 색 잔존**: 다른 탭과 동일한 10번 공통 문제 (해제된
-  sub-system의 색은 `전체 초기화`로만 제거됨).
+- **선택 축소 후 재적용 시 이전 색 잔존**: **[해결됨 2026-07]** `ApplySubSystem`에 §10
+  ResetModule/AccumulatePainted 이식 — 재적용 시 직전 누적분 원복 후 현재 선택만 재도색.
 - 우측 테이블 `매칭` 열과 리포트의 매칭 O/X는 **마지막 [적용] 스냅샷** 기준 — 적용에
   포함되지 않았던 sub-system은 "-" 표시 (미적용 상태에서 O로 찍히는 기존 탭 결함을 답습하지 않음).
 
@@ -467,12 +502,115 @@ CREATE TABLE [Navis].[SubSystem_Master](
 - **형상은 정적**: 케이블 선분을 **1회 추출·캐시**, `[적용]`마다 캐시 선분에 볼륨 술어만
   재계산. **캐시하는 건 형상이지 판정 결과 아님**(L2 준수 — 판정은 라이브 볼륨으로 매번).
 - **AABB 사전 배제**: 케이블 `BoundingBox`가 볼륨과 안 겹치면 선분 루프 스킵.
+  **[버그였음 → 수정 2026-07]** 초기 구현은 pre-cull을 **세그먼트 추출 후**(추출된 세그먼트의
+  AABB로) 수행해 첫 배치에서 2만 케이블 전부 COM 추출이 일어났다 — "clash 엄청 느림"의 원인.
+  `CableClashService.PassesVolume`이 미캐시 케이블은 **관리형 `BoundingBox()`(COM 왕복 없는
+  사전 계산값)로 먼저 배제**하고 볼륨과 겹치는 후보만 추출하도록 순서 교정. 배제된 케이블은
+  캐시하지 않음(다른 볼륨에서 후보가 되면 그때 추출). 진단 카운터 `LastPreCulled` 신설 —
+  clash CSV의 `bbox 사전배제/추출/세그AABB배제` 행에서 pre-cull이 먹는지 확인.
 
 #### (E) 통합 지점 / Windows 검증
 - `ScopeFilter` 케이블 분기의 `BoundingBox().Center` 판정을 **선분-vs-볼륨 clash로 교체**.
   통과 케이블 → 리스트/CSV/코너 카운트 반영.
 - 검증: 좌표/단위 일치(COM 정점 ↔ 볼륨 공간), 회전 프래그먼트 행렬 규약, coord 0/1-based,
   wireframe 세로 레일 존재 가정.
+
+### 13. Cable(형상) 탭 재정향 + Tray 탭 OASIS 연결 (구현됨 — Windows 검증 대기)
+
+> 사용자 결정(2026-07): 아래 6개 결정 전부 추천대로 확정 → 한 번에 구현.
+> **(A) 케이블 형상 중심 Cable 탭**(신설 `CableLineTab` — `07_Trion_All_Cable.nwd`의 cable-no
+> 컴포넌트를 직접 매칭·하이라이트·단면 clash) + **(B) EIT nwd 전용 Tray 탭**(기존 `EitTrayTab`에
+> OASIS 연결·§10·3행 버튼 마무리). "Windows 실측" 표시 항목은 리눅스 컴파일 불가라 실기 검증 후 확신 가능.
+
+**확정 결정**
+1. ~~기존 노드/박스 `Cable Pull` 탭 = 유지·개명 (`Cable(Node)`)~~ → **번복: 탭 삭제(2026-07
+   사용자 결정, §9 Cable 참조)**. DB(EIT_Route)에 홉순서·NodeId 맵이 없어 개통 불가였고 형상
+   탭이 대체. Cable 탭 = 형상 탭 단일. 추가로 형상 탭에 **Excel 케이블 리스트 필터**(`리스트
+   필터 Import` — Cable No 목록 파일로 리스트+3D를 그 부분집합만 표시, 토글) 신설.
+2. 형상 탭 stage = **신규 enum `CableLineStage`** 별도 정의(레거시 `CableStage` 불변 — 재정의는
+   `CableDefaults`·`ApplyCable`·노드탭을 깸).
+3. clash(단면 통과) 출력 = **리스트 + CSV만**(3D 색칠 안 함 — §7 "집계는 좁혔는데 색은 전체" 방지).
+4. 겹침 완화 기본 = **숨김 기반 isolate**(2만 케이블에서 투명 dim은 프레임레이트 붕괴 — SpoolTab 실측).
+5. Tray = **OASIS 듀얼소스 추가**(DataSourcePanel, Excel↔OASIS).
+6. OASIS 진척 색 배선 = **Excel 우선**. `EIT_Cable`의 `PULLING LTH`/`FROM·TO CONN` 날짜가 실적/계획
+   미확정이라 길이·%는 색에 배선 안 함(표시 전용). 데이터 오너 확정 후 stage 날짜 배선.
+
+**핵심 통찰**: 형상 재정향이 EIT_Cable DB 차단(§9 "노드 route 부재")을 무관화 — cable-no를 컴포넌트에
+직접 매칭하므로 노드 route가 애초에 불필요. Tray는 신규가 아니라 완성(기존 EitTrayTab이 이미 EIT
+스코프·Install% 3단계).
+
+**Cable(형상) 탭 아키텍처**
+- **매칭**: 신규 `CableLineSearcher`(7번째 `ModelItemSearcher`) — `BuildIndexForTags(cableNoSet,
+  NwdScope.Cable)` 레벨 타겟(2만 케이블은 스풀 규모 → general walk 자식 스캔 비용 회피). `CableBoxSearcher`
+  재사용 불가(box 인덱스는 `-BOX` 접두 키). `NwdScope.Cable`(키워드 "CABLE") 재사용. 소스 전환 시
+  `_needsIndexRebuild`(레벨 타겟은 태그 셋 기반, Spool 패턴).
+- **Stage**: 날짜 기반 4단계 `미착수/포설중/포설완료/결선완료`(`GetStageAtDate` 역순 스캔). Pulling=PULLING
+  START, Pulled=PULLING END, Terminated=`FROM CONN`·`TO CONN` **둘 다** 있을 때 Max(AND 게이트).
+  **하이라이트 우선 모드**: 로드 데이터에 stage 날짜가 전무하면(맨 Excel 목록) stage 계산 우회 →
+  매칭 케이블을 단색 solid 하이라이트로 칠함(안 그러면 전 케이블이 미착수=70% 투명 회색 = 하이라이트 반대).
+- **clash**: 신규 `Services/CableClashService` — 케이블 world 세그먼트 **형상만 캐시**(모델당 정적, doc-id
+  무효화), 판정은 매 [적용]마다 live `GetActiveClipPlanes`로 재계산(L2). AABB pre-cull + Cyrus–Beck
+  세그먼트-vs-반평면(축정렬 박스 6반평면 + Planes 모드 한 구현). `GeometryProbe.ExtractWorldSegments`
+  분리(컨테이너→geometry leaf 하강). ScopeFilter의 ClippingVolume 분기에 cableNo-keyed volume-judge
+  델리게이트 주입(타 탭 null → BoundingBox 중점 유지). `이 단면 지나가는 케이블 추출` 버튼 + scope-aware CSV.
+- **겹침 완화 UX**: 3행 버튼(가시화/초기화/출력). `체크 단계 외 숨김`·`선택 케이블만 보기`(SetHidden isolate,
+  상호배타), `필터 포커스`(투명 dim, 작은 히트셋만). List↔3D 양방향 선택 sync(조상 walk로 cable-no 해석).
+- **§10**: `VisualModule.CableLine` 신규 멤버(레거시 `Cable`과 캐시 충돌 방지). `ApplyCableLines`는 처음부터
+  ResetModule/AccumulatePainted 채택. focus·isolate는 override/hide라 AccumulatePainted가 안 잡으므로
+  ResetModule 전에 별도 해제.
+
+**Tray 탭 마무리 (재작성 아님)**
+- `EitTrayTab`에 `DataSourcePanel`(Excel↔OASIS) + `SqlLoader.LoadEitTray`(`[Navis].[EIT_Tray]` —
+  `BRANCH NO.`/`TRAY Install %`/`PJTNO`, **날짜 컬럼 없음 → %기반 현재상태**, `dtpReference` 비활성 유지).
+  `%` 스케일 파서(`85`/`0.85`/`"85%"`→0.85) 필수(§2.2). SourceComparer는 Stage/Install%만 diff.
+- `ApplyEit`에 §10 ResetModule/AccumulatePainted 이식(재적용 누적 버그) + `cache.Clear()` 유지.
+- 3행 버튼(`체크 단계 외 숨김`·`공종 초기화`) + 낡은 주석(`Cable 포설중`) 삭제.
+
+**Windows 검증 게이트(착수 직후)**
+1. **[최우선]** cable 컴포넌트 DisplayName이 Excel/OASIS CABLE NO와 trim/case 후 정확 일치인가(장식
+   문자 있으면 레벨 타겟 0 매칭 → `NormalizeCableNo` 추가). Tools `Cable Vertex 진단`으로 실 DisplayName 덤프.
+2. 케이블 모델링 깊이 단일/혼재(레벨 타겟은 첫 깊이만 — 혼재 시 일부 미색칠, general walk 베이스라인과 대조).
+3. 좌표/단위 일치(추출 world 세그 ↔ clip-box JSON) — 덤프 `AnySegmentClips` 열로 술어 calibration.
+4. 컨테이너 vs leaf 하강 깊이. 회전 박스는 `GetActiveClipPlanes` null→COM fallback(축정렬만 우선).
+5. `TRAY Install %` 스케일·`PJTNO` 필터, 선택 sync `HashSet<ModelItem>` 동등성(§7 미검증).
+
+**Phase**: 0(진단 refactor·DisplayName 실측) → 1(Excel-only 출하: 형상 탭·clash·Tray 마무리) →
+2(OASIS 로더 `LoadCable`/`LoadEitTray`·회전 박스). `LoadCable` 철자는 실 스키마로 확정·배선 완료
+(2026-07 — §9 Cable 참조), Phase 2 잔여는 회전 박스뿐.
+
+### 14. UX Audit 반영 (2026-07 — 구현됨, Windows 검증 대기)
+
+master 기준 UX audit의 항목별 판정·근거·보류 목록은 **`docs/UX_AUDIT_REVIEW.md`** 참조. 반영분:
+
+- **3D 적용 상태 표시 `UI/ApplyStatePanel.cs`** (audit P0-1): 가시화 버튼 행에 `3D: 미적용 /
+  {기준}·시각 적용됨 / ⚠ 3D 업데이트 필요(사유)` 라벨 + stale 시 [가시화 적용] 버튼 배경 강조.
+  6개 탭 전부 배선 — MarkStale 트리거는 소스 전환/재로드·기준일·단계 체크·(Sub-system) 선택/모드.
+  기존 `_lblStats`에 얹던 ⚠ 경고 문구는 전부 제거 (**통계 라벨은 통계만** — 경고가 통계를 덮어쓰던
+  문제 해소). 색/투명도 변경은 증분 즉시 반영이라 stale 아님.
+- **버튼 명칭 통일** (P0-2): `적용`→`가시화 적용`(전 탭), ScopePanel `적용`→`범위 적용`,
+  `공종 초기화`→`이 탭 가시화 해제`, `전체 초기화`→`전체 가시화 해제`(§6 "초기화 오독" 취지 실현),
+  `매칭 Status 출력`→`매칭 Status 엑셀 출력`(§6 결정 반영). 버튼명 인용 안내문도 일괄 갱신.
+  §10의 버튼 행 구성 표기는 이 명칭으로 대체됨.
+- **긴 작업 단계 문구** (P0-3 부분): marquee에 `모델 태그 인덱스 생성 중…`/`색상 적용 중…` 병기.
+  Hydrotest/Equipment/Sub-system 색칠 구간에 진행바 자체도 추가(Spool §10과 동일 try/finally).
+  건수/경과/중단은 보류 — 진행 콜백 설계 메모는 리뷰 문서에.
+- **색상 편집 접기 `UI/ColorEditCollapse.cs`** (P1): 기본 접힘 — 체크박스+스와치만 노출, ▼·투명도는
+  토글로. 탭 빌더 무수정(패널 트리 walk로 ComboBox·"▼"만 Visible 토글).
+- **저장 알림 `UI/SaveNotifier.cs`** (P2): CSV 저장 완료 MessageBox → 비모달 창(파일 열기/폴더 열기).
+- **Tools 탭 → "고급 진단"** 명칭 변경(P2 부분), **EIT Tray 기준일 행 제거**(비활성 노출 중단 —
+  날짜 컬럼 확보 시 §3 패턴으로 복원), Sub-system 검색폭 88→120 + **`이 탭 가시화 해제` 버튼 신설**
+  (§10 잔여 해소 — `ResetModule(VisualModule.SubSystem)`).
+- **Overview 탭 `UI/OverviewTab.cs` + `Services/ScopePreflight.cs`** (P1 — 후속 1순위였던 것,
+  사용자 요청으로 구현): 첫 번째 탭. ① 공종 현황 표 — 6개 탭이 `IOverviewSource.GetOverviewStatus()`
+  로 {데이터 소스·건수 / 인덱스 건수 / 3D 적용 상태(ApplyStatePanel의 IsStale·Text 재사용) /
+  매칭·미매칭 / 인덱스 스코프 노트·fallback}을 노출, 행 더블클릭 = 그 탭으로 이동.
+  ② NWD Preflight — `ScopePreflight.Probe`가 ResolveScopeRoots의 2단계 매칭(모델 파일명 →
+  파일 노드 depth≤3)을 **읽기 전용으로 미러링**해 인덱스 빌드 없이 스코프 파일 발견 여부 판정
+  (searcher의 LastScopeNote를 안 건드리는 별도 구현 — 점검이 진단값을 덮으면 안 됨).
+  상태 캐시 없음(L2 취지) — Overview 탭 선택 시 자동 재조회 + [새로고침].
+- **보류(후속 우선순위)**: ① 진행 콜백+중단, ② DPI/반응형(Windows 실측 병행 필수),
+  ③ 리스트·통계 통합, ④ Sub-system 선택 UX 재설계(§11 dual-list는 최근 사용자 결정이라 실사용 후),
+  ⑤ empty-state 체크리스트(Overview가 정보원 — 각 탭 오류 메시지에 이식), ⑥ 언어 통일.
 
 ## 레슨런 (하드 트러블슈팅 기록 — 다시 헤매지 말 것)
 
