@@ -183,7 +183,8 @@ namespace NavisVisualizer.UI
             statsRow.Controls.Add(_lblStats);
             statsRow.Controls.Add(_lblUnmatched);
 
-            var searchPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 28, AutoSize = false };
+            // 버튼·안내 라벨이 많아 한 줄을 넘으므로 줄바꿈 허용 (버튼 행들과 동일 패턴)
+            var searchPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 28, AutoSize = true };
             searchPanel.Controls.Add(new Label { Text = "검색(Cable/Equip):", AutoSize = true, Padding = new Padding(0, 4, 0, 0) });
             _txtSearch = new TextBox { Width = 170 };
             // 리스트 필터는 debounce로만, 3D 필터 포커스 재적용은 Enter로만 (성능 audit P0 —
@@ -203,7 +204,8 @@ namespace NavisVisualizer.UI
             searchPanel.Controls.Add(_txtSearch);
             _chkFocus = new CheckBox { Text = "필터 포커스", AutoSize = true, Padding = new Padding(6, 5, 0, 0) };
             _chkFocus.CheckedChanged += ChkFocus_CheckedChanged;
-            new System.Windows.Forms.ToolTip().SetToolTip(_chkFocus,
+            var tips = new System.Windows.Forms.ToolTip();
+            tips.SetToolTip(_chkFocus,
                 "검색 결과 외 케이블을 투명 처리합니다.\n검색어를 바꾼 뒤에는 Enter로 3D에 반영하세요 (키 입력마다 재적용하지 않음 — 성능).");
             searchPanel.Controls.Add(_chkFocus);
             var btnClash = new Button { Text = "이 단면 지나가는 케이블 추출", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(6, 0, 6, 0) };
@@ -211,7 +213,17 @@ namespace NavisVisualizer.UI
             searchPanel.Controls.Add(btnClash);
             _btnListFilter = new Button { Text = "리스트 필터 Import", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(6, 0, 6, 0) };
             _btnListFilter.Click += BtnListFilter_Click;
+            tips.SetToolTip(_btnListFilter,
+                "가시화하고 싶은 케이블 리스트(Cable No 목록 Excel)를 불러와 리스트와 3D를 그 부분집합만 표시합니다 (재클릭 = 해제).");
             searchPanel.Controls.Add(_btnListFilter);
+            // 버튼명만으로는 용도가 안 보여 상시 안내 병기 (사용자 요청 2026-07)
+            searchPanel.Controls.Add(new Label
+            {
+                Text = "← 가시화하고 싶은 케이블 리스트 입력",
+                ForeColor = Color.Gray,
+                AutoSize = true,
+                Padding = new Padding(0, 5, 6, 0),
+            });
             var btnExport = new Button { Text = "매칭 Status 엑셀 출력", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(6, 0, 6, 0) };
             btnExport.Click += BtnExport_Click;
             searchPanel.Controls.Add(btnExport);
@@ -280,6 +292,19 @@ namespace NavisVisualizer.UI
             layout.Controls.Add(statsRow);
             layout.Controls.Add(searchPanel);
             layout.Controls.Add(_scopePanel);
+            // Cable의 Clipping 영역은 타 공종(BoundingBox 중심점 판정)과 달리 형상 선분
+            // clash(선분-vs-볼륨)로 판정한다 — 케이블은 start–end가 이어진 긴 형상이라
+            // 중심점이 볼륨 밖이어도 몸통이 단면을 관통하면 집계된다. 이 차이를 화면에서
+            // 바로 알 수 있게 상시 remark로 노출 (사용자 요청 2026-07).
+            layout.Controls.Add(new Label
+            {
+                Text = "※ Clipping 영역: 단면 볼륨을 통과(관통)하는 케이블이 집계됩니다 — " +
+                       "케이블은 start–end가 이어진 형상이라 타 공종(중심점 판정)과 다르게 동작합니다.",
+                ForeColor = Color.Gray,
+                Dock = DockStyle.Fill,
+                Height = 30,
+                AutoSize = false,
+            });
             layout.Controls.Add(_tabFilter);
 
             Controls.Add(layout);

@@ -527,6 +527,7 @@ A Punch Total, A Punch Closed, A Punch %, B Punch Total, B Punch Closed, B Punch
    사용자 결정, §9 Cable 참조)**. DB(EIT_Route)에 홉순서·NodeId 맵이 없어 개통 불가였고 형상
    탭이 대체. Cable 탭 = 형상 탭 단일. 추가로 형상 탭에 **Excel 케이블 리스트 필터**(`리스트
    필터 Import` — Cable No 목록 파일로 리스트+3D를 그 부분집합만 표시, 토글) 신설.
+   버튼 옆 상시 안내 라벨 "← 가시화하고 싶은 케이블 리스트 입력" + 툴팁 병기(2026-07 사용자 요청).
 2. 형상 탭 stage = **신규 enum `CableLineStage`** 별도 정의(레거시 `CableStage` 불변 — 재정의는
    `CableDefaults`·`ApplyCable`·노드탭을 깸).
 3. clash(단면 통과) 출력 = **리스트 + CSV만**(3D 색칠 안 함 — §7 "집계는 좁혔는데 색은 전체" 방지).
@@ -553,6 +554,8 @@ A Punch Total, A Punch Closed, A Punch %, B Punch Total, B Punch Closed, B Punch
   세그먼트-vs-반평면(축정렬 박스 6반평면 + Planes 모드 한 구현). `GeometryProbe.ExtractWorldSegments`
   분리(컨테이너→geometry leaf 하강). ScopeFilter의 ClippingVolume 분기에 cableNo-keyed volume-judge
   델리게이트 주입(타 탭 null → BoundingBox 중점 유지). `이 단면 지나가는 케이블 추출` 버튼 + scope-aware CSV.
+  ScopePanel 하단에 상시 remark 노출(2026-07 사용자 요청): Cable의 Clipping 영역 = 단면 볼륨을 **통과**하는
+  케이블 집계 — start–end가 이어진 형상이라 타 공종(중심점 판정)과 다르게 동작함을 화면에 명시.
 - **겹침 완화 UX**: 3행 버튼(가시화/초기화/출력). `체크 단계 외 숨김`·`선택 케이블만 보기`(SetHidden isolate,
   상호배타), `필터 포커스`(투명 dim, 작은 히트셋만). List↔3D 양방향 선택 sync(조상 walk로 cable-no 해석).
 - **§10**: `VisualModule.CableLine` 신규 멤버(레거시 `Cable`과 캐시 충돌 방지). `ApplyCableLines`는 처음부터
