@@ -206,22 +206,25 @@ namespace NavisVisualizer.Searchers
 
                 var roots = ResolveScopeRoots(doc, scope, hardScope);
 
-                // Step 1: Find the depth where first tag match occurs
-                // (depth는 각 루트 기준 상대값 — 탐지와 인덱싱이 같은 roots를 쓰므로 일관됨)
-                int targetDepth = FindTagDepthInRoots(roots, normalizedTags);
+                // 루트(파일)별로 태그 깊이를 따로 탐지해 그 루트만 그 깊이로 인덱싱한다.
+                // (구 구현은 첫 발견 깊이 하나를 전 루트에 공통 적용 — federated에서 파일별
+                //  트리 깊이가 다르면 깊이가 다른 파일의 항목이 조용히 미매칭됐다: 2차 audit P1.
+                //  루트 "안"에서 여러 깊이에 태그가 섞인 경우의 첫-깊이 한정은 §2 리스크 그대로.)
+                var depths = new List<int>();   // 태그가 발견된 루트들의 깊이 (진단용)
+                int rootsWithoutTags = IndexRootsAtOwnDepth(roots, normalizedTags, depths);
 
-                // 스코프 모델 안에서 태그를 못 찾으면 스코프 오판 가능성 — 전체 모델로 재탐지 (하드 스코프 제외)
-                if (targetDepth < 0 && !hardScope && scope != null && !LastScopeFellBack && _lastScopeNarrowed)
+                // 스코프 모델 어디서도 태그를 못 찾으면 스코프 오판 가능성 — 전체 모델로 재탐지 (하드 스코프 제외)
+                if (depths.Count == 0 && !hardScope && scope != null && !LastScopeFellBack && _lastScopeNarrowed)
                 {
                     roots = new List<ModelItem>();
                     foreach (var model in doc.Models)
                         roots.Add(model.RootItem);
                     LastScopeFellBack = true;
                     LastScopeNote = $"스코프 {scope.Label}: 태그 미발견 → 전체 모델 fallback";
-                    targetDepth = FindTagDepthInRoots(roots, normalizedTags);
+                    rootsWithoutTags = IndexRootsAtOwnDepth(roots, normalizedTags, depths);
                 }
 
-                if (targetDepth < 0)
+                if (depths.Count == 0)
                 {
                     if (hardScope)
                     {
@@ -240,28 +243,56 @@ namespace NavisVisualizer.Searchers
                 }
                 else
                 {
-                    // Step 2: Index only at the target depth
-                    foreach (var root in roots)
-                        IndexAtDepth(root, 0, targetDepth, normalizedTags);
+                    // 진단: 루트 간 깊이 상이·태그 없는 루트는 노트로 드러낸다 (조용한 누락 방지).
+                    var distinct = depths.Distinct().OrderBy(d => d).ToList();
+                    if (distinct.Count > 1)
+                        LastScopeNote = (LastScopeNote ?? "") + $" · 루트별 태그 깊이 상이({string.Join(",", distinct)})";
+                    if (rootsWithoutTags > 0)
+                        LastScopeNote = (LastScopeNote ?? "") + $" · 태그 없는 루트 {rootsWithoutTags}개 제외";
                 }
 
                 _isBuilt = true;
                 perf.Items = _index.Count;
-                perf.Note = $"depth={targetDepth} · {LastScopeNote}";
+                perf.Note = $"depth={(depths.Count > 0 ? string.Join(",", depths.Distinct().OrderBy(d => d)) : "-1")} · {LastScopeNote}";
             }
         }
 
         /// <summary>
-        /// 태그가 있는 가장 얕은 깊이를 level-order(BFS)로 찾는다 (성능 audit 4-1).
+        /// 각 루트에서 태그 깊이를 BFS로 찾아 그 루트만 그 깊이로 인덱싱한다.
+        /// 태그가 안 나온 루트는 건너뛰고(인덱싱 안 함) 그 개수를 반환한다.
+        /// 발견된 깊이는 <paramref name="depths"/>에 누적 (진단용).
+        /// </summary>
+        private int IndexRootsAtOwnDepth(List<ModelItem> roots, HashSet<string> normalizedTags, List<int> depths)
+        {
+            int rootsWithoutTags = 0;
+            foreach (var root in roots)
+            {
+                int depth = FindTagDepthInRoot(root, normalizedTags);
+                if (depth >= 0)
+                {
+                    depths.Add(depth);
+                    IndexAtDepth(root, 0, depth, normalizedTags);
+                }
+                else
+                {
+                    rootsWithoutTags++;
+                }
+            }
+            return rootsWithoutTags;
+        }
+
+        /// <summary>
+        /// 한 루트 안에서 태그가 있는 가장 얕은 깊이를 level-order(BFS)로 찾는다 (성능 audit 4-1).
         /// 구 DFS는 첫 분기가 태그 없는 대형 geometry 서브트리면 그 안을 깊이 한도(20)까지
         /// 헛순회한 뒤에야 다음 분기로 넘어갔다 — BFS는 얕은 깊이부터 전 분기를 확인하므로
         /// 대상 깊이 위쪽 노드만 방문한다(= IndexAtDepth가 어차피 방문할 집합).
         /// 태그가 여러 깊이에 있으면 가장 얕은 깊이가 결정적으로 선택된다
         /// (구 DFS는 순회 순서에 따라 달라짐 — "첫 매칭 깊이만 인덱싱" 리스크 자체는 §2 그대로).
+        /// 루트 간 깊이 차이는 호출부(IndexRootsAtOwnDepth)가 루트별 탐지로 흡수한다.
         /// </summary>
-        private int FindTagDepthInRoots(List<ModelItem> roots, HashSet<string> normalizedTags)
+        private int FindTagDepthInRoot(ModelItem root, HashSet<string> normalizedTags)
         {
-            var current = new List<ModelItem>(roots);
+            var current = new List<ModelItem> { root };
             for (int depth = 0; depth <= 20 && current.Count > 0; depth++)
             {
                 var next = new List<ModelItem>();
@@ -500,13 +531,27 @@ namespace NavisVisualizer.Searchers
             return false;
         }
 
-        private string GetDocumentId(Document doc)
+        private string GetDocumentId(Document doc) => DocumentFingerprint(doc);
+
+        /// <summary>
+        /// 문서 지문 — 인덱스/형상 캐시 최신성 판정의 공용 기준 (SubSystemTab·CableClashService 공유).
+        /// 경로+모델 수만으로는 "같은 개수로 모델 교체"를 구분 못 해(2차 audit P1) 모델별 파일명까지
+        /// 포함한다. 단, **같은 파일 재로드**는 지문이 같아 여기로는 못 잡는다 — 그 경우는
+        /// MainDockablePanel의 문서 이벤트(ActiveDocumentChanged/FileNameChanged) 무효화가 담당.
+        /// </summary>
+        public static string DocumentFingerprint(Document doc)
         {
             try
             {
-                string path = doc.FileName ?? "";
-                int modelCount = doc.Models.Count;
-                return $"{path}|{modelCount}";
+                var sb = new System.Text.StringBuilder();
+                sb.Append(doc.FileName ?? "").Append('|').Append(doc.Models.Count);
+                foreach (var model in doc.Models)
+                {
+                    string fn = null;
+                    try { fn = model.FileName; } catch { /* 일부 모델은 FileName 조회 실패 가능 */ }
+                    sb.Append('|').Append(fn ?? model.RootItem?.DisplayName ?? "?");
+                }
+                return sb.ToString();
             }
             catch
             {

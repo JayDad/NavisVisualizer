@@ -1,3 +1,4 @@
+using System;
 using System.Windows.Forms;
 using Autodesk.Navisworks.Api;
 using NavisVisualizer.Searchers;
@@ -52,12 +53,84 @@ namespace NavisVisualizer.UI
         private SubSystemTab _subSystemTab;
         private ToolsTab _toolsTab;
 
+        /// <summary>
+        /// 문서 이벤트(문서 전환·같은 파일 재로드)로 모든 인덱스가 무효화됐을 때 발생.
+        /// 자기 searcher/캐시를 사유(私有)하는 탭(SubSystemTab의 공종별 4개, CableLineTab의
+        /// clash 형상 캐시)이 구독해 함께 리셋한다 — 지문 비교(DocumentFingerprint)로는
+        /// "같은 파일 재로드"를 못 잡기 때문(2차 audit P1: 오래된 ModelItem 캐시 재사용 위험).
+        /// </summary>
+        public event Action IndexesInvalidated;
+
+        // FileNameChanged 구독 중인 문서 (활성 문서 전환 시 재배선)
+        private Document _hookedDoc;
+
         public MainDockablePanel()
         {
             OverrideEngine = new ColorOverrideEngine(
                 SpoolTagSearcher, HydroTagSearcher, ElecTagSearcher,
                 EquipmentSearcher, CableLineSearcher);
             InitializeComponent();
+            HookDocumentEvents();
+        }
+
+        /// <summary>
+        /// 문서 전환/재로드 시 인덱스 자동 무효화 배선. Navisworks는 같은 Document 인스턴스를
+        /// 재사용하며 파일을 갈아끼우므로, 지문이 같아지는 "같은 파일 다시 열기"는 이벤트로만
+        /// 잡을 수 있다. 이벤트 미지원 환경(Automation 등)이어도 지문 비교(NeedsRebuild)는
+        /// 그대로 동작하므로 구독 실패는 조용히 무시한다.
+        /// </summary>
+        private void HookDocumentEvents()
+        {
+            try
+            {
+                Autodesk.Navisworks.Api.Application.ActiveDocumentChanged += OnActiveDocumentChanged;
+                HookFileNameChanged(GetDocument());
+            }
+            catch { /* 이벤트 미지원 환경 — 지문 비교만으로 동작 */ }
+        }
+
+        private void OnActiveDocumentChanged(object sender, EventArgs e)
+        {
+            try { HookFileNameChanged(GetDocument()); } catch { }
+            InvalidateIndexes();
+        }
+
+        private void HookFileNameChanged(Document doc)
+        {
+            if (_hookedDoc == doc) return;
+            if (_hookedDoc != null)
+            {
+                try { _hookedDoc.FileNameChanged -= OnDocFileNameChanged; } catch { }
+            }
+            _hookedDoc = doc;
+            if (doc != null)
+            {
+                try { doc.FileNameChanged += OnDocFileNameChanged; } catch { }
+            }
+        }
+
+        private void OnDocFileNameChanged(object sender, EventArgs e) => InvalidateIndexes();
+
+        /// <summary>패널 소유 searcher 전부 리셋 + 사유 캐시 보유 탭들에 통지.</summary>
+        private void InvalidateIndexes()
+        {
+            SpoolTagSearcher.Reset();
+            HydroTagSearcher.Reset();
+            ElecTagSearcher.Reset();
+            EquipmentSearcher.Reset();
+            CableBoxSearcher.Reset();
+            CableLineSearcher.Reset();
+            IndexesInvalidated?.Invoke();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                try { Autodesk.Navisworks.Api.Application.ActiveDocumentChanged -= OnActiveDocumentChanged; } catch { }
+                HookFileNameChanged(null);
+            }
+            base.Dispose(disposing);
         }
 
         private void InitializeComponent()

@@ -61,10 +61,8 @@ namespace NavisVisualizer.UI
             }
         }
 
-        private static string DocSig(Autodesk.Navisworks.Api.Document doc)
-        {
-            try { return $"{doc?.FileName}|{doc?.Models.Count}"; } catch { return "?"; }
-        }
+        private static string DocSig(Autodesk.Navisworks.Api.Document doc) =>
+            doc == null ? "?" : ModelItemSearcher.DocumentFingerprint(doc);
 
         /// <summary>인덱스가 현재 데이터·모델 기준으로 최신인가 (아니면 [적용] 시 재빌드).</summary>
         private bool IndexStale(Autodesk.Navisworks.Api.Document doc) =>
@@ -163,6 +161,20 @@ namespace NavisVisualizer.UI
             _stageSettings = CloneDefaults(ColorSetting.SubSystemStageDefaults);
             _progressSettings = CloneDefaults(ColorSetting.ProgressDefaults);
             InitializeComponent();
+            // 문서 전환/같은 파일 재로드 → 사유 searcher 4개도 함께 무효화 (2차 audit P1 —
+            // 지문이 같아지는 재로드는 이벤트로만 잡힌다). 다음 [적용]에서 IndexStale이 재빌드.
+            _main.IndexesInvalidated += OnIndexesInvalidated;
+            this.Disposed += (s, e) => _main.IndexesInvalidated -= OnIndexesInvalidated;
+        }
+
+        private void OnIndexesInvalidated()
+        {
+            _indexBuilt = false;
+            _indexSig = null;
+            _eqSearcher.Reset();
+            _pipingSearcher.Reset();
+            _eitEqSearcher.Reset();
+            _cableSearcher.Reset();
         }
 
         private void InitializeComponent()

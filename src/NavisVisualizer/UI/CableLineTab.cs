@@ -100,8 +100,17 @@ namespace NavisVisualizer.UI
             _volumeJudge = (cableNo, items, planes) =>
                 _clash.PassesVolume(cableNo, items, planes, _main.SectionSvc.KeepPositiveSide);
             InitializeComponent();
-            this.HandleDestroyed += (s, e) => UnsubscribeSelection();
+            // 문서 전환/같은 파일 재로드 → clash 형상 캐시(세그먼트·bbox)도 무효화 (2차 audit P1 —
+            // 같은 파일 재로드는 지문이 안 바뀌어 EnsureFresh로는 못 잡는다).
+            _main.IndexesInvalidated += OnIndexesInvalidated;
+            this.HandleDestroyed += (s, e) =>
+            {
+                UnsubscribeSelection();
+                _main.IndexesInvalidated -= OnIndexesInvalidated;
+            };
         }
+
+        private void OnIndexesInvalidated() => _clash.Invalidate();
 
         private void InitializeComponent()
         {

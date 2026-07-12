@@ -678,7 +678,43 @@ UI/3D에 그리지 않는 것")은 타당함을 확인.
   인덱싱·hardScope 내 general walk·pre-cull 미캐시·Excel 중복 미제거·propVec 반복 생성)은
   전부 코드와 일치. "OASIS 로드 UI 정지"도 사실이나 marquee+버튼 비활성으로 이미 완화돼 있음.
 - (부수 발견) `ExcelLoaderTests`의 Hydrotest 테스트 2건이 구 스키마(`HydrotestStatus`/`SpoolIds`)
-  참조로 현재 모델과 불일치 — 테스트 프로젝트가 컴파일되지 않는 기존 문제. 정리 필요.
+  참조로 현재 모델과 불일치 — 테스트 프로젝트가 컴파일되지 않는 기존 문제. → **2차 audit 대응에서
+  해결** (아래).
+
+**2차 audit 대응 (2026-07 — 같은 브랜치 후속 커밋)**
+
+2차 audit 5개 발견을 1차 반영분과 대조: P1 "검색/포커스 응답성"과 P1 "Excel 중복"은 1차에서
+이미 반영됨(2차 audit이 master 기준이라 재검출된 것). 신규 반영 3건 + 테스트 복구:
+- **[P1] 루트별 태그 깊이 인덱싱** (`IndexRootsAtOwnDepth`): 구 구현은 첫 발견 깊이 하나를
+  전 루트에 공통 적용 — federated에서 **파일별 트리 깊이가 다르면** 항목이 조용히 미매칭.
+  루트(파일)마다 BFS로 자기 깊이를 찾아 그 루트만 그 깊이로 인덱싱. 진단: 루트 간 깊이 상이
+  ("루트별 태그 깊이 상이(3,5)")·태그 없는 루트 개수를 LastScopeNote에 병기, PerfLog depth도
+  복수 표기. **한 루트 안의 복수 깊이 혼재는 §2 리스크 그대로** (첫/최소 깊이만).
+- **[P1] 인덱스 최신성 강화** 2중:
+  ① 지문 강화 — `ModelItemSearcher.DocumentFingerprint`(공용 static): 경로+모델 수에 **모델별
+  파일명 추가** → 같은 개수 모델 교체 감지. SubSystemTab.DocSig·CableClashService.DocId도 공유.
+  ② 이벤트 무효화 — **같은 파일 재로드는 지문이 안 바뀌므로** MainDockablePanel이
+  `Application.ActiveDocumentChanged` + 활성 문서 `FileNameChanged`를 구독(전환 시 재배선,
+  Dispose 시 해제), 발생 시 소유 searcher 6개 Reset + `IndexesInvalidated` 이벤트 발신.
+  SubSystemTab(사유 searcher 4개)·CableLineTab(clash 형상 캐시 `Invalidate()`)이 구독.
+  이벤트 미지원 환경은 try/catch로 무시 — 지문 비교만으로 종전 수준 동작.
+  **Windows 검증**: 두 이벤트 멤버 존재(컴파일)와 같은 파일 재로드 시 재빌드 동작.
+- **[P2] Overview preflight 안내 수정**: 미발견 시 전 스코프에 "전체 fallback"으로 표기하던
+  것을 하드 스코프(EIT)는 "매칭 0건 (하드 스코프)"로 분리 + Sub-system 공종별 인덱스가 전부
+  하드 스코프라는 안내문 추가 (실동작-안내 불일치 해소).
+- **테스트 컴파일 복구**: stale Hydrotest 테스트 2건을 현행 스키마(StageDates) 기반 생성 파일
+  테스트로 교체(+중복 first-wins 테스트) — 테스트 프로젝트가 다시 컴파일 가능. TestData의
+  구 xlsx는 미참조로 남음(무해).
+
+**2차 audit 중 의도적 홀드 (재확인)**
+- **UI 스레드 동기 인덱싱/로드·취소 불가**: Navisworks API는 UI(STA) 스레드 전용이라 인덱싱
+  자체는 background 불가. Excel/SQL 로드만 background 후보 — WinForms 스레딩 검증 필요라
+  1차와 동일하게 PerfLog 실측 후 착수. 진행 콜백+중단 버튼은 UX audit 보류 목록(§14 ①)과 동일 항목.
+- **UI 탭 크기(800~1,300줄)·화면/상태/데이터 결합**: 타당하나 대규모 리팩터링 — Windows 실기
+  검증으로 현 동작을 고정한 뒤 별도 라운드에서 (기능 변경과 섞으면 회귀 원인 분리가 안 됨).
+- **순수 로직 CI 분리**: 현 csproj가 Windows 전용 Autodesk DLL을 참조해 그대로는 CI 불가.
+  Autodesk 비의존 파일(DataModels/Loaders/NwdScope/PerfLog 등)을 별도 netstandard/net48
+  프로젝트로 쪼개는 구조 변경이 선행 — 테스트 컴파일 복구(이번)로 착수 조건은 갖춰짐, 분리는 별도 결정.
 
 ## 레슨런 (하드 트러블슈팅 기록 — 다시 헤매지 말 것)
 

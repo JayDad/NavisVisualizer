@@ -62,14 +62,17 @@ namespace NavisVisualizer.UI
         private static readonly Color BadColor = Color.FromArgb(200, 40, 40);
         private static readonly Color OkColor = Color.FromArgb(0, 120, 40);
 
-        /// <summary>Preflight로 점검할 공종 스코프 (공종 라벨, 스코프 체인).</summary>
-        private static readonly (string Label, NwdScope Scope)[] PreflightScopes =
+        /// <summary>Preflight로 점검할 공종 스코프 (공종 라벨, 스코프 체인, 하드 스코프 여부).
+        /// Hard = 그 탭이 hardScope로 빌드 — 미발견 시 전체 fallback이 아니라 인덱스 0건이
+        /// 된다 (EIT Tray). Equipment/Hydrotest/Cable은 자기 탭에선 soft지만 Sub-system 탭의
+        /// 공종별 인덱스로는 하드 — 하단 안내문으로 보완.</summary>
+        private static readonly (string Label, NwdScope Scope, bool Hard)[] PreflightScopes =
         {
-            ("Spool",              NwdScope.Spool),      // SPL→HYDROPKG 체인
-            ("Hydrotest",          NwdScope.Hydrotest),
-            ("Equipment",          NwdScope.Equipment),
-            ("EIT Tray / EIT EQ",  NwdScope.EitTray),
-            ("Cable",              NwdScope.Cable),
+            ("Spool",              NwdScope.Spool,     false),   // SPL→HYDROPKG 체인
+            ("Hydrotest",          NwdScope.Hydrotest, false),
+            ("Equipment",          NwdScope.Equipment, false),
+            ("EIT Tray / EIT EQ",  NwdScope.EitTray,   true),
+            ("Cable",              NwdScope.Cable,     false),
         };
 
         public OverviewTab(MainDockablePanel main)
@@ -163,10 +166,11 @@ namespace NavisVisualizer.UI
             layout.Controls.Add(new Label
             {
                 Text = "※ 미발견이어도 하드 스코프가 아닌 탭은 전체 모델 fallback으로 동작합니다 (속도만 손해).\n" +
-                       "   EIT(하드 스코프)는 미발견 시 매칭 0건 — 파일명 규약을 먼저 확인하세요.",
+                       "   EIT(하드 스코프)는 미발견 시 매칭 0건 — 파일명 규약을 먼저 확인하세요.\n" +
+                       "   Sub-system 탭의 공종별 인덱스(MEQ/HYDROPKG/EIT/CABLE)는 전부 하드 스코프 — 미발견 공종은 매칭 0건.",
                 ForeColor = Color.Gray,
                 Dock = DockStyle.Fill,
-                Height = 32
+                Height = 46
             });
 
             Controls.Add(layout);
@@ -232,7 +236,7 @@ namespace NavisVisualizer.UI
         {
             _lvNwd.BeginUpdate();
             _lvNwd.Items.Clear();
-            foreach (var (label, scope) in PreflightScopes)
+            foreach (var (label, scope, hard) in PreflightScopes)
             {
                 var item = new ListViewItem(label) { UseItemStyleForSubItems = false };
                 if (doc == null)
@@ -248,9 +252,11 @@ namespace NavisVisualizer.UI
                     try { r = ScopePreflight.Probe(doc, scope); }
                     catch { r = new ScopePreflight.Result { ChainLabel = ChainLabelOf(scope) }; }
                     item.SubItems.Add(r.ChainLabel);
+                    // 하드 스코프는 미발견 시 전체 fallback이 아니라 인덱스 0건 (2차 audit P2 —
+                    // 실동작과 안내 불일치 수정).
                     var verdict = item.SubItems.Add(r.Found
                         ? $"✓ 발견 ({r.MatchedTier}, {r.Files.Count}개)"
-                        : "✕ 미발견 → 전체 fallback");
+                        : (hard ? "✕ 미발견 → 매칭 0건 (하드 스코프)" : "✕ 미발견 → 전체 모델 fallback"));
                     verdict.ForeColor = r.Found ? OkColor : BadColor;
                     item.SubItems.Add(string.Join(", ", r.Files));
                 }

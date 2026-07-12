@@ -54,6 +54,16 @@ namespace NavisVisualizer.Services
             }
         }
 
+        /// <summary>
+        /// 캐시 강제 무효화 — 같은 파일 재로드처럼 지문이 안 바뀌는 문서 이벤트에서 호출
+        /// (MainDockablePanel.IndexesInvalidated 배선). 다음 EnsureFresh가 새로 캐시한다.
+        /// </summary>
+        public void Invalidate()
+        {
+            _cache.Clear();
+            _cacheDocId = null;
+        }
+
         public void ResetBatchCounters()
         {
             LastExtracted = 0; LastCulled = 0; LastPreCulled = 0;
@@ -160,10 +170,7 @@ namespace NavisVisualizer.Services
             LastExtracted++;
         }
 
-        private static string DocId(Document doc)
-        {
-            try { return $"{doc?.FileName}|{doc?.Models.Count}"; }
-            catch { return Guid.NewGuid().ToString(); }
-        }
+        private static string DocId(Document doc) =>
+            doc == null ? "" : Searchers.ModelItemSearcher.DocumentFingerprint(doc);
     }
 }

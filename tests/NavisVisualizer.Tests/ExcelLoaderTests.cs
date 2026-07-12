@@ -15,28 +15,97 @@ namespace NavisVisualizer.Tests
             Path.Combine(Path.GetDirectoryName(typeof(ExcelLoaderTests).Assembly.Location),
                          "TestData");
 
-        [TestMethod]
-        public void LoadHydrotest_ParsesStatusSheet()
-        {
-            var path = Path.Combine(TestDataDir, "hydrotest_sample.xlsx");
-            var packages = ExcelLoader.LoadHydrotest(path);
+        // (구 LoadHydrotest_ParsesStatusSheet / ParsesMappingSheet는 삭제됨 — 구 스키마
+        //  HydrotestStatus/SpoolIds를 참조해 테스트 프로젝트 컴파일을 깨던 stale 테스트.
+        //  현행 스키마(TestPackageData.StageDates)는 아래 생성 파일 기반 테스트가 커버.)
 
-            Assert.AreEqual(3, packages.Count);
-            Assert.AreEqual(HydrotestStatus.Completed,  packages.First(p => p.TestPkgId == "HTP-001").Status);
-            Assert.AreEqual(HydrotestStatus.NotStarted, packages.First(p => p.TestPkgId == "HTP-002").Status);
-            Assert.AreEqual(HydrotestStatus.Recovery,   packages.First(p => p.TestPkgId == "HTP-003").Status);
+        [TestMethod]
+        public void LoadHydrotest_ParsesStageDates()
+        {
+            var path = CreateHydrotestTestFile();
+            try
+            {
+                var packages = ExcelLoader.LoadHydrotest(path);
+
+                Assert.AreEqual(2, packages.Count);
+
+                var p1 = packages.First(p => p.TestPkgId == "HTP-001");
+                Assert.AreEqual("0201-00", p1.SystemNo);
+                Assert.AreEqual("OF", p1.LineService);
+                Assert.AreEqual(new DateTime(2025, 6, 1), p1.StageDates[HydrotestStage.Review]);
+                Assert.AreEqual(new DateTime(2025, 6, 20), p1.StageDates[HydrotestStage.Hydrotest]);
+
+                Assert.AreEqual(HydrotestStage.NotStarted, p1.GetStageAtDate(new DateTime(2025, 5, 1)));
+                Assert.AreEqual(HydrotestStage.Review, p1.GetStageAtDate(new DateTime(2025, 6, 5)));
+                Assert.AreEqual(HydrotestStage.Hydrotest, p1.GetStageAtDate(new DateTime(2025, 6, 25)));
+
+                // HTP-002는 날짜가 전무 — 항상 미착수
+                var p2 = packages.First(p => p.TestPkgId == "HTP-002");
+                Assert.AreEqual(HydrotestStage.NotStarted, p2.GetStageAtDate(new DateTime(2025, 12, 31)));
+            }
+            finally
+            {
+                File.Delete(path);
+            }
         }
 
         [TestMethod]
-        public void LoadHydrotest_ParsesMappingSheet()
+        public void LoadHydrotest_SkipsDuplicateIds_FirstRowWins()
         {
-            var path = Path.Combine(TestDataDir, "hydrotest_sample.xlsx");
-            var packages = ExcelLoader.LoadHydrotest(path);
+            var path = CreateHydrotestTestFile(duplicateFirstRow: true);
+            try
+            {
+                var packages = ExcelLoader.LoadHydrotest(path, out int duplicatesSkipped);
+                Assert.AreEqual(2, packages.Count);
+                Assert.AreEqual(1, duplicatesSkipped);
+                // 첫 행 유지 정책 — 중복 행의 System은 무시된다.
+                Assert.AreEqual("0201-00", packages.First(p => p.TestPkgId == "HTP-001").SystemNo);
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
 
-            var htp001 = packages.First(p => p.TestPkgId == "HTP-001");
-            Assert.AreEqual(2, htp001.SpoolIds.Count);
-            CollectionAssert.Contains(htp001.SpoolIds, "SP-001-A");
-            CollectionAssert.Contains(htp001.SpoolIds, "SP-001-B");
+        private static string CreateHydrotestTestFile(bool duplicateFirstRow = false)
+        {
+            var path = Path.Combine(Path.GetTempPath(), $"hydro_test_{Guid.NewGuid()}.xlsx");
+            using (var wb = new XLWorkbook())
+            {
+                var ws = wb.AddWorksheet("Hydrotest");
+                ws.Cell(1, 1).Value = "Test Package No.";
+                ws.Cell(1, 2).Value = "System No.";
+                ws.Cell(1, 3).Value = "Line Service";
+                ws.Cell(1, 4).Value = "Review";
+                ws.Cell(1, 5).Value = "Line inspection";
+                ws.Cell(1, 6).Value = "Flushing";
+                ws.Cell(1, 7).Value = "Hydrotest";
+                ws.Cell(1, 8).Value = "Drying";
+                ws.Cell(1, 9).Value = "Reinstatement";
+
+                ws.Cell(2, 1).Value = "HTP-001";
+                ws.Cell(2, 2).Value = "0201-00";
+                ws.Cell(2, 3).Value = "OF";
+                ws.Cell(2, 4).Value = new DateTime(2025, 6, 1);
+                ws.Cell(2, 5).Value = new DateTime(2025, 6, 10);
+                ws.Cell(2, 6).Value = new DateTime(2025, 6, 15);
+                ws.Cell(2, 7).Value = new DateTime(2025, 6, 20);
+                // Drying/Reinstatement 비움
+
+                ws.Cell(3, 1).Value = "HTP-002";
+                ws.Cell(3, 2).Value = "0202-00";
+                ws.Cell(3, 3).Value = "CW";
+                // 날짜 전부 비움
+
+                if (duplicateFirstRow)
+                {
+                    ws.Cell(4, 1).Value = "HTP-001";
+                    ws.Cell(4, 2).Value = "9999-99";   // first-wins라 무시돼야 함
+                }
+
+                wb.SaveAs(path);
+            }
+            return path;
         }
 
         [TestMethod]
