@@ -298,11 +298,10 @@ namespace NavisVisualizer.UI
             // 바로 알 수 있게 상시 remark로 노출 (사용자 요청 2026-07).
             layout.Controls.Add(new Label
             {
-                Text = "※ Clipping 영역: 단면 볼륨을 통과(관통)하는 케이블이 집계됩니다 — " +
-                       "케이블은 start–end가 이어진 형상이라 타 공종(중심점 판정)과 다르게 동작합니다.",
+                Text = "※ Clipping 영역: 단면 볼륨을 통과(관통)하는 케이블이 집계됩니다.",
                 ForeColor = Color.Gray,
                 Dock = DockStyle.Fill,
-                Height = 30,
+                Height = 16,
                 AutoSize = false,
             });
             layout.Controls.Add(_tabFilter);
