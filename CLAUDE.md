@@ -732,6 +732,30 @@ UI/3D에 그리지 않는 것")은 타당함을 확인.
   Autodesk 비의존 파일(DataModels/Loaders/NwdScope/PerfLog 등)을 별도 netstandard/net48
   프로젝트로 쪼개는 구조 변경이 선행 — 테스트 컴파일 복구(이번)로 착수 조건은 갖춰짐, 분리는 별도 결정.
 
+### 16. NWD Export 오류 진단 강화 (2026-07 — 구현됨, 원인 실측 대기)
+
+**배경**: NWD Export 중 간헐 오류 보고 — 화면에는 "중간에 에러가 발생하였습니다" 류 한 줄만.
+**이 문자열은 플러그인 코드에 없음** → Navisworks 자체(한국어판) 다이얼로그이거나 지역화된
+예외 메시지가 `ex.Message`로 노출된 것. 구 코드는 `ex.Message`만 보여주고 타입/inner/스택을
+어디에도 안 남겨 재현돼도 원인 특정 불가였다.
+
+**반영**:
+- `Services/ErrorLog.cs` 신설 — `%APPDATA%\NavisVisualizer\error.log`(oasis.config와 같은 폴더)에
+  예외 전체(타입+inner+스택+대상 경로) append. Viewpoint 저장 실패도 기록.
+- `ExportNwd` 사전 점검: 폴더 존재/쓰기 권한(임시 파일 실측), 대상 파일 잠김(배타 열기 실측),
+  현재 열린 파일과 동일 경로 → Navisworks 내부 오류로 가기 전에 명확한 한국어 안내로 분리.
+  점검 자체가 실패하면 저장을 막지 않음(보수적 통과).
+- 실패 대화상자에 예외 타입·내부 예외·로그 경로 표시("재현 시 이 로그 파일 전달") + 수동
+  Save As 안내 유지. 성공 시 PerfLog에 소요·파일 크기 기록.
+- (경미 결함 수정) `ExportNwd`가 `doc` 파라미터를 무시하고 `Application.ActiveDocument`를
+  다시 조회하던 것 → `doc.SaveFile`로.
+
+**Windows 확인 항목**:
+- 오류 재발 시 error.log로 실제 예외 확정 → 원인별 대응(그때 이 절 갱신).
+- **SaveFile ↔ FileNameChanged 상호작용**: Save As로 doc.FileName이 바뀌면 §15의
+  `IndexesInvalidated`가 발동해 다음 적용 때 인덱스 재빌드 1회가 발생할 수 있다 —
+  틀린 동작은 아니나(안전 초과) Export 직후 적용이 느리면 이것. 성가시면 suppress 스코프 검토.
+
 ## 레슨런 (하드 트러블슈팅 기록 — 다시 헤매지 말 것)
 
 ### L1. 단면(Clipping): **Section Box는 COM `ClippingPlanes()`에 없다** (가장 값진 교훈)
