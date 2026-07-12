@@ -7,7 +7,7 @@ namespace NavisVisualizer.UI
 {
     /// <summary>
     /// ListView 행을 클립보드로 복사하는 공용 헬퍼. WinForms ListView는 기본적으로
-    /// Ctrl+C를 지원하지 않으므로 각 탭이 이 헬퍼를 KeyDown / [클립보드 복사] 버튼에
+    /// Ctrl+C를 지원하지 않으므로 각 탭이 이 헬퍼를 KeyDown / [선택항목 클립보드 복사] 버튼에
     /// 배선한다. 선택 행(없으면 표시 중인 전체 행)을 헤더 포함 탭 구분 텍스트로 복사 →
     /// Excel에 그대로 붙여넣으면 열이 나뉜다.
     /// </summary>

@@ -382,7 +382,7 @@ namespace NavisVisualizer.UI
             // 좌측 상태 목록(_lvAll) 선택 행(없으면 전체)을 클립보드로 복사 — Ctrl+C 대체 버튼.
             var btnCopyAll = new Button
             {
-                Text = "클립보드 복사",
+                Text = "선택항목 클립보드 복사",
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 Padding = new Padding(6, 0, 6, 0),
@@ -1130,7 +1130,7 @@ namespace NavisVisualizer.UI
             top.Controls.Add(new Label { Text = "검색:", AutoSize = true, Padding = new Padding(0, 5, 0, 0) });
             top.Controls.Add(txtSearch);
             top.Controls.Add(btnCsv);
-            var btnCopyDetail = new Button { Text = "클립보드 복사", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(8, 0, 8, 0) };
+            var btnCopyDetail = new Button { Text = "선택항목 클립보드 복사", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(8, 0, 8, 0) };
             top.Controls.Add(btnCopyDetail);
 
             var lv = new ListView

@@ -79,6 +79,8 @@ namespace NavisVisualizer.UI
         private Button _btnNwd;
         private Label _lblStats;
         private Label _lblUnmatched;
+        private Label _lblCopied;            // 복사 피드백 (우측 코너, 4초 후 소거)
+        private System.Windows.Forms.Timer _copiedClear;
         private ApplyStatePanel _applyState;   // 3D 적용 상태 표시 (데이터↔3D 어긋남 경고 전담)
         private ProgressBar _progressBar;
 
@@ -179,6 +181,16 @@ namespace NavisVisualizer.UI
             };
             statsRow.Controls.Add(_lblStats);
             statsRow.Controls.Add(_lblUnmatched);
+            // 복사 피드백 — 통계 라벨을 덮지 않도록 우측 코너(미매칭 오른쪽)에 표시하고
+            // 4초 후 자동 소거 (종전엔 _lblStats를 덮어써 단계 현황이 사라졌다 — 2026-07 사용자 요청).
+            _lblCopied = new Label
+            {
+                Dock = DockStyle.Right, Width = 0, AutoSize = false,
+                TextAlign = ContentAlignment.TopRight, ForeColor = Color.Gray, Text = "",
+            };
+            statsRow.Controls.Add(_lblCopied);   // 마지막 추가 = 가장 오른쪽에 도킹
+            _copiedClear = new System.Windows.Forms.Timer { Interval = 4000 };
+            _copiedClear.Tick += (s, e) => { _copiedClear.Stop(); _lblCopied.Text = ""; _lblCopied.Width = 0; };
 
             // 버튼·안내 라벨이 많아 한 줄을 넘으므로 줄바꿈 허용 (버튼 행들과 동일 패턴)
             var searchPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 28, AutoSize = true };
@@ -204,7 +216,8 @@ namespace NavisVisualizer.UI
             btnExport.Click += BtnExport_Click;
             searchPanel.Controls.Add(btnExport);
             // 선택 행(없으면 표시 중인 전체 행)을 클립보드로 복사 — Ctrl+C 대체 버튼.
-            var btnCopy = new Button { Text = "클립보드 복사", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(8, 1, 8, 1) };
+            var btnCopy = new Button { Text = "선택항목 클립보드 복사", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(8, 1, 8, 1) };
+            new System.Windows.Forms.ToolTip().SetToolTip(btnCopy, "선택한 행을 복사합니다. 선택이 없으면 표시 중인 전체 행을 복사합니다.");
             btnCopy.Click += (s, e) => CopyListToClipboard();
             searchPanel.Controls.Add(btnCopy);
             _btnListFilter = new Button { Text = "리스트 필터 Import", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(6, 0, 6, 0) };
@@ -1033,12 +1046,16 @@ namespace NavisVisualizer.UI
             finally { _suppressSelectionSync = false; }
         }
 
-        /// <summary>[클립보드 복사] 버튼 → 공용 헬퍼 호출 후 결과 표시.</summary>
+        /// <summary>[선택항목 클립보드 복사] 버튼 → 공용 헬퍼 호출 후 우측 코너에 결과 표시.</summary>
         private void CopyListToClipboard() => ShowCopied(ListViewClipboard.CopySelectedOrAll(_listView));
 
         private void ShowCopied(int n)
         {
-            if (n > 0) _lblStats.Text = $"클립보드에 {n}행 복사됨";
+            if (n <= 0) return;
+            _lblCopied.Text = $"클립보드에 {n}행 복사됨";
+            _lblCopied.Width = 150;
+            _copiedClear.Stop();
+            _copiedClear.Start();
         }
 
         private void ListView_ColumnClick(object sender, ColumnClickEventArgs e)
