@@ -20,8 +20,11 @@ namespace NavisVisualizer.UI
     /// Cable(형상) 탭 — 07_Trion_All_Cable.nwd의 cable-no 컴포넌트를 직접 매칭·하이라이트한다
     /// (기존 Cable Pull은 트레이 노드 박스 집계 — 별개). Excel↔OASIS 듀얼소스
     /// (EIT_Cable 철자 실측 확정 2026-07 — SqlLoader.LoadCable). 주요 기능: ① 케이블 목록
-    /// 하이라이트(stage 날짜 없으면 단색), ② 날짜 기반 4단계 공정 시각화, ③ 활성 단면 통과
-    /// 케이블 추출(clash), ④ 겹침 완화(숨김 isolate + 투명 필터 포커스). 미매칭은 스코프와
+    /// 하이라이트(stage 날짜 없으면 단색), ② 날짜 기반 4단계 공정 시각화, ③ 집계 범위
+    /// Clipping 영역 = 단면 통과 clash 판정(선분-vs-볼륨), ④ 겹침 완화(숨김 isolate).
+    /// (구 전용 clash 추출 버튼·필터 포커스는 2026-07 사용자 결정으로 삭제 — 추출은
+    /// Clipping 영역 + 매칭 Status 엑셀 출력이 대체, 부분집합 보기는 리스트 필터 Import가
+    /// 원래 의도.) 미매칭은 스코프와
     /// 직교(전역 고정, 코너 라벨 — §7/L3).
     /// </summary>
     public class CableLineTab : UserControl, IOverviewSource
@@ -56,19 +59,13 @@ namespace NavisVisualizer.UI
         private HashSet<string> _listFilter;
         private Button _btnListFilter;
 
-        // 마지막 clash 판정에 쓰인 반평면 수 (CSV 진단 — 1~2개면 볼륨 퇴화 의심).
-        private int _lastClashPlaneCount;
-
         private Document _subscribedDoc;
         private bool _suppressSelectionSync;
-        private bool _focusOn;
-        private bool _suppressFocusCheck;
 
         private DataSourcePanel _srcPanel;
         private DateTimePicker _dtpReference;
         private TextBox _txtSearch;
         private Debouncer _searchDebounce;   // 키 입력마다 리스트 재계산 방지 (성능 audit P0-1)
-        private CheckBox _chkFocus;
         private TabControl _tabFilter;
         private ListView _listView;
         // VirtualMode ListView의 백킹 행 — 보이는 행만 ListViewItem으로 생성 (성능 audit P0-2).
@@ -187,8 +184,10 @@ namespace NavisVisualizer.UI
             var searchPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 28, AutoSize = true };
             searchPanel.Controls.Add(new Label { Text = "검색(Cable/Equip):", AutoSize = true, Padding = new Padding(0, 4, 0, 0) });
             _txtSearch = new TextBox { Width = 170 };
-            // 리스트 필터는 debounce로만, 3D 필터 포커스 재적용은 Enter로만 (성능 audit P0 —
-            // 종전엔 키 입력마다 전체 케이블 투명도를 다시 적용해 실시간 병목 1순위였다).
+            // 리스트 필터는 debounce로만 갱신 — Enter는 즉시 확정 (성능 audit P0-1).
+            // (구 "필터 포커스" 투명 dim은 2026-07 사용자 결정으로 삭제 — 원래 의도였던
+            //  "가시화할 케이블 리스트만 보기"는 리스트 필터 Import가 담당. clash 추출 버튼도
+            //  삭제 — 집계 범위 Clipping 영역 + 매칭 Status 엑셀 출력으로 동일 결과.)
             _searchDebounce = new Debouncer(FilterList);
             _txtSearch.TextChanged += (s, e) => _searchDebounce.Trigger();
             _txtSearch.KeyDown += (s, e) =>
@@ -196,24 +195,21 @@ namespace NavisVisualizer.UI
                 if (e.KeyCode == Keys.Enter)
                 {
                     _searchDebounce.Flush();
-                    RefreshFocusIfActive();
                     e.Handled = true;
                     e.SuppressKeyPress = true;
                 }
             };
             searchPanel.Controls.Add(_txtSearch);
-            _chkFocus = new CheckBox { Text = "필터 포커스", AutoSize = true, Padding = new Padding(6, 5, 0, 0) };
-            _chkFocus.CheckedChanged += ChkFocus_CheckedChanged;
-            var tips = new System.Windows.Forms.ToolTip();
-            tips.SetToolTip(_chkFocus,
-                "검색 결과 외 케이블을 투명 처리합니다.\n검색어를 바꾼 뒤에는 Enter로 3D에 반영하세요 (키 입력마다 재적용하지 않음 — 성능).");
-            searchPanel.Controls.Add(_chkFocus);
-            var btnClash = new Button { Text = "이 단면 지나가는 케이블 추출", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(6, 0, 6, 0) };
-            btnClash.Click += BtnClash_Click;
-            searchPanel.Controls.Add(btnClash);
+            var btnExport = new Button { Text = "매칭 Status 엑셀 출력", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(6, 0, 6, 0) };
+            btnExport.Click += BtnExport_Click;
+            searchPanel.Controls.Add(btnExport);
+            // 선택 행(없으면 표시 중인 전체 행)을 클립보드로 복사 — Ctrl+C 대체 버튼.
+            var btnCopy = new Button { Text = "클립보드 복사", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(8, 1, 8, 1) };
+            btnCopy.Click += (s, e) => CopyListToClipboard();
+            searchPanel.Controls.Add(btnCopy);
             _btnListFilter = new Button { Text = "리스트 필터 Import", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(6, 0, 6, 0) };
             _btnListFilter.Click += BtnListFilter_Click;
-            tips.SetToolTip(_btnListFilter,
+            new System.Windows.Forms.ToolTip().SetToolTip(_btnListFilter,
                 "가시화하고 싶은 케이블 리스트(Cable No 목록 Excel)를 불러와 리스트와 3D를 그 부분집합만 표시합니다 (재클릭 = 해제).");
             searchPanel.Controls.Add(_btnListFilter);
             // 버튼명만으로는 용도가 안 보여 상시 안내 병기 (사용자 요청 2026-07)
@@ -224,14 +220,6 @@ namespace NavisVisualizer.UI
                 AutoSize = true,
                 Padding = new Padding(0, 5, 6, 0),
             });
-            var btnExport = new Button { Text = "매칭 Status 엑셀 출력", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(6, 0, 6, 0) };
-            btnExport.Click += BtnExport_Click;
-            searchPanel.Controls.Add(btnExport);
-
-            // 선택 행(없으면 표시 중인 전체 행)을 클립보드로 복사 — Ctrl+C 대체 버튼.
-            var btnCopy = new Button { Text = "클립보드 복사", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(8, 1, 8, 1) };
-            btnCopy.Click += (s, e) => CopyListToClipboard();
-            searchPanel.Controls.Add(btnCopy);
 
             _scopePanel = new ScopePanel { Dock = DockStyle.Fill };
             _scopePanel.ApplyRequested += (s, e) => ApplyScope();
@@ -450,7 +438,6 @@ namespace NavisVisualizer.UI
             _scopeKeys = null;
             _scopePanel.ResetToFullModel();
             _needsIndexRebuild = true;
-            SetFocusChecked(false);
             _listFilter = null;   // 리스트 필터는 소스별 부분집합 — 소스 전환 시 해제
             if (_btnListFilter != null) _btnListFilter.Text = "리스트 필터 Import";
             _tabFilter.TabPages[0].Text = $"전체 ({_cables.Count})";
@@ -530,9 +517,7 @@ namespace NavisVisualizer.UI
             if (_needsIndexRebuild || _main.CableLineSearcher.NeedsRebuild(doc))
                 BuildIndex();
 
-            // 색칠 전 focus·isolate 해제 (override/hide는 §10 누적 리셋이 안 잡음).
-            _main.OverrideEngine.ClearCableLineFilterFocus(doc);
-            SetFocusChecked(false);
+            // 색칠 전 isolate 숨김 해제 (hide는 §10 누적 리셋이 안 잡음).
             RestoreHidden(doc);
 
             // 하이라이트 우선 모드: stage 날짜가 하나도 없으면 단색 하이라이트.
@@ -727,57 +712,6 @@ namespace NavisVisualizer.UI
             }
         }
 
-        // ----- 필터 포커스 (투명 dim) -----
-
-        private void ChkFocus_CheckedChanged(object sender, EventArgs e)
-        {
-            if (_suppressFocusCheck) return;
-            var doc = _main.GetDocument();
-            if (_chkFocus.Checked)
-            {
-                if (doc == null || _matchedCableNos.Count == 0)
-                {
-                    MessageBox.Show("먼저 가시화 적용을 실행하세요.");
-                    SetFocusChecked(false);
-                    return;
-                }
-                var hits = GetCurrentFilterHitCableNos();
-                if (hits.Count == 0) { MessageBox.Show("현재 필터에 일치하는 케이블이 없습니다."); SetFocusChecked(false); return; }
-                _main.OverrideEngine.SetCableLineFilterFocus(doc, hits);
-                _focusOn = true;
-            }
-            else
-            {
-                if (doc != null) _main.OverrideEngine.ClearCableLineFilterFocus(doc);
-                _focusOn = false;
-            }
-        }
-
-        private void SetFocusChecked(bool value)
-        {
-            _suppressFocusCheck = true;
-            _chkFocus.Checked = value;
-            _suppressFocusCheck = false;
-            _focusOn = value;
-        }
-
-        private void RefreshFocusIfActive()
-        {
-            if (!_focusOn) return;
-            var doc = _main.GetDocument();
-            if (doc == null) return;
-            _main.OverrideEngine.SetCableLineFilterFocus(doc, GetCurrentFilterHitCableNos());
-        }
-
-        private List<string> GetCurrentFilterHitCableNos()
-        {
-            string keyword = _txtSearch?.Text?.Trim().ToUpperInvariant() ?? "";
-            var hits = _cables.Where(c => _matchedCableNos.Contains(c.CableNo));
-            if (!string.IsNullOrEmpty(keyword))
-                hits = hits.Where(c => CableMatchesKeyword(c, keyword));
-            return hits.Select(c => c.CableNo).ToList();
-        }
-
         private static bool CableMatchesKeyword(CableLineData c, string keywordUpper)
         {
             // SearchKey = 로드 시 1회 대문자화한 캐시 (audit P0-3 — 검색마다 3필드 ToUpper 방지)
@@ -818,7 +752,7 @@ namespace NavisVisualizer.UI
                     MessageBox.Show("모델 또는 데이터가 변경되었습니다. 가시화 적용을 다시 실행한 뒤 범위를 선택하세요.");
                     return;
                 }
-                if (scope == MatchScope.ClippingVolume) _clash.EnsureFresh(doc);
+                if (scope == MatchScope.ClippingVolume) { _clash.EnsureFresh(doc); _clash.ResetBatchCounters(); }
 
                 _progressBar.Style = ProgressBarStyle.Marquee;
                 _progressBar.Visible = true;
@@ -838,93 +772,14 @@ namespace NavisVisualizer.UI
             UpdateTabCounts();
             FilterList();
             UpdateStats();
-            RefreshFocusIfActive();
         }
 
         private void ReapplyCurrentScope(Document doc)
         {
             var scope = _scopePanel.CurrentScope;
             if (scope == MatchScope.FullModel) { _scopeKeys = null; return; }
-            if (scope == MatchScope.ClippingVolume) _clash.EnsureFresh(doc);
+            if (scope == MatchScope.ClippingVolume) { _clash.EnsureFresh(doc); _clash.ResetBatchCounters(); }
             _scopeKeys = _scopeFilter.Apply(doc, scope, BuildScopeItemsByKey(), _volumeJudge);
-        }
-
-        /// <summary>단면 통과 케이블 추출: Clipping 영역 스코프로 판정 + CSV 출력.</summary>
-        private void BtnClash_Click(object sender, EventArgs e)
-        {
-            var doc = _main.GetDocument();
-            if (doc == null || _matchedCableNos.Count == 0)
-            {
-                MessageBox.Show("먼저 가시화 적용을 실행하세요. 단면 통과 판정은 매칭된 케이블에 적용됩니다.");
-                return;
-            }
-            var planes = _main.SectionSvc.GetActiveClipPlanes(doc);
-            if (planes == null || planes.Count == 0)
-            {
-                MessageBox.Show("활성 단면(clip plane/box)이 없습니다. Navisworks Sectioning으로 영역을 자른 뒤 다시 시도하세요.");
-                return;
-            }
-            _clash.EnsureFresh(doc);
-            _clash.ResetBatchCounters();
-            // 볼륨 퇴화 진단: 축정렬 박스면 6반평면. 1~2개면 반쪽 공간(예: 회전 박스 → COM
-            // fallback 잔여 평면 — L1/L6)이라 먼 케이블도 정당하게 '통과'로 찍힌다.
-            _lastClashPlaneCount = planes.Count;
-
-            _progressBar.Style = ProgressBarStyle.Marquee;
-            _progressBar.Visible = true;
-            Application.DoEvents();
-            try
-            {
-                _scopeKeys = _scopeFilter.Apply(doc, MatchScope.ClippingVolume, BuildScopeItemsByKey(), _volumeJudge);
-            }
-            finally
-            {
-                _progressBar.Visible = false;
-                _progressBar.Style = ProgressBarStyle.Blocks;
-            }
-            _scopePanel.SetCurrentScope(MatchScope.ClippingVolume);
-            _tabFilter.SelectedIndex = 1; // 매칭 탭
-            UpdateTabCounts();
-            FilterList();
-            UpdateStats();
-
-            int inCount = _scopeKeys?.Count ?? 0;
-            ExportClashCsv(inCount);
-        }
-
-        private void ExportClashCsv(int inCount)
-        {
-            var lines = new List<string>();
-            lines.Add($"단면 통과 케이블,{inCount}건");
-            lines.Add($"bbox 사전배제/추출/세그AABB배제,{_clash.LastPreCulled}/{_clash.LastExtracted}/{_clash.LastCulled}");
-            // 반평면 수: 축정렬 박스 = 6. 1~2면 볼륨이 반쪽 공간으로 퇴화(회전 박스 → COM fallback
-            // 잔여 평면 등) — 먼 케이블도 정당하게 통과로 찍히므로 "동떨어진 통과"의 1순위 원인.
-            lines.Add($"판정 반평면 수,{_lastClashPlaneCount}");
-            lines.Add($"인덱스 스코프,\"{_main.CableLineSearcher.LastScopeNote ?? "-"}\"");
-            // 통과지점 = 첫 통과 세그먼트 중점(모델 좌표). 단면 볼륨 안이면 정상 관통(케이블이
-            // 길어서 먼 곳까지 뻗은 것). 볼륨에서 멀면 좌표계/술어 버그. 아이템수 ≥2면 같은
-            // cable-no에 여러 컴포넌트가 매칭된 것 — 남의 아이템이 섞였는지(인덱스 '/' 접두 키
-            // 충돌) 그 케이블을 리스트에서 더블클릭해 3D로 확인.
-            lines.Add("Cable No,단계,From,To,Design,Pulled,아이템수,통과지점X,통과지점Y,통과지점Z");
-            var referenceDate = _dtpReference.Value;
-            foreach (var c in _cables)
-            {
-                if (_scopeKeys == null || !_scopeKeys.Contains(c.CableNo)) continue;
-                string stageLabel = _lastHighlightMode ? "하이라이트" : CableLineStageInfo.Labels[c.GetStageAtDate(referenceDate)];
-                int itemCount = _main.OverrideEngine.GetCableLineItems(c.CableNo)?.Count ?? 0;
-                string hit = "";
-                if (_clash.LastHits.TryGetValue(c.CableNo, out var h))
-                    hit = $"{h[0]:0.##},{h[1]:0.##},{h[2]:0.##}";
-                else
-                    hit = ",,";
-                lines.Add($"\"{c.CableNo}\",\"{stageLabel}\",\"{FromText(c)}\",\"{ToText(c)}\"," +
-                          $"{(c.DesignLth?.ToString("0.##") ?? "")},{(c.PulledLth?.ToString("0.##") ?? "")}," +
-                          $"{itemCount},{hit}");
-            }
-            string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
-                $"CableClash_{DateTime.Now:yyyyMMdd_HHmmss}.csv");
-            File.WriteAllText(path, string.Join("\r\n", lines), new System.Text.UTF8Encoding(true));
-            SaveNotifier.ShowSaved(this, "단면 통과 케이블 추출", path, $"단면 통과 케이블 {inCount}건.");
         }
 
         // ----- Buttons -----
@@ -934,7 +789,6 @@ namespace NavisVisualizer.UI
             var doc = _main.GetDocument();
             if (doc == null) return;
             RestoreHidden(doc);
-            SetFocusChecked(false);
             _main.OverrideEngine.ResetCableLineModule(doc);
             _lblStats.Text = "이 탭 가시화 해제 완료 (Cable 형상 색만 제거)";
             _applyState.SetCleared();
@@ -945,7 +799,6 @@ namespace NavisVisualizer.UI
             var doc = _main.GetDocument();
             if (doc == null) return;
             RestoreHidden(doc);
-            SetFocusChecked(false);
             _main.OverrideEngine.Reset(doc);
             _scopeFilter.Reset();
             _scopeKeys = null;
@@ -978,6 +831,14 @@ namespace NavisVisualizer.UI
             var lines = new List<string>();
             lines.Add($"집계 범위,{MatchScopeInfo.Label(_scopePanel.CurrentScope)}");
             lines.Add($"인덱스 스코프,\"{_main.CableLineSearcher.LastScopeNote ?? "-"}\"");
+            if (_scopePanel.CurrentScope == MatchScope.ClippingVolume)
+            {
+                // 구 clash 전용 CSV의 진단 대체(L5): 활성평면 수는 범위 진단에 포함 —
+                // 1~2개면 볼륨이 반쪽 공간으로 퇴화(회전 박스 → COM fallback)라 오탐 1순위.
+                // pre-cull이 안 먹으면(사전배제 소수) 첫 판정이 COM 추출로 느려진 것.
+                lines.Add($"범위 진단,\"{_scopeFilter.Diagnostics}\"");
+                lines.Add($"clash 진단(bbox 사전배제/추출/세그AABB배제),{_clash.LastPreCulled}/{_clash.LastExtracted}/{_clash.LastCulled}");
+            }
             lines.Add("Cable No,단계,From,To,Design,Pulled,%,Matched");
             foreach (var c in _cables)
             {

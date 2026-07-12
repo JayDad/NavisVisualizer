@@ -553,11 +553,18 @@ A Punch Total, A Punch Closed, A Punch %, B Punch Total, B Punch Closed, B Punch
   무효화), 판정은 매 [적용]마다 live `GetActiveClipPlanes`로 재계산(L2). AABB pre-cull + Cyrus–Beck
   세그먼트-vs-반평면(축정렬 박스 6반평면 + Planes 모드 한 구현). `GeometryProbe.ExtractWorldSegments`
   분리(컨테이너→geometry leaf 하강). ScopeFilter의 ClippingVolume 분기에 cableNo-keyed volume-judge
-  델리게이트 주입(타 탭 null → BoundingBox 중점 유지). `이 단면 지나가는 케이블 추출` 버튼 + scope-aware CSV.
+  델리게이트 주입(타 탭 null → BoundingBox 중점 유지). **전용 clash 추출 버튼은 2026-07 사용자
+  결정으로 삭제** — 집계 범위 `Clipping 영역` + `매칭 Status 엑셀 출력`이 동일 결과를 내고, 그
+  CSV에 clash 진단(범위 진단 라인 = 활성평면 수 포함 + bbox 사전배제/추출/세그AABB배제 카운터)을
+  병기해 구 전용 CSV의 L5 역할을 대체. 통과지점 좌표 덤프는 버튼과 함께 제거(필요 시 git 복원).
+  배치 카운터 리셋은 ApplyScope/ReapplyCurrentScope의 ClippingVolume 분기로 이동.
   ScopePanel 하단에 상시 remark 노출(2026-07 사용자 요청): Cable의 Clipping 영역 = 단면 볼륨을 **통과**하는
   케이블 집계 — start–end가 이어진 형상이라 타 공종(중심점 판정)과 다르게 동작함을 화면에 명시.
 - **겹침 완화 UX**: 3행 버튼(가시화/초기화/출력). `체크 단계 외 숨김`·`선택 케이블만 보기`(SetHidden isolate,
-  상호배타), `필터 포커스`(투명 dim, 작은 히트셋만). List↔3D 양방향 선택 sync(조상 walk로 cable-no 해석).
+  상호배타). List↔3D 양방향 선택 sync(조상 walk로 cable-no 해석). **`필터 포커스`(투명 dim)는
+  2026-07 사용자 결정으로 삭제** — 원래 의도(가시화할 케이블 리스트만 보기)는 `리스트 필터
+  Import`가 담당. 엔진의 Set/ClearCableLineFilterFocus·그룹 맵도 함께 제거. 검색 행 순서는
+  타 공종과 통일(검색 → 매칭 Status 엑셀 출력 → 클립보드 복사 → 리스트 필터 Import).
 - **§10**: `VisualModule.CableLine` 신규 멤버(레거시 `Cable`과 캐시 충돌 방지). `ApplyCableLines`는 처음부터
   ResetModule/AccumulatePainted 채택. focus·isolate는 override/hide라 AccumulatePainted가 안 잡으므로
   ResetModule 전에 별도 해제.
@@ -624,7 +631,8 @@ UI/3D에 그리지 않는 것")은 타당함을 확인.
 **반영됨 (1차·2차 패키지)**
 - **검색 debounce 300ms** (`UI/Debouncer.cs`, 전 탭 + Sub-system 좌측/상세 창): 키 입력마다
   전체 리스트 재계산하던 것을 입력 멈춘 뒤 1회로.
-- **Cable 필터 포커스 = Enter로만 3D 재적용**: 종전엔 TextChanged마다 전체 케이블 투명도
+- **Cable 필터 포커스 = Enter로만 3D 재적용** *(이후 2026-07 사용자 결정으로 필터 포커스 자체
+  삭제 — §13. 아래는 삭제 전 이력)*: 종전엔 TextChanged마다 전체 케이블 투명도
   재적용(실시간 병목 1순위). 리스트는 debounce로 갱신, 3D는 검색창 Enter(또는 체크 시점)에만.
   체크박스 툴팁으로 안내.
 - **ListView VirtualMode (Spool·Cable 탭)**: 보이는 행만 `RetrieveVirtualItem`으로 생성 —
