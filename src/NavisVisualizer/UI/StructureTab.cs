@@ -112,7 +112,8 @@ namespace NavisVisualizer.UI
             _areaTable.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             _areaTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 62));
             _areaTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 26));
-            _areaPanel = new Panel { Dock = DockStyle.Fill, Height = 240, AutoScroll = true, BorderStyle = BorderStyle.FixedSingle };
+            // 레벨2 펼침으로 행이 늘어남 — 다른 탭 리스트(230)보다 크게 잡는다 (사용자 요청 2026-07).
+            _areaPanel = new Panel { Dock = DockStyle.Fill, Height = 360, AutoScroll = true, BorderStyle = BorderStyle.FixedSingle };
             _areaPanel.Controls.Add(_areaTable);
 
             // 1행(가시화)
