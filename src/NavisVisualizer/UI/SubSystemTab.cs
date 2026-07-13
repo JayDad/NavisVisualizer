@@ -16,7 +16,7 @@ namespace NavisVisualizer.UI
     /// Walkdown/P-MCC/MCC/PCC 실적일 + ITR/Punch 수치)와 요소 데이터 4공종
     /// (Equipment Mech_EQ / Piping Hydrotest PKG / EIT EQ / Cable —
     /// 각 테이블의 SUB-SYSTEM 컬럼 기준. EIT Tray는 매핑 컬럼이 없어 제외)을 묶어,
-    /// 선택한 Sub-system들의 요소를 3D에 가시화하고 현황 리포트를 출력한다.
+    /// 전체 Sub-system의 요소를 단계색으로 3D에 가시화하고 현황 리포트를 출력한다.
     ///
     /// - 데이터: OASIS 전용. 마스터 미구성 시 요소 파생 목록으로 자동 fallback.
     ///   EIT 계열은 공종별 try/catch — 컬럼 미구성이어도 나머지는 정상 로드(라벨에 사유)
@@ -25,8 +25,11 @@ namespace NavisVisualizer.UI
     ///   SearcherFor로 라우팅(엔진 ApplySubSystem에 리졸버 주입).
     /// - 가시화 2모드: Sub-system 단계별(Walkdown→PCC 6색, 마스터 필요) /
     ///   요소 진행상태별(미착수·진행중·완료)
-    /// - 선택 UI: 좌측 검색+상태 테이블(~400개) ↔ [▶ ◀ ▶▶ ◀◀] ↔ 우측 선택 누적
-    ///   테이블 + 하단 개수 라벨. 다중 선택 후 화살표로 이동
+    /// - [가시화 적용]은 선택과 무관하게 전체 Sub-system을 단계색으로 칠한다 (다른 탭과 동일 —
+    ///   버튼 행은 색상 그리드 바로 아래, 선택창 위에 위치). 색칠 전 ResetModule로 누적분 원복.
+    /// - 선택 UI(하단 dual-list)는 색칠이 아니라 "선택 항목만 남김"(isolate 숨김 토글)과
+    ///   "선택 Sub-system 상세 현황 보기"의 대상: 좌측 검색+상태 테이블(~400개) ↔
+    ///   [▶ ◀ ▶▶ ◀◀] ↔ 우측 선택 누적 테이블 + 하단 개수 라벨·선택 액션 버튼.
     /// </summary>
     public class SubSystemTab : UserControl, IOverviewSource
     {
@@ -138,6 +141,9 @@ namespace NavisVisualizer.UI
         private Debouncer _filterDebounce;   // 키 입력마다 좌측 목록 재생성 방지 (성능 audit P0-1)
         private Button _btnDelayed;
         private Button _btnDetail;
+        private Button _btnKeepOnly;   // 선택 항목만 남김 (선택 외 요소 숨김 isolate 토글)
+        // isolate로 숨긴 요소 복원용 — 재로드/해제/문서 전환 시 원복
+        private Autodesk.Navisworks.Api.ModelItemCollection _hiddenByKeepOnly;
         private ListView _lvAll;
         private ListView _lvSelected;
         private Label _lblSelCount;
@@ -171,6 +177,9 @@ namespace NavisVisualizer.UI
         {
             _indexBuilt = false;
             _indexSig = null;
+            // 옛 문서의 숨김 컬렉션은 복원 불가 — 참조만 버리고 버튼 표기 원복.
+            _hiddenByKeepOnly = null;
+            if (_btnKeepOnly != null) _btnKeepOnly.Text = "선택 항목만 남김";
             _eqSearcher.Reset();
             _pipingSearcher.Reset();
             _eitEqSearcher.Reset();
@@ -240,26 +249,34 @@ namespace NavisVisualizer.UI
 
             var selGroup = BuildSelectionGroup();
 
-            // ----- 버튼 행 -----
-            var btnPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 65, AutoSize = true };
-            var btnApply = new Button { Text = "가시화 적용", Width = 90 };
+            // ----- 버튼 행 (색상 그리드 바로 아래 = 선택창 위. 다른 탭과 동일 배치) -----
+            // 1행(가시화): 선택과 무관하게 전체 Sub-system을 단계색으로 칠한다.
+            var btnRowVis = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 34, AutoSize = true };
+            var btnApply = new Button { Text = "가시화 적용", Width = 100 };
+            btnApply.Click += BtnApply_Click;
+            _applyState.AttachApplyButton(btnApply);
+            btnRowVis.Controls.AddRange(new Control[] { btnApply, _applyState });
+
+            // 2행(해제)
+            var btnRowReset = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 34, AutoSize = true };
             var btnResetModule = new Button { Text = "이 탭 가시화 해제", Width = 130 };
             var btnReset = new Button { Text = "전체 가시화 해제", Width = 130 };
+            btnResetModule.Click += BtnResetModule_Click;
+            btnReset.Click += BtnReset_Click;
+            btnRowReset.Controls.AddRange(new Control[] { btnResetModule, btnReset });
+
+            // 3행(출력)
+            var btnRowOut = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 34, AutoSize = true };
             var btnReport = new Button { Text = "현황 리포트 출력", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(8, 1, 8, 1) };
             var btnViewpoint = new Button { Text = "Viewpoint 저장", Width = 120 };
             var btnNwd = new Button { Text = "NWD Export", Width = 110 };
-            btnApply.Click += BtnApply_Click;
-            btnResetModule.Click += BtnResetModule_Click;
-            btnReset.Click += BtnReset_Click;
             btnReport.Click += BtnReport_Click;
             btnViewpoint.Click += BtnViewpoint_Click;
             btnNwd.Click += BtnNwd_Click;
-            _applyState.AttachApplyButton(btnApply);
-            btnPanel.Controls.AddRange(new Control[]
-                { btnApply, btnResetModule, btnReset, btnReport, btnViewpoint, btnNwd, _applyState });
+            btnRowOut.Controls.AddRange(new Control[] { btnReport, btnViewpoint, btnNwd });
 
             _progressBar = new ProgressBar { Dock = DockStyle.Fill, Height = 12, Visible = false };
-            _lblStats = new Label { Dock = DockStyle.Fill, Text = "로드된 데이터 없음", AutoSize = false, Height = 78 };
+            _lblStats = new Label { Dock = DockStyle.Fill, Text = "로드된 데이터 없음", AutoSize = false, Height = 92 };
 
             layout.Controls.Add(loadPanel);
             layout.Controls.Add(modeGroup);
@@ -268,10 +285,13 @@ namespace NavisVisualizer.UI
             layout.Controls.Add(_progressPanel);
             // 색상 편집(▼·투명도)은 기본 접힘 — 체크박스·스와치만 상시 노출 (UX audit P1)
             layout.Controls.Add(ColorEditCollapse.BuildToggleRow(_stagePanel, _progressPanel));
-            layout.Controls.Add(selGroup);
-            layout.Controls.Add(btnPanel);
+            // 버튼 행을 선택창 위로 (사용자 요청): 색상 그리드 → 버튼 → 통계 → 선택창.
+            layout.Controls.Add(btnRowVis);
+            layout.Controls.Add(btnRowReset);
+            layout.Controls.Add(btnRowOut);
             layout.Controls.Add(_progressBar);
             layout.Controls.Add(_lblStats);
+            layout.Controls.Add(selGroup);
 
             Controls.Add(layout);
         }
@@ -347,7 +367,8 @@ namespace NavisVisualizer.UI
 
         private GroupBox BuildSelectionGroup()
         {
-            var group = new GroupBox { Text = "Sub-system 선택", Dock = DockStyle.Fill, Height = 366 };
+            // 선택은 색칠 대상이 아니라 상세보기·"선택 항목만 남김"(isolate)의 대상임을 제목에 명시.
+            var group = new GroupBox { Text = "Sub-system 선택 (상세 보기·선택 항목만 남김 대상)", Dock = DockStyle.Fill, Height = 372 };
 
             var grid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 4 };
             grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
@@ -356,7 +377,7 @@ namespace NavisVisualizer.UI
             grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
             grid.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));
-            grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
+            grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
 
             // 좌측 상단: 검색 (코드 + 설명 매칭) + MCC 지연 일괄 선택
             var leftTop = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = Padding.Empty };
@@ -466,14 +487,31 @@ namespace NavisVisualizer.UI
                 TextAlign = ContentAlignment.MiddleRight,
             };
 
-            // 선택 박스 하단: 선택된 sub-system의 공종·요소별 상세 현황을 별도 창으로
+            // 선택 박스 하단: 선택 대상에 대한 액션 2개 — isolate 숨김 토글 + 상세 현황 창.
+            // 선택 항목만 남김: 선택 외 Sub-system 요소를 3D에서 숨겨 선택 요소만 남긴다(토글).
+            _btnKeepOnly = new Button
+            {
+                Text = "선택 항목만 남김",
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Padding = new Padding(8, 1, 8, 1),
+                Margin = new Padding(0, 2, 6, 0),
+            };
+            _btnKeepOnly.Click += BtnKeepOnly_Click;
+
             _btnDetail = new Button
             {
-                Dock = DockStyle.Fill,
                 Text = "선택 Sub-system 상세 현황 보기…",
-                Margin = new Padding(0, 1, 0, 0),
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Padding = new Padding(8, 1, 8, 1),
+                Margin = new Padding(0, 2, 0, 0),
             };
             _btnDetail.Click += (s, e) => ShowDetailWindow();
+
+            var selActions = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = Padding.Empty };
+            selActions.Controls.Add(_btnKeepOnly);
+            selActions.Controls.Add(_btnDetail);
 
             grid.Controls.Add(leftTop, 0, 0);
             grid.Controls.Add(rightTopLbl, 2, 0);
@@ -482,7 +520,8 @@ namespace NavisVisualizer.UI
             grid.Controls.Add(_lvSelected, 2, 1);
             grid.Controls.Add(_lblSelCount, 0, 2);
             grid.SetColumnSpan(_lblSelCount, 3);
-            grid.Controls.Add(_btnDetail, 2, 3);
+            grid.Controls.Add(selActions, 0, 3);
+            grid.SetColumnSpan(selActions, 3);
 
             group.Controls.Add(grid);
             return group;
@@ -509,6 +548,8 @@ namespace NavisVisualizer.UI
 
         private void LoadOasis()
         {
+            // 재로드 시 매칭 셋이 바뀌므로 isolate 숨김을 먼저 원복 (옛 상태 잔존 방지).
+            RestoreKeepOnlyHidden(_main.GetDocument());
             try
             {
                 var settings = SqlConnectionSettings.Load();
@@ -886,11 +927,6 @@ namespace NavisVisualizer.UI
                 MessageBox.Show("OASIS 데이터를 먼저 로드하고 모델을 열어주세요.");
                 return;
             }
-            if (_selected.Count == 0)
-            {
-                MessageBox.Show("가시화할 Sub-system을 먼저 선택하세요.");
-                return;
-            }
             if (_rdoByStage.Checked && _master == null)
             {
                 MessageBox.Show("Sub-system 마스터가 없어 단계별 가시화를 할 수 없습니다.\n요소 진행상태별 모드를 사용하세요.");
@@ -899,7 +935,8 @@ namespace NavisVisualizer.UI
             if (IndexStale(doc))
                 BuildIndex();
 
-            var targets = _elements.Where(el => _selected.Contains(el.SubSystem)).ToList();
+            // 선택과 무관하게 전체 Sub-system 요소를 칠한다 (사용자 요청 — 선택은 상세보기·isolate 전용).
+            var targets = _elements;
             var referenceDate = _dtpReference.Value;
 
             OverrideResult result;
@@ -947,21 +984,78 @@ namespace NavisVisualizer.UI
             _matchedIds = new HashSet<string>(
                 targets.Select(el => el.ElementId).Where(id => !_unmatchedIds.Contains(id)),
                 StringComparer.OrdinalIgnoreCase);
-            _appliedSubSystems = new HashSet<string>(_selected, StringComparer.OrdinalIgnoreCase);
+            // 전체 적용 — 요소를 가진 모든 sub-system이 적용 대상 (매칭 O/X는 이 스냅샷 기준 유효).
+            _appliedSubSystems = new HashSet<string>(_bySubSystem.Keys, StringComparer.OrdinalIgnoreCase);
             _appliedOnce = true;
             _appliedMode = mode;
             _applyState.SetApplied(
-                $"{(mode == ApplyMode.Stage ? "단계별" : "진행상태별")} · {_appliedSubSystems.Count}개 sub-system");
+                $"{(mode == ApplyMode.Stage ? "단계별" : "진행상태별")} · 전체 {_appliedSubSystems.Count}개 sub-system");
 
             RefreshRightList();
             UpdateStats(result);
         }
 
-        /// <summary>이 탭 가시화 해제: Sub-system 색만 제거 — 다른 공종 색은 유지 (§10 ResetModule).</summary>
+        /// <summary>
+        /// 선택 항목만 남김(토글): 선택된 Sub-system 외의 매칭 요소를 3D에서 숨겨 선택 요소만
+        /// 남긴다. 다시 누르면 원복. 색칠(가시화 적용)과 독립 — 선택은 색 대상이 아니라 여기서만 쓰인다.
+        /// (StructureTab/CableLineTab의 SetHidden isolate 패턴 — 타 공종 객체는 건드리지 않음.)
+        /// </summary>
+        private void BtnKeepOnly_Click(object sender, EventArgs e)
+        {
+            var doc = _main.GetDocument();
+            if (doc == null) { MessageBox.Show("모델을 먼저 열어주세요."); return; }
+            if (_hiddenByKeepOnly != null)   // 이미 isolate 상태 → 전체 보기로 복원
+            {
+                RestoreKeepOnlyHidden(doc);
+                _lblStats.Text = "전체 보기로 복원되었습니다.";
+                return;
+            }
+            if (_elements.Count == 0) { MessageBox.Show("OASIS 데이터를 먼저 로드하세요."); return; }
+            if (_selected.Count == 0)
+            {
+                MessageBox.Show("먼저 남길 Sub-system을 선택하세요 (좌측 목록에서 ▶로 우측에 담기).");
+                return;
+            }
+
+            // 매칭 인덱스가 있어야 요소→모델 아이템을 찾을 수 있음 — 필요 시 즉석 빌드.
+            if (IndexStale(doc)) BuildIndex();
+
+            var others = _elements.Where(el => !_selected.Contains(el.SubSystem)).ToList();
+            var toHide = FindItemsFor(others);   // 선택 외 요소의 매칭 아이템(모델에 없는 건 자동 제외)
+            if (toHide.Count == 0)
+            {
+                MessageBox.Show("숨길 대상이 없습니다 (선택 외 요소가 모델에 없거나 전부 선택됨).");
+                return;
+            }
+
+            doc.Models.SetHidden(toHide, true);
+            _hiddenByKeepOnly = toHide;
+            _btnKeepOnly.Text = "전체 보기";
+            _lblStats.Text = $"선택 항목만 남김: 선택 {_selected.Count}개 Sub-system 외 요소 {toHide.Count:N0}개 숨김 (다시 누르면 복원)";
+        }
+
+        /// <summary>isolate 숨김 복원 — 실패(문서 전환으로 stale 컬렉션 등)해도 조용히 상태만 정리.</summary>
+        private void RestoreKeepOnlyHidden(Autodesk.Navisworks.Api.Document doc)
+        {
+            if (_hiddenByKeepOnly == null) return;
+            try
+            {
+                if (doc != null) doc.Models.SetHidden(_hiddenByKeepOnly, false);
+            }
+            catch
+            {
+                // 닫힌/전환된 문서의 숨김은 어차피 소멸 — 참조만 버린다.
+            }
+            _hiddenByKeepOnly = null;
+            if (_btnKeepOnly != null) _btnKeepOnly.Text = "선택 항목만 남김";
+        }
+
+        /// <summary>이 탭 가시화 해제: Sub-system 색만 제거 — 다른 공종 색은 유지 (§10 ResetModule) + isolate 복원.</summary>
         private void BtnResetModule_Click(object sender, EventArgs e)
         {
             var doc = _main.GetDocument();
             if (doc == null) return;
+            RestoreKeepOnlyHidden(doc);
             _main.OverrideEngine.ResetModule(doc, VisualModule.SubSystem);
             _lblStats.Text = "이 탭 가시화 해제 완료 (Sub-system 색만 제거)";
             _applyState.SetCleared();
@@ -971,6 +1065,7 @@ namespace NavisVisualizer.UI
         {
             var doc = _main.GetDocument();
             if (doc == null) return;
+            RestoreKeepOnlyHidden(doc);
             _main.OverrideEngine.Reset(doc);
             _lblStats.Text = "전체 가시화 해제 완료";
             _applyState.SetCleared();
@@ -1291,57 +1386,57 @@ namespace NavisVisualizer.UI
             var referenceDate = _dtpReference.Value;
             var linesOut = new List<string>();
 
-            if (_selected.Count == 0)
+            // [가시화 적용]은 전체에 적용되므로 통계도 전체 기준 (선택은 별도 라인으로 병기).
+            linesOut.Add($"전체 Sub-system {_subSystemNames.Count}개 · 요소 {_elements.Count:N0}건 (기준일 {referenceDate:yyyy-MM-dd})");
+
+            // 마스터가 있으면 전체 sub-system 실적 단계 분포 (+ 지연 개수 병기)
+            if (_master != null)
             {
-                linesOut.Add($"요소 {_elements.Count:N0}건 · Sub-system {_subSystemNames.Count}개 — 좌측에서 선택하세요");
+                var stageCounts = new Dictionary<SubSystemStage, int>();
+                int delayed = 0;
+                foreach (var name in _subSystemNames)
+                {
+                    var m = GetMaster(name);
+                    if (m == null) continue;
+                    var stg = m.GetStageAtDate(referenceDate);
+                    stageCounts[stg] = stageCounts.TryGetValue(stg, out int c) ? c + 1 : 1;
+                    if (m.IsDelayed(referenceDate)) delayed++;
+                }
+                var parts = new List<string>();
+                var order = new[] { SubSystemStage.Pcc, SubSystemStage.Mcc,
+                    SubSystemStage.PartialMcc, SubSystemStage.Walkdown, SubSystemStage.NotStarted };
+                foreach (var st in order)
+                    if (stageCounts.TryGetValue(st, out int c) && c > 0)
+                        parts.Add($"{SubSystemStageInfo.Labels[st]} {c}");
+                string line = "단계: " + string.Join(" · ", parts);
+                if (delayed > 0) line += $"   (MCC 지연 {delayed})";
+                if (parts.Count > 0) linesOut.Add(line);
             }
-            else
+
+            // 전체 요소 진행 분포
+            int ns = 0, ip = 0, done = 0;
+            foreach (var el in _elements)
             {
-                int total = _selectionOrder.Sum(ElementCount);
-                linesOut.Add($"선택 Sub-system {_selected.Count}개 · 요소 {total:N0}건 (기준일 {referenceDate:yyyy-MM-dd})");
-
-                // 마스터가 있으면 sub-system 실적 단계 분포 (+ 지연 개수 병기)
-                if (_master != null)
+                switch (el.StatusAt(referenceDate))
                 {
-                    var stageCounts = new Dictionary<SubSystemStage, int>();
-                    int delayed = 0;
-                    foreach (var name in _selectionOrder)
-                    {
-                        var m = GetMaster(name);
-                        if (m == null) continue;
-                        var stg = m.GetStageAtDate(referenceDate);
-                        stageCounts[stg] = stageCounts.TryGetValue(stg, out int c) ? c + 1 : 1;
-                        if (m.IsDelayed(referenceDate)) delayed++;
-                    }
-                    var parts = new List<string>();
-                    var order = new[] { SubSystemStage.Pcc, SubSystemStage.Mcc,
-                        SubSystemStage.PartialMcc, SubSystemStage.Walkdown, SubSystemStage.NotStarted };
-                    foreach (var st in order)
-                        if (stageCounts.TryGetValue(st, out int c) && c > 0)
-                            parts.Add($"{SubSystemStageInfo.Labels[st]} {c}");
-                    string line = "단계: " + string.Join(" · ", parts);
-                    if (delayed > 0) line += $"   (MCC 지연 {delayed})";
-                    if (parts.Count > 0) linesOut.Add(line);
+                    case ProgressStatus.Completed: done++; break;
+                    case ProgressStatus.InProgress: ip++; break;
+                    default: ns++; break;
                 }
+            }
+            linesOut.Add($"요소 진행: 미착수 {ns} · 진행중 {ip} · 완료 {done}");
 
-                int ns = 0, ip = 0, done = 0;
-                foreach (var el in _elements)
-                {
-                    if (!_selected.Contains(el.SubSystem)) continue;
-                    switch (el.StatusAt(referenceDate))
-                    {
-                        case ProgressStatus.Completed: done++; break;
-                        case ProgressStatus.InProgress: ip++; break;
-                        default: ns++; break;
-                    }
-                }
-                linesOut.Add($"요소 진행: 미착수 {ns} · 진행중 {ip} · 완료 {done}");
+            // 선택은 색칠 대상이 아니라 상세보기·선택 항목만 남김(isolate)의 대상임을 안내.
+            if (_selected.Count > 0)
+            {
+                int selElems = _selectionOrder.Sum(ElementCount);
+                linesOut.Add($"선택 {_selected.Count}개 · 요소 {selElems:N0}건 (상세보기·선택 항목만 남김 대상)");
             }
 
             if (_appliedOnce)
             {
                 string mode = _appliedMode == ApplyMode.Stage ? "Sub-system 단계별" : "요소 진행상태별";
-                linesOut.Add($"매칭 {_matchedIds.Count:N0} / 미매칭 {_unmatchedIds.Count:N0} ({mode} 적용됨)");
+                linesOut.Add($"매칭 {_matchedIds.Count:N0} / 미매칭 {_unmatchedIds.Count:N0} ({mode} · 전체 적용됨)");
             }
 
             _lblStats.Text = string.Join("\n", linesOut);
