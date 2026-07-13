@@ -222,8 +222,16 @@ Apply:
 
 ### 6. UI Architecture (`UI/`)
 
-**탭 구성:** Overview | Hydrotest | Spool | Equipment | EIT Tray | Cable(형상) | Sub-system | 고급 진단(구 Tools)
+**탭 구성:** Overview | Structure | Hydrotest | Spool | Equipment | EIT Tray | Cable(형상) | Sub-system | 고급 진단(구 Tools)
 (구 Cable Pull/Cable(Node) 노드·박스 집계 탭은 2026-07 삭제 — 고급 진단의 box 중복 검사만 유지)
+
+**Structure 탭 (`UI/StructureTab.cs` — 실적 데이터·매칭 없음, CLAUDE.md §15):**
+- `Services/StructureAreaService.Probe`가 Str 파일(`NwdScope.Structure`, 키워드 STR)의
+  레벨1 영역 노드를 읽기 전용 열거 (ScopePreflight 미러 — 인덱스·geometry walk 없음,
+  미발견 시 전체 fallback 안 함)
+- 영역별 체크박스 + 투명도 콤보 → [투명도 적용] = `ApplyStructureTransparency`
+  (`VisualModule.Structure`, **투명도만** — 색은 원본 유지, 반투명 백도면)
+- [선택 항목만 남김] = 체크 안 된 영역 `SetHidden` 토글 — 다른 공종 가시화의 배경 역할
 
 **Overview 탭 (`UI/OverviewTab.cs`, 첫 화면):**
 - 공종 현황 표: 각 탭이 `IOverviewSource.GetOverviewStatus()`로 노출하는 스냅샷

@@ -14,7 +14,8 @@ BuildIndexForTags / BuildIndexForBoxes에 `NwdScope` 파라미터, null = 전체
 **확정 파일명 규약과 스코프 배정**
 ```
 00-02_Trion_Topsides_Subsystem.nwd     ← federated 컨테이너 (어느 스코프에도 미매칭 — 의도)
-├─ 01-02_Trion_TopsidesLQ_Str.nwc      ← 구조. 플러그인 없음 (추후 block no별 공정 시각화 후보)
+├─ 01-02_Trion_TopsidesLQ_Str.nwc      ← 구조. Structure 탭(§15 — 영역 투명도/숨김 백도면).
+│                                        block no별 공정 시각화는 여전히 추후 후보
 ├─ 02-02_Trion_Topsides_HYDROPKG.nwd   ← Hydrotest. SPL 파일 부재 시 스풀도 여기 존재
 ├─ (03-..._SPL.nwd — 있으면)           ← 배관 스풀
 ├─ 04-02_Trion_Topsides_MEQ.nwd        ← Mechanical Equipment
@@ -58,7 +59,8 @@ BuildIndexForTags / BuildIndexForBoxes에 `NwdScope` 파라미터, null = 전체
   fallback 발동 여부는 매칭 Status CSV의 `인덱스 스코프` 행으로 확인
 - Cable node box nwd 파일명 규약 확정 시 `NwdScope.Cable` 키워드 추가 (현재는 0건 fallback으로 동작)
 - 파일명 규약 변경 시 `NwdScope`의 키워드 + `NwdScopeTests`를 같이 갱신할 것
-- Str(구조)·PIPSupport는 플러그인 신설 시 각자 키워드(STR / PIPSUPPORT)로 스코프 추가
+- Str(구조)은 `NwdScope.Structure`(키워드 STR)로 구현됨 — Structure 탭(§15).
+  PIPSupport는 플러그인 신설 시 키워드(PIPSUPPORT)로 스코프 추가
 
 ### 2. WalkAndIndex 조기 정지 (우선순위: 낮음)
 
@@ -611,6 +613,33 @@ master 기준 UX audit의 항목별 판정·근거·보류 목록은 **`docs/UX_
 - **보류(후속 우선순위)**: ① 진행 콜백+중단, ② DPI/반응형(Windows 실측 병행 필수),
   ③ 리스트·통계 통합, ④ Sub-system 선택 UX 재설계(§11 dual-list는 최근 사용자 결정이라 실사용 후),
   ⑤ empty-state 체크리스트(Overview가 정보원 — 각 탭 오류 메시지에 이식), ⑥ 언어 통일.
+
+### 15. Structure(구조) 탭 — 영역 백도면 (구현됨 2026-07 — Windows 검증 대기)
+
+**의도적으로 간단한 기능만** (사용자 결정): Str nwd/nwc의 **레벨1 영역 노드**
+(/QR/LG/STRU/HHI …)를 그대로 나열해 체크박스 + 투명도로 백도면을 만든다.
+실적 데이터·매칭·색상·searcher 없음.
+
+- **영역 열거 = `Services/StructureAreaService.Probe`**: `NwdScope.Structure`(키워드 STR,
+  체인 없음)를 ScopePreflight와 동일한 2단계 매칭(모델 파일명 → 파일 노드 depth≤3)으로
+  읽기 전용 열거 — 인덱스 빌드·geometry walk 없음. **하드 스코프 성격**: Str 미발견 시
+  전체 모델 fallback 안 함(빈 목록 + "파일명 규약 확인" 노트). nwd→nwc 중첩 대비
+  단일 파일노드 래퍼 unwrap(≤3단) 포함 — Windows 실측 확인 필요. 복수 Str 파일(granular)의
+  동명 영역은 이름 기준 병합(OrdinalIgnoreCase).
+- **[투명도 적용]** = `ColorOverrideEngine.ApplyStructureTransparency`(`VisualModule.Structure`):
+  체크 영역에 **투명도만** 오버라이드(색은 원본 유지 — 반투명 백도면). §10 그대로
+  ResetModule→재도색이라 체크 해제 영역 잔존 없음. 투명도 콤보 변경은
+  `UpdateGroupTransparency`(신설 — 색 없는 모듈의 증분 갱신)로 즉시 반영. 기본 70%.
+- **[선택 항목만 남김]** = 체크 안 된 영역만 `SetHidden(true)` 토글(EitTray `_trayHiddenByStage`
+  패턴) — 구조 중 선택 영역만 남아 타 공종 가시화의 배경 역할. 타 공종 객체는 안 건드림.
+  `이 탭/전체 가시화 해제`가 숨김도 복원. 체크 변경 후엔 토글 복원 후 재실행(재숨김 자동 아님).
+- **문서 변경 감지**: 영역 ModelItem이 조회 시점 문서 기준이라 `DocId`(파일경로+모델수 —
+  searcher `GetDocumentId`와 동일 규칙) 불일치 시 적용/숨김을 막고 재조회 안내.
+- Overview 배선: 공종 현황 표 첫 행 + NWD Preflight에 Structure 추가. 탭 위치는 Overview 다음
+  (파일 규약 01번이자 "배경 먼저 세팅" 동선).
+- **잔여**: 영역별 3D 선택·포커스, block no별 공정 시각화(원 후보), ScopePanel 배선 —
+  전부 필요해질 때. Windows 검증 포인트: 레벨1이 실제 영역 깊이인가(래퍼 unwrap 동작),
+  대형 Str에서 `SetHidden`/투명도 배치 시간.
 
 ## 레슨런 (하드 트러블슈팅 기록 — 다시 헤매지 말 것)
 

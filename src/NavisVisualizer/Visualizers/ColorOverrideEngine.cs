@@ -17,6 +17,7 @@ namespace NavisVisualizer.Visualizers
         EitTray,
         CableLine,    // Cable(형상) 탭 (구 노드/박스 탭 Cable은 2026-07 삭제)
         SubSystem,
+        Structure,    // 구조 탭 — 색 없이 영역별 투명도만 오버라이드 (백도면 용도)
     }
 
     public class ColorOverrideEngine
@@ -511,6 +512,49 @@ namespace NavisVisualizer.Visualizers
             _cableLineItems.Clear();
             _cableLineGroupOfCable.Clear();
             _cableLineGroupSettings = new Dictionary<string, ColorSetting>();
+        }
+
+        // ============================================================
+        // Structure 탭 — 영역(레벨1 노드)별 투명도만 오버라이드 (VisualModule.Structure)
+        // ============================================================
+
+        /// <summary>
+        /// Structure: 체크된 영역 컬렉션에 투명도만 오버라이드한다 — 색은 원본 유지
+        /// (다른 공종을 볼 때 반투명 백도면 역할). §10 그대로: 시작 시 ResetModule로
+        /// 직전 적용 누적분을 원복하므로 체크 해제된 영역의 투명도 잔존이 없다.
+        /// 캐시 키는 영역명 — UpdateGroupTransparency로 증분 투명도 조정이 된다.
+        /// </summary>
+        /// <returns>실제로 오버라이드된 영역 수.</returns>
+        public int ApplyStructureTransparency(
+            Document doc,
+            List<(string AreaName, ModelItemCollection Items, double Transparency)> groups)
+        {
+            ResetModule(doc, VisualModule.Structure);
+            var cache = ModuleCache(VisualModule.Structure);
+
+            int applied = 0;
+            foreach (var g in groups)
+            {
+                if (g.Items == null || g.Items.Count == 0) continue;
+                cache[g.AreaName] = g.Items;
+                // 0%여도 항상 호출 — ApplyOverride와 같은 이유 (이전 오버라이드 잔존 방지는
+                // ResetModule이 담당하지만, 증분 조정 경로와 캐시 의미를 일치시킨다).
+                doc.Models.OverridePermanentTransparency(g.Items, g.Transparency);
+                AccumulatePainted(VisualModule.Structure, g.Items);
+                applied++;
+            }
+            return applied;
+        }
+
+        /// <summary>캐시된 그룹 컬렉션에 투명도만 재적용 — Structure처럼 색이 없는 모듈의 증분 갱신용.</summary>
+        public bool UpdateGroupTransparency(Document doc, VisualModule module, string groupKey, double transparency)
+        {
+            if (!_stageCollectionsByModule.TryGetValue(module, out var cache))
+                return false;
+            if (!cache.TryGetValue(groupKey, out var collection))
+                return false;
+            doc.Models.OverridePermanentTransparency(collection, transparency);
+            return true;
         }
 
         /// <summary>모듈 자기 캐시의 stage 컬렉션에만 색/투명도를 재적용한다.</summary>

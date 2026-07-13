@@ -8,7 +8,7 @@ namespace NavisVisualizer.Searchers
     /// federated 문서(전체 nwd 묶음)에서 대상 공종 파일만 인덱싱해 빌드 시간을 줄인다.
     ///
     /// 확정 파일명 규약 (예: 00-02_Trion_Topsides_Subsystem.nwd 하위):
-    ///   *_Str.nwc        구조 (플러그인 없음 — 스코프 제외가 곧 성능 이득)
+    ///   *_Str.nwc        구조 (Structure 탭 — 레벨1 영역 노드만 열거, geometry walk 없음)
     ///   *_HYDROPKG.nwd   Hydrotest 패키지 (SPL 파일이 없으면 스풀도 여기 존재)
     ///   *_SPL*.nwd       배관 스풀 (있을 때 우선 탐색 대상)
     ///   *_MEQ.nwd        Mechanical Equipment
@@ -59,6 +59,10 @@ namespace NavisVisualizer.Searchers
         public static readonly NwdScope EitTray = new NwdScope("EIT", "EIT");
         /// <summary>node box nwd 파일명 규약 확정 시 키워드 추가 (미매칭 시 전체 fallback으로 동작은 유지).</summary>
         public static readonly NwdScope Cable = new NwdScope("CABLE", "CABLE");
+        /// <summary>구조(Str) — Structure 탭 전용. 인덱스 빌드 없이 Str 파일의 레벨1 영역 노드만
+        /// 열거한다(StructureAreaService). 하드 스코프 성격: Str 파일 미발견 시 전체 모델을
+        /// 훑지 않고 빈 목록 + 진단 노트만 남긴다 (전 트리 walk로 인한 지연 방지).</summary>
+        public static readonly NwdScope Structure = new NwdScope("STR", "STR");
         // (구 SubSystem 합집합 스코프는 폐기 — Sub-system 탭이 공종별로 Equipment/Hydrotest/EitTray/Cable
         //  스코프를 각각 레벨 타겟하므로 union 불필요. 2026-07 §11.)
 

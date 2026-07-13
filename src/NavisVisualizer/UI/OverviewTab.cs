@@ -65,6 +65,7 @@ namespace NavisVisualizer.UI
         /// <summary>Preflight로 점검할 공종 스코프 (공종 라벨, 스코프 체인).</summary>
         private static readonly (string Label, NwdScope Scope)[] PreflightScopes =
         {
+            ("Structure",          NwdScope.Structure),  // Str — 미발견 시 Structure 탭 영역 0개 (전체 fallback 없음)
             ("Spool",              NwdScope.Spool),      // SPL→HYDROPKG 체인
             ("Hydrotest",          NwdScope.Hydrotest),
             ("Equipment",          NwdScope.Equipment),
@@ -163,7 +164,7 @@ namespace NavisVisualizer.UI
             layout.Controls.Add(new Label
             {
                 Text = "※ 미발견이어도 하드 스코프가 아닌 탭은 전체 모델 fallback으로 동작합니다 (속도만 손해).\n" +
-                       "   EIT(하드 스코프)는 미발견 시 매칭 0건 — 파일명 규약을 먼저 확인하세요.",
+                       "   EIT(하드 스코프)는 미발견 시 매칭 0건, Structure는 영역 0개 — 파일명 규약을 먼저 확인하세요.",
                 ForeColor = Color.Gray,
                 Dock = DockStyle.Fill,
                 Height = 32
