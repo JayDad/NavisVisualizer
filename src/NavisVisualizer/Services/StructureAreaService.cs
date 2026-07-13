@@ -66,15 +66,20 @@ namespace NavisVisualizer.Services
 
             // 이름 기준 병합 — 복수 Str 파일(granular 분할)에 같은 영역명이 있으면 한 행으로.
             var byName = new Dictionary<string, StructureArea>(System.StringComparer.OrdinalIgnoreCase);
-            foreach (var root in roots)
+            for (int i = 0; i < roots.Count; i++)
             {
-                var top = UnwrapSingleFileChild(root);
+                var top = UnwrapSingleFileChild(roots[i]);
                 int unnamed = 0;
                 foreach (ModelItem child in top.Children)
                 {
                     string name = child.DisplayName?.Trim();
                     if (string.IsNullOrEmpty(name))
-                        name = $"(이름 없음 {++unnamed})";   // 무명 노드도 숨김/투명 대상에서 빠지지 않게 포함
+                    {
+                        // 무명 노드도 숨김/투명 대상에서 빠지지 않게 포함. 합성 이름은 위치 기반이라
+                        // 파일 간 정체성이 없음 — 파일명을 붙여 다른 Str 파일의 무명 노드와 병합되지
+                        // 않게 하고, 재조회 시 설정 보존(이름 키)도 파일 순서와 무관하게 유지한다.
+                        name = $"(이름 없음 {++unnamed} · {files[i]})";
+                    }
                     if (!byName.TryGetValue(name, out var area))
                     {
                         area = new StructureArea { Name = name };

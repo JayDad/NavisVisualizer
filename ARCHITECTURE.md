@@ -237,7 +237,7 @@ Apply:
 - 공종 현황 표: 각 탭이 `IOverviewSource.GetOverviewStatus()`로 노출하는 스냅샷
   (데이터 소스·건수 / 인덱스 건수 / 3D 적용 상태 / 매칭·미매칭 / 인덱스 스코프·fallback).
   행 더블클릭 = 해당 탭 이동. 상태 캐시 없음 — Overview 탭 선택 시 자동 재조회 + [새로고침]
-- NWD Preflight: `Services/ScopePreflight.Probe`가 스코프 체인(SPL→HYDROPKG/HYDROPKG/MEQ/EIT/CABLE)별
+- NWD Preflight: `Services/ScopePreflight.Probe`가 스코프 체인(STR/SPL→HYDROPKG/HYDROPKG/MEQ/EIT/CABLE)별
   대상 파일 발견 여부를 인덱스 빌드 없이 판정 (ResolveScopeRoots 2단계 매칭의 읽기 전용 미러 —
   searcher 진단 상태를 안 건드림). 파일명 규약·하드 스코프 불일치를 적용 전에 노출
 

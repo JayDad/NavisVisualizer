@@ -586,7 +586,8 @@ master 기준 UX audit의 항목별 판정·근거·보류 목록은 **`docs/UX_
 
 - **3D 적용 상태 표시 `UI/ApplyStatePanel.cs`** (audit P0-1): 가시화 버튼 행에 `3D: 미적용 /
   {기준}·시각 적용됨 / ⚠ 3D 업데이트 필요(사유)` 라벨 + stale 시 [가시화 적용] 버튼 배경 강조.
-  6개 탭 전부 배선 — MarkStale 트리거는 소스 전환/재로드·기준일·단계 체크·(Sub-system) 선택/모드.
+  7개 탭 전부 배선(Structure 포함 — §15) — MarkStale 트리거는 소스 전환/재로드·기준일·단계 체크·
+  (Sub-system) 선택/모드·(Structure) 영역 체크/재조회.
   기존 `_lblStats`에 얹던 ⚠ 경고 문구는 전부 제거 (**통계 라벨은 통계만** — 경고가 통계를 덮어쓰던
   문제 해소). 색/투명도 변경은 증분 즉시 반영이라 stale 아님.
 - **버튼 명칭 통일** (P0-2): `적용`→`가시화 적용`(전 탭), ScopePanel `적용`→`범위 적용`,
@@ -603,7 +604,7 @@ master 기준 UX audit의 항목별 판정·근거·보류 목록은 **`docs/UX_
   날짜 컬럼 확보 시 §3 패턴으로 복원), Sub-system 검색폭 88→120 + **`이 탭 가시화 해제` 버튼 신설**
   (§10 잔여 해소 — `ResetModule(VisualModule.SubSystem)`).
 - **Overview 탭 `UI/OverviewTab.cs` + `Services/ScopePreflight.cs`** (P1 — 후속 1순위였던 것,
-  사용자 요청으로 구현): 첫 번째 탭. ① 공종 현황 표 — 6개 탭이 `IOverviewSource.GetOverviewStatus()`
+  사용자 요청으로 구현): 첫 번째 탭. ① 공종 현황 표 — 7개 탭(Structure 포함 — §15)이 `IOverviewSource.GetOverviewStatus()`
   로 {데이터 소스·건수 / 인덱스 건수 / 3D 적용 상태(ApplyStatePanel의 IsStale·Text 재사용) /
   매칭·미매칭 / 인덱스 스코프 노트·fallback}을 노출, 행 더블클릭 = 그 탭으로 이동.
   ② NWD Preflight — `ScopePreflight.Probe`가 ResolveScopeRoots의 2단계 매칭(모델 파일명 →
