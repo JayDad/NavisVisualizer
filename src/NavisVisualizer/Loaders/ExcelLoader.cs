@@ -471,6 +471,63 @@ namespace NavisVisualizer.Loaders
             return result;
         }
 
+        /// <summary>
+        /// Sub-system 형상 전용 Excel — 정식 진척이 아니라 "sub-system별 형상만 보여주기 위한" 목록.
+        /// 하나의 엑셀에 시트명 Hydrotest/MEQ/Cable로 각 공종 (ID, Sub-system) 표가 들어 있다:
+        ///   Hydrotest → Piping (Test Package No.) / MEQ → Equipment (Tag No.) / Cable → Cable (Cable No)
+        /// 각 시트에서 ID·Sub-system 컬럼만 읽어 날짜 없는 SubSystemElement(FromBare)로 만든다.
+        /// 시트/컬럼이 없으면 그 공종만 조용히 건너뛰고 <paramref name="notes"/>에 사유를 남긴다.
+        /// </summary>
+        public static List<SubSystemElement> LoadSubSystemShapes(string filePath, out List<string> notes)
+        {
+            notes = new List<string>();
+            var result = new List<SubSystemElement>();
+            var subNames = new[] { "Sub-system", "Sub-System", "SubSystem", "Sub System", "SUB-SYSTEM", "Subsystem" };
+            var specs = new[]
+            {
+                new { Sheet = "Hydrotest", Disc = SubSystemDiscipline.Piping,
+                      IdNames = new[] { "Test Package No.", "Test Package No", "TestPkgId", "Test Pkg No", "PKGNO" } },
+                new { Sheet = "MEQ", Disc = SubSystemDiscipline.Equipment,
+                      IdNames = new[] { "Tag No.", "Tag No", "TagNo", "TAG NO", "TAG" } },
+                new { Sheet = "Cable", Disc = SubSystemDiscipline.Cable,
+                      IdNames = new[] { "Cable No", "Cable No.", "CableNo", "CABLE NO", "Cable Number" } },
+            };
+
+            using (var stream = File.Open(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            using (var reader = ExcelReaderFactory.CreateReader(stream))
+            {
+                var dataSet = reader.AsDataSet();
+                foreach (var spec in specs)
+                {
+                    var table = dataSet.Tables.Cast<System.Data.DataTable>()
+                        .FirstOrDefault(t => t.TableName.Equals(spec.Sheet, StringComparison.OrdinalIgnoreCase));
+                    if (table == null) { notes.Add($"{spec.Sheet} 시트 없음"); continue; }
+
+                    int headerRow = FindHeaderRowInTable(table, spec.IdNames);
+                    if (headerRow < 0) { notes.Add($"{spec.Sheet}: ID 헤더 없음"); continue; }
+
+                    var cols = BuildColumnMap(table, headerRow);
+                    int idCol = FindColumn(cols, spec.IdNames);
+                    int subCol = FindColumn(cols, subNames);
+                    if (idCol < 0 || subCol < 0) { notes.Add($"{spec.Sheet}: 컬럼 부족"); continue; }
+
+                    int added = 0;
+                    var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    for (int r = headerRow + 1; r < table.Rows.Count; r++)
+                    {
+                        string id = table.Rows[r][idCol]?.ToString()?.Trim();
+                        string sub = table.Rows[r][subCol]?.ToString()?.Trim();
+                        if (string.IsNullOrEmpty(id) || string.IsNullOrEmpty(sub)) continue;
+                        if (!seen.Add(id)) continue;   // 시트 내 중복 ID는 첫 행만
+                        result.Add(SubSystemElement.FromBare(id, sub, spec.Disc));
+                        added++;
+                    }
+                    notes.Add($"{spec.Sheet} {added}건");
+                }
+            }
+            return result;
+        }
+
         #region Shared helpers
 
         private static Dictionary<string, int> BuildColumnMap(System.Data.DataTable table, int headerRowIdx)

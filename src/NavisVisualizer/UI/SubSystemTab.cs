@@ -33,7 +33,7 @@ namespace NavisVisualizer.UI
     /// </summary>
     public class SubSystemTab : UserControl, IOverviewSource
     {
-        private enum ApplyMode { Stage, Progress }
+        private enum ApplyMode { Stage, Progress, SystemPalette }
 
         private readonly MainDockablePanel _main;
 
@@ -98,7 +98,7 @@ namespace NavisVisualizer.UI
             {
                 DataLoaded = _elements.Count > 0,
                 DataText = _elements.Count > 0
-                    ? $"OASIS 요소 {_elements.Count:N0}건 · SS {_subSystemNames.Count}개" : "미로드",
+                    ? $"{(_paletteMode ? "Excel 형상" : "OASIS")} 요소 {_elements.Count:N0}건 · SS {_subSystemNames.Count}개" : "미로드",
                 IndexText = anyBuilt ? idx.ToString("N0") : "-",
                 ApplyStateText = _applyState.Text + (_hiddenByKeepOnly != null ? " · 숨김 활성" : ""),
                 ApplyStale = _applyState.IsStale,
@@ -127,22 +127,32 @@ namespace NavisVisualizer.UI
 
         private Dictionary<SubSystemStage, ColorSetting> _stageSettings;
         private Dictionary<ProgressStatus, ColorSetting> _progressSettings;
+        // Excel 형상 import 팔레트: 시스템(sub-system 앞2자리)별 색. 390+ sub-system을 개별 색칠하면
+        // 구분이 안 되므로 앞2자리(=큰 시스템)로 묶어 색을 배정한다 (사용자 결정 2026-07).
+        private Dictionary<string, ColorSetting> _systemColors = new Dictionary<string, ColorSetting>(StringComparer.OrdinalIgnoreCase);
+        private bool _paletteMode;   // true = Excel 형상 소스(단계/진행 대신 시스템 팔레트로 색칠)
 
         private Label _dotOasis;
         private Label _lblOasis;
         // 로드 요약이 라벨 폭을 넘으면 잘리므로 전체 문구를 툴팁으로 노출
         private readonly ToolTip _loadTip = new ToolTip { AutoPopDelay = 15000 };
+        private GroupBox _modeGroup;          // 시각화 모드 그룹 (팔레트 모드에선 숨김)
         private RadioButton _rdoByStage;
         private RadioButton _rdoByProgress;
         private DateTimePicker _dtpReference;
+        private Label _stageColorLabel;       // "단계 색상" 헤더 (팔레트 모드에선 숨김)
         private Panel _stagePanel;
         private Panel _progressPanel;
+        private Control _colorEditRow;        // 색상 편집 토글 행 (팔레트 모드에선 숨김)
+        private Label _paletteLabel;          // "시스템(앞2자리) 색상" 헤더 (팔레트 모드에서만)
+        private Panel _paletteLegend;         // 시스템→색 범례 (팔레트 모드에서만, 로드 후 동적 구성)
         private TextBox _txtFilter;
         private Debouncer _filterDebounce;   // 키 입력마다 좌측 목록 재생성 방지 (성능 audit P0-1)
         private Button _btnDelayed;
         private Button _btnDetail;
-        private Button _btnKeepOnly;   // 선택 항목만 남김 (선택 외 요소 숨김 isolate 토글)
-        // isolate로 숨긴 요소 복원용 — 재로드/해제/문서 전환 시 원복
+        private Button _btnKeepOnly;        // 선택 항목만 남김 (선택 sub-system만 격리, isolate 토글)
+        private Button _btnHideUnmatched;   // 매칭 안 된 항목 숨기기 (전체 매칭분 유지, isolate 토글)
+        // 두 isolate 토글이 공유하는 숨김 복원용 — 재로드/해제/문서 전환 시 원복
         private Autodesk.Navisworks.Api.ModelItemCollection _hiddenByKeepOnly;
         private ListView _lvAll;
         private ListView _lvSelected;
@@ -201,18 +211,22 @@ namespace NavisVisualizer.UI
             // 색상 그리드·선택/모드/기준일 핸들러가 참조하므로 먼저 생성 (버튼 연결은 버튼 행에서).
             _applyState = new ApplyStatePanel();
 
-            // ----- OASIS 로드 행 -----
+            // ----- 데이터 로드 행 (OASIS 정식 / Excel 형상) -----
             var loadPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 30, AutoSize = false, WrapContents = false };
             var btnOasis = new Button { Text = "OASIS 로드", Width = 100, Height = 24 };
             btnOasis.Click += (s, e) => LoadOasis();
+            // 형상 전용 Excel(시트: Hydrotest/MEQ/Cable) — 정식 진척이 아니라 sub-system별 형상 보기용.
+            var btnExcel = new Button { Text = "Excel 형상 import", Width = 130, Height = 24 };
+            btnExcel.Click += (s, e) => LoadExcelShapes();
             _dotOasis = new Label { Text = "●", AutoSize = true, ForeColor = DotEmpty, Padding = new Padding(4, 5, 0, 0) };
             _lblOasis = new Label { Text = "(미로드)", AutoSize = true, ForeColor = Color.Gray, Padding = new Padding(0, 5, 0, 0) };
             loadPanel.Controls.Add(btnOasis);
+            loadPanel.Controls.Add(btnExcel);
             loadPanel.Controls.Add(_dotOasis);
             loadPanel.Controls.Add(_lblOasis);
 
             // ----- 시각화 모드 + 기준일 -----
-            var modeGroup = new GroupBox { Text = "시각화 모드", Dock = DockStyle.Fill, Height = 50 };
+            _modeGroup = new GroupBox { Text = "시각화 모드", Dock = DockStyle.Fill, Height = 50 };
             var modeFlow = new FlowLayoutPanel
             {
                 Dock = DockStyle.Fill,
@@ -239,8 +253,9 @@ namespace NavisVisualizer.UI
                 { RefreshLeftList(); RefreshRightList(); UpdateStats(); _applyState.MarkStale("기준일 변경"); }
             };
             modeFlow.Controls.Add(_dtpReference);
-            modeGroup.Controls.Add(modeFlow);
+            _modeGroup.Controls.Add(modeFlow);
 
+            _stageColorLabel = new Label { Text = "단계 색상", Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 18 };
             _stagePanel = BuildColorGrid(
                 SubSystemStageInfo.GridOrder,
                 SubSystemStageInfo.Labels, _stageSettings, _stageChecks, ApplyMode.Stage);
@@ -248,16 +263,24 @@ namespace NavisVisualizer.UI
                 ProgressStatusInfo.Ordered,
                 ProgressStatusInfo.Labels, _progressSettings, _progressChecks, ApplyMode.Progress);
             _progressPanel.Visible = false;
+            _colorEditRow = ColorEditCollapse.BuildToggleRow(_stagePanel, _progressPanel);
+
+            // 팔레트 모드(Excel 형상) 전용: 시스템(앞2자리)→색 범례 — 로드 후 RebuildPaletteLegend가 채움.
+            _paletteLabel = new Label { Text = "시스템(앞2자리) 색상", Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 18, Visible = false };
+            _paletteLegend = new Panel { Dock = DockStyle.Fill, AutoSize = true, Visible = false };
 
             var selGroup = BuildSelectionGroup();
 
             // ----- 버튼 행 (색상 그리드 바로 아래 = 선택창 위. 다른 탭과 동일 배치) -----
-            // 1행(가시화): 선택과 무관하게 전체 Sub-system을 단계색으로 칠한다.
+            // 1행(가시화): 선택과 무관하게 전체 Sub-system을 칠한다. "매칭 안 된 항목 숨기기"는
+            // 선택과 무관한 전역 정리라 이 행에, "선택 항목만 남김"은 선택 대상이라 선택창 하단에 둔다.
             var btnRowVis = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 34, AutoSize = true };
             var btnApply = new Button { Text = "가시화 적용", Width = 100 };
+            _btnHideUnmatched = new Button { Text = "매칭 안 된 항목 숨기기", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(8, 1, 8, 1) };
             btnApply.Click += BtnApply_Click;
+            _btnHideUnmatched.Click += BtnHideUnmatched_Click;
             _applyState.AttachApplyButton(btnApply);
-            btnRowVis.Controls.AddRange(new Control[] { btnApply, _applyState });
+            btnRowVis.Controls.AddRange(new Control[] { btnApply, _btnHideUnmatched, _applyState });
 
             // 2행(해제)
             var btnRowReset = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 34, AutoSize = true };
@@ -282,12 +305,15 @@ namespace NavisVisualizer.UI
             _lblStats = new Label { Dock = DockStyle.Fill, Text = "로드된 데이터 없음", AutoSize = false, Height = 110 };
 
             layout.Controls.Add(loadPanel);
-            layout.Controls.Add(modeGroup);
-            layout.Controls.Add(new Label { Text = "단계 색상", Font = new Font(Font, FontStyle.Bold), Dock = DockStyle.Fill, Height = 18 });
+            layout.Controls.Add(_modeGroup);
+            layout.Controls.Add(_stageColorLabel);
             layout.Controls.Add(_stagePanel);
             layout.Controls.Add(_progressPanel);
             // 색상 편집(▼·투명도)은 기본 접힘 — 체크박스·스와치만 상시 노출 (UX audit P1)
-            layout.Controls.Add(ColorEditCollapse.BuildToggleRow(_stagePanel, _progressPanel));
+            layout.Controls.Add(_colorEditRow);
+            // 팔레트 모드 전용 헤더·범례 (Excel 형상 소스일 때만 보임)
+            layout.Controls.Add(_paletteLabel);
+            layout.Controls.Add(_paletteLegend);
             // 버튼 행을 선택창 위로 (사용자 요청): 색상 그리드 → 버튼 → 통계 → 선택창.
             layout.Controls.Add(btnRowVis);
             layout.Controls.Add(btnRowReset);
@@ -297,6 +323,7 @@ namespace NavisVisualizer.UI
             layout.Controls.Add(selGroup);
 
             Controls.Add(layout);
+            UpdateModeUiVisibility();
         }
 
         /// <summary>공통 색상 그리드 (2열 × N행) — 단계/진행상태 두 모드가 공유하는 빌더.</summary>
@@ -577,25 +604,12 @@ namespace NavisVisualizer.UI
 
                 _elements = list;
                 _master = master;
+                _paletteMode = false;          // OASIS = 단계/진행 색칠
                 RebuildNames(out int outsideMaster);
-
-                _selected.RemoveWhere(name => !_subSystemNames.Contains(name, StringComparer.OrdinalIgnoreCase));
-                _selectionOrder.RemoveAll(name => !_selected.Contains(name));
-
-                _matchedIds.Clear();
-                _unmatchedIds.Clear();
-                _appliedSubSystems.Clear();
-                _appliedOnce = false;
-                _appliedMode = null;
-
-                // 단계 모드·MCC 지연 담기는 마스터가 있을 때만
-                _rdoByStage.Enabled = _master != null;
-                _btnDelayed.Enabled = _master != null;
-                if (_master == null && _rdoByStage.Checked)
-                    _rdoByProgress.Checked = true;
+                AfterElementsLoaded();
 
                 string prj = string.IsNullOrEmpty(settings.ProjectNo) ? "전체" : settings.ProjectNo;
-                _loadLabel = $"{settings.Database}/{prj} · {DateTime.Now:HH:mm}";
+                _loadLabel = $"OASIS {settings.Database}/{prj} · {DateTime.Now:HH:mm}";
                 _dotOasis.ForeColor = DotLoaded;
                 _lblOasis.ForeColor = Color.Black;
                 _lblOasis.Text = $"요소 {list.Count:N0}건 · Sub-system {_subSystemNames.Count}개{masterNote}"
@@ -604,14 +618,6 @@ namespace NavisVisualizer.UI
                     + (disciplineNotes.Count > 0 ? " · " + string.Join(" · ", disciplineNotes) : "");
                 // 문구가 길어 창 폭에 잘릴 수 있음 — 전체 문구는 마우스 오버 툴팁으로 제공
                 _loadTip.SetToolTip(_lblOasis, _lblOasis.Text);
-                _needsIndexRebuild = true;   // Cable 레벨 타겟 인덱스는 로드 셋 기반 — 재빌드 강제
-
-                RefreshLeftList();
-                RefreshRightList();
-                UpdateSelCount();
-                UpdateStats();
-                // 3D 색이 남아 있으면 이전 로드 기준 — 상태 표시기로 경고 (P0-1)
-                _applyState.MarkStale("데이터 재로드");
             }
             catch (Exception ex)
             {
@@ -620,6 +626,179 @@ namespace NavisVisualizer.UI
                 _lblOasis.Text = "로드 실패";
                 MessageBox.Show($"OASIS 로드 실패:\n{ex.Message}", "오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
+        }
+
+        /// <summary>
+        /// Sub-system 형상 전용 Excel(시트 Hydrotest/MEQ/Cable) import — 정식 진척이 아니라
+        /// sub-system별 형상을 시스템(앞2자리) 색으로 보여주기 위한 소스. 마스터/날짜 없음 →
+        /// 팔레트 모드로 전환. 마지막 로드 소스가 활성(비정식 단일 슬롯 — OASIS와 상호 교체).
+        /// </summary>
+        private void LoadExcelShapes()
+        {
+            using (var dlg = new OpenFileDialog
+            {
+                Title = "Sub-system 형상 Excel (시트: Hydrotest / MEQ / Cable)",
+                Filter = "Excel 파일 (*.xlsx;*.xls;*.xlsb)|*.xlsx;*.xls;*.xlsb|모든 파일|*.*"
+            })
+            {
+                if (dlg.ShowDialog() != DialogResult.OK) return;
+
+                // 재로드 시 매칭 셋이 바뀌므로 isolate 숨김을 먼저 원복.
+                RestoreKeepOnlyHidden(_main.GetDocument());
+                try
+                {
+                    var list = ExcelLoader.LoadSubSystemShapes(dlg.FileName, out List<string> notes);
+                    if (list.Count == 0)
+                    {
+                        _dotOasis.ForeColor = DotFailed;
+                        _lblOasis.ForeColor = DotFailed;
+                        _lblOasis.Text = "형상 0건 — 시트/컬럼 확인";
+                        _loadTip.SetToolTip(_lblOasis, string.Join(" · ", notes));
+                        MessageBox.Show("형상 데이터를 찾지 못했습니다.\n시트명(Hydrotest/MEQ/Cable)과 ID·Sub-system 컬럼을 확인하세요.\n\n"
+                            + string.Join("\n", notes), "형상 Excel", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
+
+                    _elements = list;
+                    _master = null;                // 형상 전용 — 마스터/날짜 없음
+                    _paletteMode = true;           // 시스템(앞2자리) 팔레트로 색칠
+                    RebuildNames(out _);
+                    AfterElementsLoaded();         // 여기서 RebuildSystemColors도 실행됨
+
+                    _loadLabel = $"Excel 형상: {Path.GetFileName(dlg.FileName)} · {DateTime.Now:HH:mm}";
+                    _dotOasis.ForeColor = DotLoaded;
+                    _lblOasis.ForeColor = Color.Black;
+                    _lblOasis.Text = $"형상 요소 {list.Count:N0}건 · Sub-system {_subSystemNames.Count}개 · 시스템 {_systemColors.Count}개 · "
+                        + string.Join(" · ", notes);
+                    _loadTip.SetToolTip(_lblOasis, _lblOasis.Text);
+                }
+                catch (Exception ex)
+                {
+                    _dotOasis.ForeColor = DotFailed;
+                    _lblOasis.ForeColor = DotFailed;
+                    _lblOasis.Text = "Excel 로드 실패";
+                    MessageBox.Show($"Excel 형상 로드 실패:\n{ex.Message}", "오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+        }
+
+        /// <summary>OASIS/Excel 공통 로드 후처리 — 선택 정리·적용 상태 리셋·모드 게이팅·UI 갱신.
+        /// 호출 전 _elements·_master·_paletteMode와 RebuildNames가 완료돼 있어야 한다.</summary>
+        private void AfterElementsLoaded()
+        {
+            _selected.RemoveWhere(name => !_subSystemNames.Contains(name, StringComparer.OrdinalIgnoreCase));
+            _selectionOrder.RemoveAll(name => !_selected.Contains(name));
+
+            _matchedIds.Clear();
+            _unmatchedIds.Clear();
+            _appliedSubSystems.Clear();
+            _appliedOnce = false;
+            _appliedMode = null;
+
+            // 팔레트 모드(Excel)는 단계/진행이 의미 없음 — 단계 모드·MCC 지연은 마스터가 있을 때만.
+            _rdoByStage.Enabled = !_paletteMode && _master != null;
+            _btnDelayed.Enabled = !_paletteMode && _master != null;
+            if (_master == null && _rdoByStage.Checked)
+                _rdoByProgress.Checked = true;
+
+            if (_paletteMode)
+                RebuildSystemColors();      // 시스템(앞2자리)→색 배정 + 범례 구성
+            UpdateModeUiVisibility();
+
+            _needsIndexRebuild = true;      // 레벨 타겟 인덱스는 로드 셋 기반 — 재빌드 강제
+
+            RefreshLeftList();
+            RefreshRightList();
+            UpdateSelCount();
+            UpdateStats();
+            // 3D 색이 남아 있으면 이전 로드 기준 — 상태 표시기로 경고 (P0-1)
+            _applyState.MarkStale("데이터 재로드");
+        }
+
+        // ----- 시스템(앞2자리) 팔레트 -----
+
+        /// <summary>sub-system 코드의 앞 2자리 = 큰 시스템 구분 (0104-00 → "01"). 2자 미만이면 전체.</summary>
+        private static string SystemPrefix(string subSystem)
+        {
+            string s = (subSystem ?? "").Trim();
+            return s.Length >= 2 ? s.Substring(0, 2) : s;
+        }
+
+        /// <summary>로드된 요소의 시스템(앞2자리)마다 구분색을 배정하고 범례를 다시 그린다.
+        /// 정렬된 시스템 목록 기준 인덱스라 재로드/재적용 시 색이 안정적이다.</summary>
+        private void RebuildSystemColors()
+        {
+            var prefixes = _elements
+                .Select(el => SystemPrefix(el.SubSystem))
+                .Where(p => !string.IsNullOrEmpty(p))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            _systemColors = new Dictionary<string, ColorSetting>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < prefixes.Count; i++)
+                _systemColors[prefixes[i]] = new ColorSetting { DisplayColor = PaletteColor(i, prefixes.Count), Transparency = 0.0 };
+
+            RebuildPaletteLegend(prefixes);
+        }
+
+        /// <summary>범례(시스템→색 스와치)를 팔레트 패널에 다시 채운다 — 로드 후 시스템 수에 맞춰 동적 구성.</summary>
+        private void RebuildPaletteLegend(List<string> prefixes)
+        {
+            _paletteLegend.Controls.Clear();
+            var grid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 12, AutoSize = true };
+            for (int i = 0; i < prefixes.Count; i++)
+            {
+                var swatch = new Panel
+                {
+                    Width = 20, Height = 16, BorderStyle = BorderStyle.FixedSingle,
+                    BackColor = _systemColors[prefixes[i]].DisplayColor,
+                    Margin = new Padding(2, 2, 0, 2),
+                };
+                var lbl = new Label { Text = prefixes[i], AutoSize = true, Padding = new Padding(2, 2, 8, 0) };
+                int col = (i % 6) * 2;
+                int row = i / 6;
+                grid.Controls.Add(swatch, col, row);
+                grid.Controls.Add(lbl, col + 1, row);
+            }
+            _paletteLegend.Controls.Add(grid);
+        }
+
+        /// <summary>golden-angle HSV로 시스템 수에 맞춰 구분색 생성 — 몇 개든 인접색이 안 겹치게 배분.</summary>
+        private static Color PaletteColor(int index, int total)
+        {
+            double hue = (index * 137.508) % 360.0;      // 황금각 — 균등 분산
+            return ColorFromHsv(hue, 0.62, 0.92);
+        }
+
+        private static Color ColorFromHsv(double hue, double sat, double val)
+        {
+            int hi = (int)(hue / 60) % 6;
+            double f = hue / 60 - Math.Floor(hue / 60);
+            double v = val * 255, p = v * (1 - sat), q = v * (1 - f * sat), t = v * (1 - (1 - f) * sat);
+            int V = (int)Math.Round(v), P = (int)Math.Round(p), Q = (int)Math.Round(q), T = (int)Math.Round(t);
+            switch (hi)
+            {
+                case 0: return Color.FromArgb(V, T, P);
+                case 1: return Color.FromArgb(Q, V, P);
+                case 2: return Color.FromArgb(P, V, T);
+                case 3: return Color.FromArgb(P, Q, V);
+                case 4: return Color.FromArgb(T, P, V);
+                default: return Color.FromArgb(V, P, Q);
+            }
+        }
+
+        /// <summary>팔레트 모드(Excel 형상)면 단계/진행 UI를 숨기고 시스템 범례를, 아니면 반대로 보인다.</summary>
+        private void UpdateModeUiVisibility()
+        {
+            bool pal = _paletteMode;
+            _modeGroup.Visible = !pal;
+            _stageColorLabel.Visible = !pal;
+            _stagePanel.Visible = !pal && _rdoByStage.Checked;
+            _progressPanel.Visible = !pal && !_rdoByStage.Checked;
+            _colorEditRow.Visible = !pal;
+            _paletteLabel.Visible = pal;
+            _paletteLegend.Visible = pal;
         }
 
         /// <summary>
@@ -796,10 +975,18 @@ namespace NavisVisualizer.UI
                 int count = ElementCount(name);
 
                 var item = new ListViewItem("■") { UseItemStyleForSubItems = false, Tag = name };
-                // 스와치 = 실제 칠해질 마스터 단계색(기준일) — 마스터 없으면 중립 회색
-                var stg = StageOf(m, referenceDate);
-                item.ForeColor = stg.HasValue && _stageSettings.TryGetValue(stg.Value, out var st)
-                    ? st.DisplayColor : Color.DimGray;
+                // 스와치 = 실제 칠해질 색. 팔레트 모드는 시스템(앞2자리) 색, 아니면 마스터 단계색(기준일).
+                if (_paletteMode)
+                {
+                    item.ForeColor = _systemColors.TryGetValue(SystemPrefix(name), out var sc)
+                        ? sc.DisplayColor : Color.DimGray;
+                }
+                else
+                {
+                    var stg = StageOf(m, referenceDate);
+                    item.ForeColor = stg.HasValue && _stageSettings.TryGetValue(stg.Value, out var st)
+                        ? st.DisplayColor : Color.DimGray;
+                }
                 item.SubItems.Add(name);
                 item.SubItems.Add(m != null ? SubSystemStageInfo.Labels[m.GetStageAtDate(referenceDate)] : "-");
                 item.SubItems.Add(m?.PlanText(referenceDate) ?? "-");
@@ -871,8 +1058,7 @@ namespace NavisVisualizer.UI
         private void ModeChanged()
         {
             if (_stagePanel == null || _progressPanel == null) return; // 초기화 중 이벤트 방어
-            _stagePanel.Visible = _rdoByStage.Checked;
-            _progressPanel.Visible = !_rdoByStage.Checked;
+            UpdateModeUiVisibility();   // 팔레트 모드 여부 + 단계/진행 그리드 가시성 일괄 반영
             // 색이 이전 모드 기준으로 남아 있으면 상태 표시기로 경고 (통계 라벨은 통계만 — P0-1)
             _applyState.MarkStale("시각화 모드 변경");
         }
@@ -927,10 +1113,10 @@ namespace NavisVisualizer.UI
             var doc = _main.GetDocument();
             if (doc == null || _elements.Count == 0)
             {
-                MessageBox.Show("OASIS 데이터를 먼저 로드하고 모델을 열어주세요.");
+                MessageBox.Show("데이터(OASIS 또는 Excel 형상)를 먼저 로드하고 모델을 열어주세요.");
                 return;
             }
-            if (_rdoByStage.Checked && _master == null)
+            if (!_paletteMode && _rdoByStage.Checked && _master == null)
             {
                 MessageBox.Show("Sub-system 마스터가 없어 단계별 가시화를 할 수 없습니다.\n요소 진행상태별 모드를 사용하세요.");
                 return;
@@ -951,7 +1137,15 @@ namespace NavisVisualizer.UI
             Application.DoEvents();
             try
             {
-                if (_rdoByStage.Checked)
+                if (_paletteMode)
+                {
+                    // Excel 형상: 시스템(앞2자리)별 팔레트 색 — 단계/진행 없이 형상을 색으로 구분.
+                    mode = ApplyMode.SystemPalette;
+                    var groupSettings = new Dictionary<string, ColorSetting>(_systemColors, StringComparer.OrdinalIgnoreCase);
+                    result = _main.OverrideEngine.ApplySubSystem(doc, targets,
+                        el => SystemPrefix(el.SubSystem), groupSettings, SearcherFor);
+                }
+                else if (_rdoByStage.Checked)
                 {
                     mode = ApplyMode.Stage;
                     var groupSettings = new Dictionary<string, ColorSetting>(StringComparer.OrdinalIgnoreCase);
@@ -991,53 +1185,141 @@ namespace NavisVisualizer.UI
             _appliedSubSystems = new HashSet<string>(_bySubSystem.Keys, StringComparer.OrdinalIgnoreCase);
             _appliedOnce = true;
             _appliedMode = mode;
-            _applyState.SetApplied(
-                $"{(mode == ApplyMode.Stage ? "단계별" : "진행상태별")} · 전체 {_appliedSubSystems.Count}개 sub-system");
+            _applyState.SetApplied($"{ModeLabel(mode)} · 전체 {_appliedSubSystems.Count}개 sub-system");
 
             RefreshRightList();
             UpdateStats(result);
         }
 
+        private static string ModeLabel(ApplyMode mode)
+        {
+            switch (mode)
+            {
+                case ApplyMode.Stage:         return "단계별";
+                case ApplyMode.Progress:      return "진행상태별";
+                default:                      return "시스템 팔레트";
+            }
+        }
+
         /// <summary>
-        /// 선택 항목만 남김(토글): 선택된 Sub-system 외의 매칭 요소를 3D에서 숨겨 선택 요소만
-        /// 남긴다. 다시 누르면 원복. 색칠(가시화 적용)과 독립 — 선택은 색 대상이 아니라 여기서만 쓰인다.
-        /// (StructureTab/CableLineTab의 SetHidden isolate 패턴 — 타 공종 객체는 건드리지 않음.)
+        /// 선택 항목만 남김(토글): 선택한 Sub-system의 매칭 항목만 남기고, 그 항목이 속한 nwd
+        /// 파일 노드 스코프 안의 나머지(비선택 매칭 + 매칭 안 된 geometry)를 전부 숨긴다.
+        /// 무관한 파일(Structure=STR nwd, 별도 Tray 파일 등)은 순회 대상이 아니라 그대로 남는다.
+        /// 색칠(가시화 적용)과 독립 — 선택은 색 대상이 아니라 여기서만 쓰인다. 다시 누르면 원복.
         /// </summary>
         private void BtnKeepOnly_Click(object sender, EventArgs e)
         {
             var doc = _main.GetDocument();
             if (doc == null) { MessageBox.Show("모델을 먼저 열어주세요."); return; }
-            if (_hiddenByKeepOnly != null)   // 이미 isolate 상태 → 전체 보기로 복원
-            {
-                RestoreKeepOnlyHidden(doc);
-                _lblStats.Text = "전체 보기로 복원되었습니다.";
-                return;
-            }
-            if (_elements.Count == 0) { MessageBox.Show("OASIS 데이터를 먼저 로드하세요."); return; }
+            if (_hiddenByKeepOnly != null) { RestoreKeepOnlyHidden(doc); _lblStats.Text = "전체 보기로 복원되었습니다."; return; }
+            if (_elements.Count == 0) { MessageBox.Show("데이터를 먼저 로드하세요."); return; }
             if (_selected.Count == 0)
             {
                 MessageBox.Show("먼저 남길 Sub-system을 선택하세요 (좌측 목록에서 ▶로 우측에 담기).");
                 return;
             }
-
-            // 매칭 인덱스가 있어야 요소→모델 아이템을 찾을 수 있음 — 필요 시 즉석 빌드.
             if (IndexStale(doc)) BuildIndex();
 
-            var others = _elements.Where(el => !_selected.Contains(el.SubSystem)).ToList();
-            var toHide = FindItemsFor(others);   // 선택 외 요소의 매칭 아이템(모델에 없는 건 자동 제외)
-            if (toHide.Count == 0)
-            {
-                MessageBox.Show("숨길 대상이 없습니다 (선택 외 요소가 모델에 없거나 전부 선택됨).");
-                return;
-            }
-
-            doc.Models.SetHidden(toHide, true);
-            _hiddenByKeepOnly = toHide;
-            _btnKeepOnly.Text = "전체 보기";
-            _lblStats.Text = $"선택 항목만 남김: 선택 {_selected.Count}개 Sub-system 외 요소 {toHide.Count:N0}개 숨김 (다시 누르면 복원)";
+            var keep = FindItemsFor(_elements.Where(el => _selected.Contains(el.SubSystem)));
+            if (keep.Count == 0) { MessageBox.Show("선택한 Sub-system의 매칭 항목이 모델에 없습니다."); return; }
+            ApplyScopedHide(doc, keep, _btnKeepOnly,
+                $"선택 항목만 남김: 선택 {_selected.Count}개 Sub-system만 표시");
         }
 
-        /// <summary>isolate 숨김 복원 — 실패(문서 전환으로 stale 컬렉션 등)해도 조용히 상태만 정리.</summary>
+        /// <summary>
+        /// 매칭 안 된 항목 숨기기(토글): 데이터에 매칭된 요소가 있는 nwd 파일 스코프 안에서
+        /// 매칭 요소만 남기고 나머지(매칭 안 된 geometry)를 숨긴다. 선택과 무관 — 전체 매칭분 유지.
+        /// 무관한 파일(Structure 등)은 그대로. 다시 누르면 원복.
+        /// </summary>
+        private void BtnHideUnmatched_Click(object sender, EventArgs e)
+        {
+            var doc = _main.GetDocument();
+            if (doc == null) { MessageBox.Show("모델을 먼저 열어주세요."); return; }
+            if (_hiddenByKeepOnly != null) { RestoreKeepOnlyHidden(doc); _lblStats.Text = "전체 보기로 복원되었습니다."; return; }
+            if (_elements.Count == 0) { MessageBox.Show("데이터를 먼저 로드하세요."); return; }
+            if (IndexStale(doc)) BuildIndex();
+
+            var keep = FindItemsFor(_elements);   // 전체 매칭분 유지
+            if (keep.Count == 0) { MessageBox.Show("매칭된 항목이 없습니다 (가시화 적용/데이터를 확인하세요)."); return; }
+            ApplyScopedHide(doc, keep, _btnHideUnmatched,
+                "매칭 안 된 항목 숨김: 스코프 내 데이터 매칭 요소만 표시");
+        }
+
+        /// <summary>keep 항목이 속한 nwd 파일 스코프 안에서 keep 외를 숨긴다(공유 isolate 실행부).</summary>
+        private void ApplyScopedHide(Autodesk.Navisworks.Api.Document doc,
+            Autodesk.Navisworks.Api.ModelItemCollection keep, Button activeButton, string statsMsg)
+        {
+            // 스코프 트리 순회 + SetHidden은 대형 모델에서 수 초 걸릴 수 있어 진행바로 프리즈 인상 제거.
+            _progressBar.Style = ProgressBarStyle.Marquee;
+            _progressBar.Visible = true;
+            _lblStats.Text = "숨김 대상 계산 중…";
+            Application.DoEvents();
+            Autodesk.Navisworks.Api.ModelItemCollection toHide;
+            try
+            {
+                toHide = ComputeScopedHide(keep);
+                if (toHide.Count > 0) doc.Models.SetHidden(toHide, true);
+            }
+            finally
+            {
+                _progressBar.Visible = false;
+                _progressBar.Style = ProgressBarStyle.Blocks;
+            }
+            if (toHide.Count == 0) { MessageBox.Show("숨길 대상이 없습니다."); return; }
+            _hiddenByKeepOnly = toHide;
+            activeButton.Text = "전체 보기";
+            _lblStats.Text = $"{statsMsg} (숨김 {toHide.Count:N0}개 — 다시 누르면 복원)";
+        }
+
+        /// <summary>
+        /// keep 항목의 nwd 파일 노드 스코프 안에서 keep 경로 밖 서브트리를 숨김 대상으로 모은다.
+        /// ① 각 keep에서 위로 올라가 가장 가까운 파일 노드(NwdScope.LooksLikeFileNode)를 스코프
+        ///    루트로 잡는다(없으면 모델 루트 = 개별 nwd) → keep 없는 파일(Structure 등)은 제외.
+        /// ② 스코프 루트를 prune 순회: keep 서브트리는 유지, keep 경로(조상)면 하강, 그 외는
+        ///    서브트리째 숨김 대상에 추가(geometry는 안 내려감 — 비용은 keep 경로 근처로 한정).
+        /// HashSet&lt;ModelItem&gt; 동등성 의존 — ScopeFilter와 동일(Windows 실측 검증 대상).
+        /// </summary>
+        private Autodesk.Navisworks.Api.ModelItemCollection ComputeScopedHide(
+            Autodesk.Navisworks.Api.ModelItemCollection keep)
+        {
+            var keepSet = new HashSet<Autodesk.Navisworks.Api.ModelItem>();
+            foreach (var mi in keep) keepSet.Add(mi);
+
+            var ancestors = new HashSet<Autodesk.Navisworks.Api.ModelItem>();
+            var scopeRoots = new HashSet<Autodesk.Navisworks.Api.ModelItem>();
+            foreach (var mi in keep)
+            {
+                Autodesk.Navisworks.Api.ModelItem fileNode = null, top = mi;
+                for (var cur = mi; cur != null; cur = cur.Parent)
+                {
+                    ancestors.Add(cur);
+                    if (fileNode == null && NwdScope.LooksLikeFileNode(cur.DisplayName?.Trim())) fileNode = cur;
+                    top = cur;
+                }
+                scopeRoots.Add(fileNode ?? top);   // 파일 노드 우선, 없으면 모델 루트(개별 nwd)
+            }
+
+            var toHide = new Autodesk.Navisworks.Api.ModelItemCollection();
+            foreach (var root in scopeRoots) PruneHide(root, keepSet, ancestors, toHide);
+            return toHide;
+        }
+
+        private static void PruneHide(Autodesk.Navisworks.Api.ModelItem item,
+            HashSet<Autodesk.Navisworks.Api.ModelItem> keepSet,
+            HashSet<Autodesk.Navisworks.Api.ModelItem> ancestors,
+            Autodesk.Navisworks.Api.ModelItemCollection toHide)
+        {
+            if (keepSet.Contains(item)) return;                 // keep 서브트리 유지
+            if (ancestors.Contains(item))                        // keep 경로 — 하강해 형제 가지만 숨김
+            {
+                foreach (var child in item.Children) PruneHide(child, keepSet, ancestors, toHide);
+                return;
+            }
+            toHide.Add(item);                                    // keep 경로 밖 — 서브트리째 숨김
+        }
+
+        /// <summary>isolate 숨김 복원 — 두 토글이 공유. 실패(문서 전환으로 stale 컬렉션 등)해도
+        /// 조용히 상태만 정리하고 두 버튼 표기를 원복한다.</summary>
         private void RestoreKeepOnlyHidden(Autodesk.Navisworks.Api.Document doc)
         {
             if (_hiddenByKeepOnly == null) return;
@@ -1051,6 +1333,7 @@ namespace NavisVisualizer.UI
             }
             _hiddenByKeepOnly = null;
             if (_btnKeepOnly != null) _btnKeepOnly.Text = "선택 항목만 남김";
+            if (_btnHideUnmatched != null) _btnHideUnmatched.Text = "매칭 안 된 항목 숨기기";
         }
 
         /// <summary>이 탭 가시화 해제: Sub-system 색만 제거 — 다른 공종 색은 유지 (§10 ResetModule) + isolate 복원.</summary>
@@ -1097,7 +1380,7 @@ namespace NavisVisualizer.UI
             lines.Add("Sub-system 현황 리포트");
             lines.Add($"출력 시각,{DateTime.Now:yyyy-MM-dd HH:mm}");
             lines.Add($"기준일,{referenceDate:yyyy-MM-dd}");
-            lines.Add($"데이터 소스,{Csv("OASIS " + _loadLabel)}");
+            lines.Add($"데이터 소스,{Csv(_loadLabel)}");
             lines.Add($"Sub-system 마스터,{(_master != null ? $"{_master.Count}개 로드됨" : "미구성 — 요소 파생 목록 기준")}");
             int delayedCount = names.Count(n => { var mm = GetMaster(n); return mm != null && mm.IsDelayed(referenceDate); });
             lines.Add($"MCC 지연,{delayedCount}개 (계획일 경과·P-MCC/MCC 실적 미입력)");
@@ -1326,7 +1609,7 @@ namespace NavisVisualizer.UI
             var lines = new List<string>();
             lines.Add("Sub-system 공종·요소별 상세 현황");
             lines.Add($"기준일,{referenceDate:yyyy-MM-dd}");
-            lines.Add($"데이터 소스,{Csv("OASIS " + _loadLabel)}");
+            lines.Add($"데이터 소스,{Csv(_loadLabel)}");
             lines.Add($"매칭 기준,{(_appliedOnce ? "가시화 적용 결과" : "미적용 — 매칭 미산정")}");
             lines.Add("");
             lines.Add("Sub-system,Description,MCC계획,공종,요소 ID,설명,현재 단계,진행 상태,매칭");
@@ -1416,18 +1699,25 @@ namespace NavisVisualizer.UI
                 if (parts.Count > 0) linesOut.Add(line);
             }
 
-            // 전체 요소 진행 분포
-            int ns = 0, ip = 0, done = 0;
-            foreach (var el in _elements)
+            if (_paletteMode)
             {
-                switch (el.StatusAt(referenceDate))
-                {
-                    case ProgressStatus.Completed: done++; break;
-                    case ProgressStatus.InProgress: ip++; break;
-                    default: ns++; break;
-                }
+                // Excel 형상 = 진척/단계 없음 — 요소 진행 대신 시스템(앞2자리) 색 구분 수를 보인다.
+                linesOut.Add($"시스템(앞2자리) {_systemColors.Count}개 · 형상 색 구분 (진척/단계 없음)");
             }
-            linesOut.Add($"요소 진행: 미착수 {ns} · 진행중 {ip} · 완료 {done}");
+            else
+            {
+                int ns = 0, ip = 0, done = 0;
+                foreach (var el in _elements)
+                {
+                    switch (el.StatusAt(referenceDate))
+                    {
+                        case ProgressStatus.Completed: done++; break;
+                        case ProgressStatus.InProgress: ip++; break;
+                        default: ns++; break;
+                    }
+                }
+                linesOut.Add($"요소 진행: 미착수 {ns} · 진행중 {ip} · 완료 {done}");
+            }
 
             // 선택은 색칠 대상이 아니라 상세보기·선택 항목만 남김(isolate)의 대상임을 안내.
             if (_selected.Count > 0)
@@ -1438,7 +1728,7 @@ namespace NavisVisualizer.UI
 
             if (_appliedOnce)
             {
-                string mode = _appliedMode == ApplyMode.Stage ? "Sub-system 단계별" : "요소 진행상태별";
+                string mode = _appliedMode.HasValue ? ModeLabel(_appliedMode.Value) : "";
                 linesOut.Add($"매칭 {_matchedIds.Count:N0} / 미매칭 {_unmatchedIds.Count:N0} ({mode} · 전체 적용됨)");
             }
 

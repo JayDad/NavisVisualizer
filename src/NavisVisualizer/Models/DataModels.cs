@@ -471,6 +471,15 @@ namespace NavisVisualizer.Models
             new SubSystemElement(cable.SubSystem?.Trim(), SubSystemDiscipline.Cable,
                 cable.CableNo, cable.System ?? "", cable: cable);
 
+        /// <summary>
+        /// 형상 전용 Excel import — 정식 진척이 아니라 id·sub-system·공종만 담은 행.
+        /// 원본 데이터가 없어 날짜/단계가 없으므로 StatusAt은 항상 NotStarted이며,
+        /// 색칠은 단계/진행이 아니라 시스템(앞2자리) 팔레트로 한다(SubSystemTab 팔레트 모드).
+        /// ElementId 정규화는 searcher(BuildIndexForTags/FindBySpoolIds)가 담당하므로 여기선 trim만.
+        /// </summary>
+        public static SubSystemElement FromBare(string elementId, string subSystem, SubSystemDiscipline discipline) =>
+            new SubSystemElement(subSystem?.Trim(), discipline, elementId?.Trim(), "");
+
         /// <summary>기준일 시점의 공종별 상세 단계 라벨 (리포트 상세 리스트용).</summary>
         public string StageLabelAt(DateTime referenceDate)
         {
