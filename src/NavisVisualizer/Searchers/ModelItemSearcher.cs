@@ -25,6 +25,13 @@ namespace NavisVisualizer.Searchers
         /// (0건 fallback 재시도 여부 판단용 — federated에선 모델 수 비교로는 알 수 없음).</summary>
         private bool _lastScopeNarrowed;
 
+        /// <summary>마지막 빌드에서 실제로 인덱싱한 스코프 루트(공종 nwd 파일 노드). Sub-system
+        /// isolate가 "데이터가 있는 공종 파일 전체"를 숨김 스코프로 잡는 데 쓴다 — 선택 항목이
+        /// 없는 파일(예: 선택 sub-system에 기계가 없어도 MEQ 파일)도 스코프에 포함되게 한다.
+        /// 하드 스코프면 공종 파일만(미발견 시 빈 리스트). 빌드 전엔 빈 리스트.</summary>
+        private List<ModelItem> _scopeRoots = new List<ModelItem>();
+        public IReadOnlyList<ModelItem> ScopeRoots => _scopeRoots;
+
         public bool NeedsRebuild(Document doc)
         {
             if (!_isBuilt) return true;
@@ -51,6 +58,7 @@ namespace NavisVisualizer.Searchers
                 _lastDocumentId = GetDocumentId(doc);
 
                 var roots = ResolveScopeRoots(doc, scope, hardScope);
+                _scopeRoots = roots;   // isolate 스코프용 — 공종 파일 루트 노출
                 foreach (var root in roots)
                     WalkAndIndex(root);
 
@@ -205,6 +213,7 @@ namespace NavisVisualizer.Searchers
                 }
 
                 var roots = ResolveScopeRoots(doc, scope, hardScope);
+                _scopeRoots = roots;   // isolate 스코프용 — 공종 파일 루트 노출 (하드 스코프면 그 nwd만)
 
                 // 루트(파일)별로 태그 깊이를 따로 탐지해 그 루트만 그 깊이로 인덱싱한다.
                 // (구 구현은 첫 발견 깊이 하나를 전 루트에 공통 적용 — federated에서 파일별
@@ -219,6 +228,7 @@ namespace NavisVisualizer.Searchers
                     roots = new List<ModelItem>();
                     foreach (var model in doc.Models)
                         roots.Add(model.RootItem);
+                    _scopeRoots = roots;   // fallback 시 스코프도 전체 모델로 갱신
                     LastScopeFellBack = true;
                     LastScopeNote = $"스코프 {scope.Label}: 태그 미발견 → 전체 모델 fallback";
                     rootsWithoutTags = IndexRootsAtOwnDepth(roots, normalizedTags, depths);
@@ -522,6 +532,7 @@ namespace NavisVisualizer.Searchers
         {
             _isBuilt = false;
             _lastDocumentId = null;
+            _scopeRoots = new List<ModelItem>();
         }
 
         private static bool ContainsDigit(string s)

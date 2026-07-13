@@ -1205,10 +1205,11 @@ namespace NavisVisualizer.UI
         }
 
         /// <summary>
-        /// 선택 항목만 남김(토글): 선택한 Sub-system의 매칭 항목만 남기고, 그 항목이 속한 nwd
-        /// 파일 노드 스코프 안의 나머지(비선택 매칭 + 매칭 안 된 geometry)를 전부 숨긴다.
-        /// 무관한 파일(Structure=STR nwd, 별도 Tray 파일 등)은 순회 대상이 아니라 그대로 남는다.
-        /// 색칠(가시화 적용)과 독립 — 선택은 색 대상이 아니라 여기서만 쓰인다. 다시 누르면 원복.
+        /// 선택 항목만 남김(토글): 선택한 Sub-system의 매칭 항목만 남기고, 데이터가 있는 모든 공종
+        /// nwd 파일(MEQ/HYDROPKG/EIT/CABLE) 스코프 안의 나머지(비선택 매칭 + 매칭 안 된 geometry)를
+        /// 전부 숨긴다 — 선택에 기계가 없어도 MEQ 파일 전체가 스코프라 비선택 기계가 통째로 숨겨진다.
+        /// 데이터 없는 공종(Structure=STR nwd)은 스코프가 아니라 그대로. 색칠과 독립. 다시 누르면 원복.
+        /// (EIT EQ 데이터가 있으면 EIT 스코프에 Tray 파일이 포함될 수 있음 — Windows 실측 확인 대상.)
         /// </summary>
         private void BtnKeepOnly_Click(object sender, EventArgs e)
         {
@@ -1275,12 +1276,32 @@ namespace NavisVisualizer.UI
         }
 
         /// <summary>
-        /// keep 항목의 nwd 파일 노드 스코프 안에서 keep 경로 밖 서브트리를 숨김 대상으로 모은다.
-        /// ① 각 keep에서 위로 올라가 가장 가까운 파일 노드(NwdScope.LooksLikeFileNode)를 스코프
-        ///    루트로 잡는다(없으면 모델 루트 = 개별 nwd) → keep 없는 파일(Structure 등)은 제외.
-        /// ② 스코프 루트를 prune 순회: keep 서브트리는 유지, keep 경로(조상)면 하강, 그 외는
-        ///    서브트리째 숨김 대상에 추가(geometry는 안 내려감 — 비용은 keep 경로 근처로 한정).
-        /// HashSet&lt;ModelItem&gt; 동등성 의존 — ScopeFilter와 동일(Windows 실측 검증 대상).
+        /// 숨김 스코프 = 데이터가 있는 공종 nwd 파일 전체 (searcher가 매칭 때 찾은 스코프 루트의 합집합).
+        /// keep(선택) 항목이 하나도 없는 공종 파일도 포함 — 그래야 선택 sub-system에 기계가 없어도
+        /// MEQ 파일 전체가 스코프에 들어가 비선택 기계가 통째로 숨겨진다. (구 버그: keep 항목이 속한
+        /// 파일만 스코프라, 선택 밖 공종 파일·중첩 sub-nwc의 비선택 항목이 안 숨겨졌다.)
+        /// 다른 파일(Structure=STR nwd 등 데이터 없는 공종)은 스코프 루트가 아니라 그대로 남는다.
+        /// </summary>
+        private List<Autodesk.Navisworks.Api.ModelItem> ScopeRootsForHide()
+        {
+            var roots = new HashSet<Autodesk.Navisworks.Api.ModelItem>();
+            foreach (var s in new[] { _eqSearcher, _pipingSearcher, _eitEqSearcher, _cableSearcher })
+                if (s.IsIndexBuilt)
+                    foreach (var r in s.ScopeRoots) roots.Add(r);
+            // 다른 루트의 자손인 루트는 제거 (상위가 이미 커버 — 이중 순회 방지).
+            return roots.Where(r =>
+            {
+                for (var p = r.Parent; p != null; p = p.Parent) if (roots.Contains(p)) return false;
+                return true;
+            }).ToList();
+        }
+
+        /// <summary>
+        /// 공종 파일 스코프 안에서 keep 경로 밖 서브트리를 숨김 대상으로 모은다.
+        /// keep = 유지할 매칭 항목(선택만 남김=선택분 / 매칭 안된 것 숨김=전체 매칭분).
+        /// 스코프 루트를 prune 순회: keep 서브트리는 유지, keep 경로(조상)면 하강, 그 외는 서브트리째 숨김
+        /// (geometry는 안 내려감 — 비용은 인덱스 빌드 수준). HashSet&lt;ModelItem&gt; 값 동등성 의존
+        /// (ScopeFilter와 동일 — Windows 실측 검증 대상).
         /// </summary>
         private Autodesk.Navisworks.Api.ModelItemCollection ComputeScopedHide(
             Autodesk.Navisworks.Api.ModelItemCollection keep)
@@ -1289,21 +1310,22 @@ namespace NavisVisualizer.UI
             foreach (var mi in keep) keepSet.Add(mi);
 
             var ancestors = new HashSet<Autodesk.Navisworks.Api.ModelItem>();
-            var scopeRoots = new HashSet<Autodesk.Navisworks.Api.ModelItem>();
             foreach (var mi in keep)
+                for (var cur = mi; cur != null; cur = cur.Parent) ancestors.Add(cur);
+
+            var scopeRoots = ScopeRootsForHide();
+            if (scopeRoots.Count == 0)
             {
-                Autodesk.Navisworks.Api.ModelItem fileNode = null, top = mi;
-                for (var cur = mi; cur != null; cur = cur.Parent)
+                // 예외적으로 searcher 루트가 없으면 keep 항목의 파일 노드로 폴백 (기존 방식).
+                var derived = new HashSet<Autodesk.Navisworks.Api.ModelItem>();
+                foreach (var mi in keep)
                 {
-                    ancestors.Add(cur);
-                    if (fileNode == null && NwdScope.LooksLikeFileNode(cur.DisplayName?.Trim())) fileNode = cur;
-                    top = cur;
+                    Autodesk.Navisworks.Api.ModelItem fileNode = null, top = mi;
+                    for (var cur = mi; cur != null; cur = cur.Parent)
+                    { if (fileNode == null && NwdScope.LooksLikeFileNode(cur.DisplayName?.Trim())) fileNode = cur; top = cur; }
+                    derived.Add(fileNode ?? top);
                 }
-                // 파일 노드 우선, 없으면 모델 루트(개별 nwd로 열린 경우 = 그 파일 자체).
-                // ⚠ fileNode==null + 단일 federated 모델이면 scope = 모델 루트 → 그 안의 Structure까지
-                // 숨길 수 있는 유일한 경로. 단, 매칭도 같은 LooksLikeFileNode에 의존하므로 파일 노드
-                // 탐지가 실패하면 keep.Count==0으로 여기 도달 전에 반환된다(매칭·숨김이 함께 실패 = 안전).
-                scopeRoots.Add(fileNode ?? top);
+                scopeRoots = derived.ToList();
             }
 
             var toHide = new Autodesk.Navisworks.Api.ModelItemCollection();
