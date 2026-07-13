@@ -222,14 +222,25 @@ Apply:
 
 ### 6. UI Architecture (`UI/`)
 
-**탭 구성:** Overview | Hydrotest | Spool | Equipment | EIT Tray | Cable(형상) | Sub-system | 고급 진단(구 Tools)
+**탭 구성:** Overview | Structure | Hydrotest | Spool | Equipment | EIT Tray | Cable(형상) | Sub-system | 고급 진단(구 Tools)
 (구 Cable Pull/Cable(Node) 노드·박스 집계 탭은 2026-07 삭제 — 고급 진단의 box 중복 검사만 유지)
+
+**Structure 탭 (`UI/StructureTab.cs` — 실적 데이터·매칭 없음, CLAUDE.md §17):**
+- `Services/StructureAreaService.Probe`가 Str 파일(`NwdScope.Structure`, 키워드 STR)의
+  레벨1 영역 노드 + 레벨2 하위(영역당 상한 200)를 읽기 전용 열거 (ScopePreflight 미러 —
+  인덱스·geometry walk 없음, 미발견 시 전체 fallback 안 함)
+- 영역별 체크박스 + 투명도 콤보 → [투명도 적용] = `ApplyStructureTransparency`
+  (`VisualModule.Structure`, **투명도만** — 색은 원본 유지, 반투명 백도면)
+- [선택 항목만 남김] = 체크 안 된 영역/하위 `SetHidden` 토글 — 다른 공종 가시화의 배경 역할
+- ▸/▾ 레벨2 펼침(기본 접힘) — 레벨1 체크 = 하위 전체 토글(혼합 시 중간 상태), 레벨1 콤보 =
+  하위 전파. 적용/숨김 단위: 균일 영역 = 레벨1 통째, 부분 선택 = 체크된 레벨2 단위
+- 행 ⊙ = 3D 선택·포커스 (Navisworks 선택 하이라이트)
 
 **Overview 탭 (`UI/OverviewTab.cs`, 첫 화면):**
 - 공종 현황 표: 각 탭이 `IOverviewSource.GetOverviewStatus()`로 노출하는 스냅샷
   (데이터 소스·건수 / 인덱스 건수 / 3D 적용 상태 / 매칭·미매칭 / 인덱스 스코프·fallback).
   행 더블클릭 = 해당 탭 이동. 상태 캐시 없음 — Overview 탭 선택 시 자동 재조회 + [새로고침]
-- NWD Preflight: `Services/ScopePreflight.Probe`가 스코프 체인(SPL→HYDROPKG/HYDROPKG/MEQ/EIT/CABLE)별
+- NWD Preflight: `Services/ScopePreflight.Probe`가 스코프 체인(STR/SPL→HYDROPKG/HYDROPKG/MEQ/EIT/CABLE)별
   대상 파일 발견 여부를 인덱스 빌드 없이 판정 (ResolveScopeRoots 2단계 매칭의 읽기 전용 미러 —
   searcher 진단 상태를 안 건드림). 파일명 규약·하드 스코프 불일치를 적용 전에 노출
 

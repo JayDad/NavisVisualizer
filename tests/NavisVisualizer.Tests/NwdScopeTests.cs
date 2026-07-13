@@ -92,6 +92,33 @@ namespace NavisVisualizer.Tests
         }
 
         [TestMethod]
+        public void Structure_Matches_Str_Only()
+        {
+            Assert.IsTrue(NwdScope.Structure.MatchesFileName(Str));
+            Assert.IsTrue(NwdScope.Structure.MatchesFileName("01-02_TRION_TOPSIDESLQ_STR.NWC")); // 대소문자 무시
+
+            // "STR" 부분일치가 다른 규약 파일을 오탐하지 않음을 고정
+            // (Subsystem/HYDROPKG/SPL/MEQ/EIT/Cable/PIPSupport 모두 'str' 미포함)
+            Assert.IsFalse(NwdScope.Structure.MatchesFileName(Container));
+            Assert.IsFalse(NwdScope.Structure.MatchesFileName(HydroPkg));
+            Assert.IsFalse(NwdScope.Structure.MatchesFileName(Spl));
+            Assert.IsFalse(NwdScope.Structure.MatchesFileName(Meq));
+            Assert.IsFalse(NwdScope.Structure.MatchesFileName(Eit));
+            Assert.IsFalse(NwdScope.Structure.MatchesFileName(Cable));
+            Assert.IsFalse(NwdScope.Structure.MatchesFileName(PipSupport));
+
+            // 역방향 교차 오탐 없음 — 다른 스코프가 Str 파일을 잡으면 안 됨 (기존 테스트와 중복 일부 허용)
+            Assert.IsFalse(NwdScope.Cable.MatchesFileName(Str));
+
+            // 디렉터리명에 STR이 있어도 파일명만 판정
+            Assert.IsFalse(NwdScope.Structure.MatchesFileName(@"D:\STR\04-02_Trion_Topsides_MEQ.nwd"));
+            Assert.IsTrue(NwdScope.Structure.MatchesFileName(@"D:\Models\01-02_Trion_TopsidesLQ_Str.nwc"));
+
+            // 체인 없음 — Str 미발견 시 다른 파일로 넘어가지 않는다 (하드 스코프 성격)
+            Assert.IsNull(NwdScope.Structure.Fallback);
+        }
+
+        [TestMethod]
         public void SubSystem_Disciplines_Match_Their_Own_Files()
         {
             // 구 union 스코프(MEQ·SPL·HYDROPKG) 폐기 — Sub-system은 공종별로 자기 nwd만

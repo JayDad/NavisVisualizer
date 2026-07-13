@@ -33,8 +33,8 @@ namespace NavisVisualizer.UI
     ///
     /// ① 공종 현황 표 — 탭마다 열어보지 않아도 {데이터 로드 / 인덱스 / 3D 적용 상태 /
     ///    매칭·미매칭 / 인덱스 스코프 fallback 여부}를 한 표로. 행 더블클릭 = 그 탭으로 이동.
-    /// ② NWD Preflight — 열린 문서에서 공종별 스코프 파일(SPL→HYDROPKG / HYDROPKG / MEQ /
-    ///    EIT / CABLE)이 발견되는지 인덱스 빌드 없이 판정 (ScopePreflight — 파일 노드만
+    /// ② NWD Preflight — 열린 문서에서 공종별 스코프 파일(STR / SPL→HYDROPKG / HYDROPKG /
+    ///    MEQ / EIT / CABLE)이 발견되는지 인덱스 빌드 없이 판정 (ScopePreflight — 파일 노드만
     ///    얕게 하강, geometry walk 없음). 파일명 규약 + 하드 스코프 구조라 "대상 nwd
     ///    미발견"을 적용 전에 잡는 것이 이 탭의 핵심 가치.
     ///
@@ -68,6 +68,7 @@ namespace NavisVisualizer.UI
         /// 공종별 인덱스로는 하드 — 하단 안내문으로 보완.</summary>
         private static readonly (string Label, NwdScope Scope, bool Hard)[] PreflightScopes =
         {
+            ("Structure",          NwdScope.Structure, true),    // Str — 미발견 시 영역 0개 (하드 스코프, fallback 없음)
             ("Spool",              NwdScope.Spool,     false),   // SPL→HYDROPKG 체인
             ("Hydrotest",          NwdScope.Hydrotest, false),
             ("Equipment",          NwdScope.Equipment, false),
@@ -166,7 +167,7 @@ namespace NavisVisualizer.UI
             layout.Controls.Add(new Label
             {
                 Text = "※ 미발견이어도 하드 스코프가 아닌 탭은 전체 모델 fallback으로 동작합니다 (속도만 손해).\n" +
-                       "   EIT(하드 스코프)는 미발견 시 매칭 0건 — 파일명 규약을 먼저 확인하세요.\n" +
+                       "   EIT(하드 스코프)는 미발견 시 매칭 0건, Structure는 영역 0개 — 파일명 규약을 먼저 확인하세요.\n" +
                        "   Sub-system 탭의 공종별 인덱스(MEQ/HYDROPKG/EIT/CABLE)는 전부 하드 스코프 — 미발견 공종은 매칭 0건.",
                 ForeColor = Color.Gray,
                 Dock = DockStyle.Fill,

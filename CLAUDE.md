@@ -14,7 +14,8 @@ BuildIndexForTags / BuildIndexForBoxes에 `NwdScope` 파라미터, null = 전체
 **확정 파일명 규약과 스코프 배정**
 ```
 00-02_Trion_Topsides_Subsystem.nwd     ← federated 컨테이너 (어느 스코프에도 미매칭 — 의도)
-├─ 01-02_Trion_TopsidesLQ_Str.nwc      ← 구조. 플러그인 없음 (추후 block no별 공정 시각화 후보)
+├─ 01-02_Trion_TopsidesLQ_Str.nwc      ← 구조. Structure 탭(§17 — 영역 투명도/숨김 백도면).
+│                                        block no별 공정 시각화는 여전히 추후 후보
 ├─ 02-02_Trion_Topsides_HYDROPKG.nwd   ← Hydrotest. SPL 파일 부재 시 스풀도 여기 존재
 ├─ (03-..._SPL.nwd — 있으면)           ← 배관 스풀
 ├─ 04-02_Trion_Topsides_MEQ.nwd        ← Mechanical Equipment
@@ -58,7 +59,8 @@ BuildIndexForTags / BuildIndexForBoxes에 `NwdScope` 파라미터, null = 전체
   fallback 발동 여부는 매칭 Status CSV의 `인덱스 스코프` 행으로 확인
 - Cable node box nwd 파일명 규약 확정 시 `NwdScope.Cable` 키워드 추가 (현재는 0건 fallback으로 동작)
 - 파일명 규약 변경 시 `NwdScope`의 키워드 + `NwdScopeTests`를 같이 갱신할 것
-- Str(구조)·PIPSupport는 플러그인 신설 시 각자 키워드(STR / PIPSUPPORT)로 스코프 추가
+- Str(구조)은 `NwdScope.Structure`(키워드 STR)로 구현됨 — Structure 탭(§17).
+  PIPSupport는 플러그인 신설 시 키워드(PIPSUPPORT)로 스코프 추가
 
 ### 2. WalkAndIndex 조기 정지 (우선순위: 낮음)
 
@@ -594,7 +596,8 @@ master 기준 UX audit의 항목별 판정·근거·보류 목록은 **`docs/UX_
 
 - **3D 적용 상태 표시 `UI/ApplyStatePanel.cs`** (audit P0-1): 가시화 버튼 행에 `3D: 미적용 /
   {기준}·시각 적용됨 / ⚠ 3D 업데이트 필요(사유)` 라벨 + stale 시 [가시화 적용] 버튼 배경 강조.
-  6개 탭 전부 배선 — MarkStale 트리거는 소스 전환/재로드·기준일·단계 체크·(Sub-system) 선택/모드.
+  7개 탭 전부 배선(Structure 포함 — §17) — MarkStale 트리거는 소스 전환/재로드·기준일·단계 체크·
+  (Sub-system) 선택/모드·(Structure) 영역 체크/재조회.
   기존 `_lblStats`에 얹던 ⚠ 경고 문구는 전부 제거 (**통계 라벨은 통계만** — 경고가 통계를 덮어쓰던
   문제 해소). 색/투명도 변경은 증분 즉시 반영이라 stale 아님.
 - **버튼 명칭 통일** (P0-2): `적용`→`가시화 적용`(전 탭), ScopePanel `적용`→`범위 적용`,
@@ -611,7 +614,7 @@ master 기준 UX audit의 항목별 판정·근거·보류 목록은 **`docs/UX_
   날짜 컬럼 확보 시 §3 패턴으로 복원), Sub-system 검색폭 88→120 + **`이 탭 가시화 해제` 버튼 신설**
   (§10 잔여 해소 — `ResetModule(VisualModule.SubSystem)`).
 - **Overview 탭 `UI/OverviewTab.cs` + `Services/ScopePreflight.cs`** (P1 — 후속 1순위였던 것,
-  사용자 요청으로 구현): 첫 번째 탭. ① 공종 현황 표 — 6개 탭이 `IOverviewSource.GetOverviewStatus()`
+  사용자 요청으로 구현): 첫 번째 탭. ① 공종 현황 표 — 7개 탭(Structure 포함 — §17)이 `IOverviewSource.GetOverviewStatus()`
   로 {데이터 소스·건수 / 인덱스 건수 / 3D 적용 상태(ApplyStatePanel의 IsStale·Text 재사용) /
   매칭·미매칭 / 인덱스 스코프 노트·fallback}을 노출, 행 더블클릭 = 그 탭으로 이동.
   ② NWD Preflight — `ScopePreflight.Probe`가 ResolveScopeRoots의 2단계 매칭(모델 파일명 →
@@ -755,6 +758,47 @@ UI/3D에 그리지 않는 것")은 타당함을 확인.
 - **SaveFile ↔ FileNameChanged 상호작용**: Save As로 doc.FileName이 바뀌면 §15의
   `IndexesInvalidated`가 발동해 다음 적용 때 인덱스 재빌드 1회가 발생할 수 있다 —
   틀린 동작은 아니나(안전 초과) Export 직후 적용이 느리면 이것. 성가시면 suppress 스코프 검토.
+### 17. Structure(구조) 탭 — 영역 백도면 (구현됨 2026-07 — Windows 검증 대기)
+
+**의도적으로 간단한 기능만** (사용자 결정): Str nwd/nwc의 **레벨1 영역 노드**
+(/QR/LG/STRU/HHI …)를 그대로 나열해 체크박스 + 투명도로 백도면을 만든다.
+실적 데이터·매칭·색상·searcher 없음.
+
+- **영역 열거 = `Services/StructureAreaService.Probe`**: `NwdScope.Structure`(키워드 STR,
+  체인 없음)를 ScopePreflight와 동일한 2단계 매칭(모델 파일명 → 파일 노드 depth≤3)으로
+  읽기 전용 열거 — 인덱스 빌드·geometry walk 없음. **하드 스코프 성격**: Str 미발견 시
+  전체 모델 fallback 안 함(빈 목록 + "파일명 규약 확인" 노트). nwd→nwc 중첩 대비
+  단일 파일노드 래퍼 unwrap(≤3단) 포함 — Windows 실측 확인 필요. 복수 Str 파일(granular)의
+  동명 영역은 이름 기준 병합(OrdinalIgnoreCase). 무명 노드 합성 이름엔 파일명을 붙여
+  파일 간 오병합 방지.
+- **레벨2 펼침 (2026-07 확장, 기본 접힘)**: Probe가 레벨1 아래 한 단계(레벨2)까지 추가
+  열거(여전히 geometry walk 없음). 레벨1 행 ▸/▾ 버튼으로 레벨2 행 펼침 — 개별 체크·투명도.
+  레벨1 체크 = 하위 전체 토글(혼합 시 Indeterminate 표시), 레벨1 콤보 = 하위 전체 전파.
+  **적용/숨김 단위 규칙**: 영역이 균일(하위 전부 체크 + 투명도 동일, 또는 하위 없음)이면
+  레벨1 노드 통째(직속 geometry 포함·그룹 수 최소), 부분 선택이면 체크된 레벨2 단위 —
+  이때 레벨2에 속하지 않는 **레벨1 직속 geometry는 대상에서 빠짐**(수용된 한계).
+  캐시 키 = 레벨1명 또는 "레벨1 ▸ 레벨2"; 적용 시점 단위와 콤보 변경이 어긋나
+  캐시 키가 없으면 증분 갱신 대신 MarkStale("투명도 변경"). **영역당 레벨2 상한 200**
+  (`MaxLevel2PerArea`) — 플랫 geometry 모델링으로 행 폭주 방지, 초과 영역은 레벨1 단위로만
+  취급 + 행에 "(하위 N개 초과 — 펼침 생략)" 명시(무언 생략 금지).
+- **[투명도 적용]** = `ColorOverrideEngine.ApplyStructureTransparency`(`VisualModule.Structure`):
+  체크 영역에 **투명도만** 오버라이드(색은 원본 유지 — 반투명 백도면). §10 그대로
+  ResetModule→재도색이라 체크 해제 영역 잔존 없음. 투명도 콤보 변경은
+  `UpdateGroupTransparency`(신설 — 색 없는 모듈의 증분 갱신)로 즉시 반영. 기본 70%.
+- **[선택 항목만 남김]** = 체크 안 된 영역만 `SetHidden(true)` 토글(EitTray `_trayHiddenByStage`
+  패턴) — 구조 중 선택 영역만 남아 타 공종 가시화의 배경 역할. 타 공종 객체는 안 건드림.
+  `이 탭/전체 가시화 해제`가 숨김도 복원. 체크 변경 후엔 토글 복원 후 재실행(재숨김 자동 아님).
+- **문서 변경 감지**: 영역 ModelItem이 조회 시점 문서 기준이라 `DocId`(파일경로+모델수 —
+  searcher `GetDocumentId`와 동일 규칙) 불일치 시 적용/숨김을 막고 재조회 안내.
+- Overview 배선: 공종 현황 표 첫 행 + NWD Preflight에 Structure 추가. 탭 위치는 Overview 다음
+  (파일 규약 01번이자 "배경 먼저 세팅" 동선).
+- **행 ⊙ 버튼 = 3D 선택·포커스** (2026-07): 그 영역(레벨1 전체/레벨2 하나)을
+  `CurrentSelection.CopyFrom` + `FocusOnCurrentSelection` — 기존 탭 리스트 선택 동기화와
+  동일 패턴, 강조는 Navisworks 기본 선택 하이라이트.
+- **잔여**: block no별 공정 시각화(원 후보), ScopePanel 배선 — 전부 필요해질 때.
+  Windows 검증 포인트: 레벨1/2가 실제 영역 깊이인가(래퍼 unwrap 동작), 대형 Str에서
+  `SetHidden`/투명도 배치 시간, 레벨2 행 수가 실무에서 상한(200) 이내인지,
+  "⊙"/"▸" 글리프 렌더링(Malgun Gothic 기준 문제 없어야 정상).
 
 ## 레슨런 (하드 트러블슈팅 기록 — 다시 헤매지 말 것)
 

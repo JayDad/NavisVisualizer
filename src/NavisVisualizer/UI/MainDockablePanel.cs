@@ -45,6 +45,7 @@ namespace NavisVisualizer.UI
 
         private TabControl _tabControl;
         private OverviewTab _overviewTab;
+        private StructureTab _structureTab;
         private HydrotestTab _hydrotestTab;
         private SpoolTab _spoolTab;
         private EquipmentTab _equipmentTab;
@@ -144,6 +145,13 @@ namespace NavisVisualizer.UI
             _overviewTab.Dock = DockStyle.Fill;
             ovPage.Controls.Add(_overviewTab);
 
+            // 구조 탭 — Str 레벨1 영역 체크박스+투명도, 선택 항목만 남김 (다른 공종의 백도면).
+            // 실적 데이터·searcher 없음: 영역 노드를 StructureAreaService로 직접 열거.
+            var stPage = new TabPage("Structure");
+            _structureTab = new StructureTab(this);
+            _structureTab.Dock = DockStyle.Fill;
+            stPage.Controls.Add(_structureTab);
+
             var htPage = new TabPage("Hydrotest");
             _hydrotestTab = new HydrotestTab(this);
             _hydrotestTab.Dock = DockStyle.Fill;
@@ -184,6 +192,7 @@ namespace NavisVisualizer.UI
             toolPage.Controls.Add(_toolsTab);
 
             _tabControl.TabPages.Add(ovPage);
+            _tabControl.TabPages.Add(stPage);
             _tabControl.TabPages.Add(htPage);
             _tabControl.TabPages.Add(spPage);
             _tabControl.TabPages.Add(eqPage);
@@ -196,6 +205,7 @@ namespace NavisVisualizer.UI
             // Overview 탭이 선택될 때마다 자동 재조회한다 (숨김/문서 전환 이벤트 없이도 최신).
             _overviewTab.Configure(_tabControl, new (string, IOverviewSource, TabPage)[]
             {
+                ("Structure",  _structureTab, stPage),
                 ("Hydrotest",  _hydrotestTab, htPage),
                 ("Spool",      _spoolTab,     spPage),
                 ("Equipment",  _equipmentTab, eqPage),
