@@ -331,10 +331,13 @@ namespace NavisVisualizer.Visualizers
             var groupItems = new Dictionary<string, List<ModelItem>>(StringComparer.OrdinalIgnoreCase);
 
             // 공종(searcher)별로 id를 모아 한 번씩 조회 후, 요소 순회 시 자기 결과에서 찾는다.
+            // 미빌드 searcher는 조회하지 않는다(FindBySpoolIds는 !IsIndexBuilt면 예외) — 그 공종
+            // 요소는 빈 결과로 미매칭 처리. 현재 호출부(BtnApply)는 항상 먼저 빌드하지만 방어적으로.
             var resultsBySearcher = new Dictionary<ModelItemSearcher, Dictionary<string, List<ModelItem>>>();
             foreach (var group in elements.GroupBy(el => searcherFor(el.Discipline)))
-                resultsBySearcher[group.Key] =
-                    group.Key.FindBySpoolIds(group.Select(el => el.ElementId).Distinct());
+                resultsBySearcher[group.Key] = group.Key.IsIndexBuilt
+                    ? group.Key.FindBySpoolIds(group.Select(el => el.ElementId).Distinct())
+                    : new Dictionary<string, List<ModelItem>>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var el in elements)
             {

@@ -1250,7 +1250,7 @@ namespace NavisVisualizer.UI
 
             var keep = FindItemsFor(_elements.Where(el => _selected.Contains(el.SubSystem)));
             if (keep.Count == 0) { MessageBox.Show("선택한 Sub-system의 매칭 항목이 모델에 없습니다."); return; }
-            ApplyScopedHide(doc, keep, _btnKeepOnly,
+            ApplyScopedHide(doc, keep,
                 $"선택 항목만 남김: 선택 {_selected.Count}개 Sub-system만 표시");
         }
 
@@ -1269,13 +1269,13 @@ namespace NavisVisualizer.UI
 
             var keep = FindItemsFor(_elements);   // 전체 매칭분 유지
             if (keep.Count == 0) { MessageBox.Show("매칭된 항목이 없습니다 (가시화 적용/데이터를 확인하세요)."); return; }
-            ApplyScopedHide(doc, keep, _btnHideUnmatched,
+            ApplyScopedHide(doc, keep,
                 "매칭 안 된 항목 숨김: 스코프 내 데이터 매칭 요소만 표시");
         }
 
-        /// <summary>keep 항목이 속한 nwd 파일 스코프 안에서 keep 외를 숨긴다(공유 isolate 실행부).</summary>
+        /// <summary>keep 항목이 속한 공종 파일 스코프 안에서 keep 외를 숨긴다(두 isolate 토글 공용 실행부).</summary>
         private void ApplyScopedHide(Autodesk.Navisworks.Api.Document doc,
-            Autodesk.Navisworks.Api.ModelItemCollection keep, Button activeButton, string statsMsg)
+            Autodesk.Navisworks.Api.ModelItemCollection keep, string statsMsg)
         {
             // 스코프 트리 순회 + SetHidden은 대형 모델에서 수 초 걸릴 수 있어 진행바로 프리즈 인상 제거.
             _progressBar.Style = ProgressBarStyle.Marquee;
@@ -1295,7 +1295,9 @@ namespace NavisVisualizer.UI
             }
             if (toHide.Count == 0) { MessageBox.Show("숨길 대상이 없습니다."); return; }
             _hiddenByKeepOnly = toHide;
-            activeButton.Text = "전체 보기";
+            // 숨김 활성 상태에선 두 토글 다 "전체 보기"로 — 어느 쪽을 눌러도 복원(라벨-동작 일치).
+            _btnKeepOnly.Text = "전체 보기";
+            _btnHideUnmatched.Text = "전체 보기";
             _lblStats.Text = $"{statsMsg} (숨김 {toHide.Count:N0}개 — 다시 누르면 복원)";
         }
 
@@ -1546,6 +1548,10 @@ namespace NavisVisualizer.UI
                 MessageBox.Show("선택된 Sub-system에 요소가 없습니다 (마스터에만 존재).");
                 return;
             }
+            // 비모달 창이라 여는 동안 데이터가 재로드되면 _bySubSystem가 새 dict로 바뀐다.
+            // populate/CSV가 _bySubSystem[name]로 직접 인덱싱하면 KeyNotFoundException → 여는 시점에
+            // 요소 리스트를 스냅샷해 창이 자기 데이터로 독립 동작하게 한다.
+            var elementsByName = names.ToDictionary(n => n, n => _bySubSystem[n], StringComparer.OrdinalIgnoreCase);
 
             var form = new Form
             {
@@ -1609,7 +1615,7 @@ namespace NavisVisualizer.UI
                     var m = GetMaster(name);
                     string plan = m?.PlanText(referenceDate) ?? "-";
                     string desc = m?.Description ?? "";
-                    var ordered = _bySubSystem[name]
+                    var ordered = elementsByName[name]
                         .OrderBy(el => el.Discipline)
                         .ThenBy(el => el.ElementId, StringComparer.OrdinalIgnoreCase);
                     foreach (var el in ordered)
@@ -1646,7 +1652,7 @@ namespace NavisVisualizer.UI
             var detailDebounce = new Debouncer(() => populate(txtSearch.Text.Trim()));
             txtSearch.TextChanged += (s, e) => detailDebounce.Trigger();
             form.Disposed += (s, e) => detailDebounce.Dispose();
-            btnCsv.Click += (s, e) => ExportDetailCsv(names, referenceDate);
+            btnCsv.Click += (s, e) => ExportDetailCsv(names, elementsByName, referenceDate);
             btnCopyDetail.Click += (s, e) => ListViewClipboard.CopySelectedOrAll(lv);
 
             populate("");
@@ -1656,8 +1662,10 @@ namespace NavisVisualizer.UI
             form.Show();  // 비모달 — 창을 열어둔 채 3D 작업 가능
         }
 
-        /// <summary>상세 창의 CSV 출력 — sub-system·공종·요소별 status 전체를 바탕화면에 저장.</summary>
-        private void ExportDetailCsv(List<string> names, DateTime referenceDate)
+        /// <summary>상세 창의 CSV 출력 — sub-system·공종·요소별 status 전체를 바탕화면에 저장.
+        /// 요소는 창 열 때 스냅샷한 elementsByName에서 조회(재로드 후에도 안전).</summary>
+        private void ExportDetailCsv(List<string> names,
+            Dictionary<string, List<SubSystemElement>> elementsByName, DateTime referenceDate)
         {
             var lines = new List<string>();
             lines.Add("Sub-system 공종·요소별 상세 현황");
@@ -1668,9 +1676,10 @@ namespace NavisVisualizer.UI
             lines.Add("Sub-system,Description,MCC계획,공종,요소 ID,설명,현재 단계,진행 상태,매칭");
             foreach (var name in names)
             {
+                if (!elementsByName.TryGetValue(name, out var els)) continue;
                 var m = GetMaster(name);
                 string plan = m?.MccPlan?.ToString("yyyy-MM-dd") ?? "";
-                var ordered = _bySubSystem[name]
+                var ordered = els
                     .OrderBy(el => el.Discipline)
                     .ThenBy(el => el.ElementId, StringComparer.OrdinalIgnoreCase);
                 foreach (var el in ordered)
