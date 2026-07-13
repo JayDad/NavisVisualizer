@@ -745,7 +745,10 @@ namespace NavisVisualizer.UI
         /// <summary>범례(시스템→색 스와치)를 팔레트 패널에 다시 채운다 — 로드 후 시스템 수에 맞춰 동적 구성.</summary>
         private void RebuildPaletteLegend(List<string> prefixes)
         {
+            // 이전 범례를 dispose 후 제거 — 반복 Excel 로드 시 컨트롤 핸들 누수 방지.
+            var old = _paletteLegend.Controls.Cast<Control>().ToList();
             _paletteLegend.Controls.Clear();
+            foreach (var c in old) c.Dispose();
             var grid = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 12, AutoSize = true };
             for (int i = 0; i < prefixes.Count; i++)
             {
@@ -1296,7 +1299,11 @@ namespace NavisVisualizer.UI
                     if (fileNode == null && NwdScope.LooksLikeFileNode(cur.DisplayName?.Trim())) fileNode = cur;
                     top = cur;
                 }
-                scopeRoots.Add(fileNode ?? top);   // 파일 노드 우선, 없으면 모델 루트(개별 nwd)
+                // 파일 노드 우선, 없으면 모델 루트(개별 nwd로 열린 경우 = 그 파일 자체).
+                // ⚠ fileNode==null + 단일 federated 모델이면 scope = 모델 루트 → 그 안의 Structure까지
+                // 숨길 수 있는 유일한 경로. 단, 매칭도 같은 LooksLikeFileNode에 의존하므로 파일 노드
+                // 탐지가 실패하면 keep.Count==0으로 여기 도달 전에 반환된다(매칭·숨김이 함께 실패 = 안전).
+                scopeRoots.Add(fileNode ?? top);
             }
 
             var toHide = new Autodesk.Navisworks.Api.ModelItemCollection();
@@ -1368,7 +1375,7 @@ namespace NavisVisualizer.UI
         {
             if (_subSystemNames.Count == 0)
             {
-                MessageBox.Show("OASIS 데이터를 먼저 로드하세요.");
+                MessageBox.Show("데이터(OASIS 또는 Excel 형상)를 먼저 로드하세요.");
                 return;
             }
 
