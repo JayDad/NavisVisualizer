@@ -5,11 +5,18 @@ using NavisVisualizer.Searchers;
 
 namespace NavisVisualizer.Services
 {
-    /// <summary>구조(Str) 파일의 레벨1 영역 노드 하나 — 이름 기준으로 복수 Str 파일의 동명 노드를 병합.</summary>
+    /// <summary>구조(Str) 파일의 영역 노드 하나(레벨1 또는 레벨2) — 이름 기준으로 복수 Str 파일의 동명 노드를 병합.</summary>
     public class StructureArea
     {
         public string Name;
         public List<ModelItem> Items = new List<ModelItem>();
+
+        /// <summary>레벨2 하위 영역 (레벨1 영역에서만 채움 — 탭의 펼침 행). 레벨2의 Children은 항상 비어 있음.</summary>
+        public List<StructureArea> Children = new List<StructureArea>();
+
+        /// <summary>레벨2 자식이 상한(MaxLevel2PerArea)을 넘어 열거를 생략했는가 — 플랫 geometry 모델링 방어.
+        /// true면 탭이 이 영역을 레벨1 단위로만 취급한다(펼침 없음) + 생략 사실을 행에 표기.</summary>
+        public bool ChildrenTruncated;
     }
 
     /// <summary>
@@ -24,6 +31,10 @@ namespace NavisVisualizer.Services
     /// </summary>
     public static class StructureAreaService
     {
+        /// <summary>영역당 레벨2 열거 상한 — 영역 바로 아래가 그룹이 아니라 대량 geometry leaf로
+        /// 플랫하게 모델링된 경우 UI 행 폭주를 막는다. 초과 시 그 영역은 레벨1 단위로만 취급.</summary>
+        public const int MaxLevel2PerArea = 200;
+
         public class Result
         {
             public List<StructureArea> Areas = new List<StructureArea>();
@@ -66,6 +77,7 @@ namespace NavisVisualizer.Services
 
             // 이름 기준 병합 — 복수 Str 파일(granular 분할)에 같은 영역명이 있으면 한 행으로.
             var byName = new Dictionary<string, StructureArea>(System.StringComparer.OrdinalIgnoreCase);
+            var childByArea = new Dictionary<StructureArea, Dictionary<string, StructureArea>>();
             for (int i = 0; i < roots.Count; i++)
             {
                 var top = UnwrapSingleFileChild(roots[i]);
@@ -87,6 +99,7 @@ namespace NavisVisualizer.Services
                         result.Areas.Add(area);
                     }
                     area.Items.Add(child);
+                    CollectLevel2(child, area, childByArea, files[i]);
                 }
             }
 
@@ -94,6 +107,49 @@ namespace NavisVisualizer.Services
                 ? $"스코프 STR: {string.Join(", ", files.Distinct())} · 영역 {result.Areas.Count}개"
                 : $"스코프 STR: {string.Join(", ", files.Distinct())} · 레벨1 자식 없음";
             return result;
+        }
+
+        /// <summary>
+        /// 레벨1 영역 노드의 직계 자식(레벨2)을 영역에 병합 수집 — 탭의 펼침 행용. 한 단계만
+        /// 내려가므로 여전히 geometry walk 없음. 영역당 상한 초과 시(플랫 geometry 모델링)
+        /// ChildrenTruncated만 표시하고 열거 생략 — 탭은 그 영역을 레벨1 단위로만 취급.
+        /// </summary>
+        private static void CollectLevel2(ModelItem l1Node, StructureArea area,
+            Dictionary<StructureArea, Dictionary<string, StructureArea>> childByArea, string file)
+        {
+            if (area.ChildrenTruncated) return;
+
+            int count = 0;
+            foreach (ModelItem c in l1Node.Children)
+            {
+                if (++count > MaxLevel2PerArea)
+                {
+                    // 병합 도중 한 파일에서라도 초과하면 영역 전체를 레벨1 단위로 강등
+                    // (부분 목록을 남기면 "전부인 줄" 오해 — 생략은 명시적으로).
+                    area.ChildrenTruncated = true;
+                    return;
+                }
+            }
+
+            if (!childByArea.TryGetValue(area, out var byName))
+            {
+                byName = new Dictionary<string, StructureArea>(System.StringComparer.OrdinalIgnoreCase);
+                childByArea[area] = byName;
+            }
+            int unnamed = 0;
+            foreach (ModelItem c in l1Node.Children)
+            {
+                string name = c.DisplayName?.Trim();
+                if (string.IsNullOrEmpty(name))
+                    name = $"(이름 없음 {++unnamed} · {file})";
+                if (!byName.TryGetValue(name, out var child))
+                {
+                    child = new StructureArea { Name = name };
+                    byName[name] = child;
+                    area.Children.Add(child);
+                }
+                child.Items.Add(c);
+            }
         }
 
         /// <summary>federated 트리에서 파일 노드만 얕게 따라가며 Str 매칭 루트 수집 (ResolveScopeRoots ② 미러).</summary>

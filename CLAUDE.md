@@ -626,7 +626,18 @@ master 기준 UX audit의 항목별 판정·근거·보류 목록은 **`docs/UX_
   읽기 전용 열거 — 인덱스 빌드·geometry walk 없음. **하드 스코프 성격**: Str 미발견 시
   전체 모델 fallback 안 함(빈 목록 + "파일명 규약 확인" 노트). nwd→nwc 중첩 대비
   단일 파일노드 래퍼 unwrap(≤3단) 포함 — Windows 실측 확인 필요. 복수 Str 파일(granular)의
-  동명 영역은 이름 기준 병합(OrdinalIgnoreCase).
+  동명 영역은 이름 기준 병합(OrdinalIgnoreCase). 무명 노드 합성 이름엔 파일명을 붙여
+  파일 간 오병합 방지.
+- **레벨2 펼침 (2026-07 확장, 기본 접힘)**: Probe가 레벨1 아래 한 단계(레벨2)까지 추가
+  열거(여전히 geometry walk 없음). 레벨1 행 ▸/▾ 버튼으로 레벨2 행 펼침 — 개별 체크·투명도.
+  레벨1 체크 = 하위 전체 토글(혼합 시 Indeterminate 표시), 레벨1 콤보 = 하위 전체 전파.
+  **적용/숨김 단위 규칙**: 영역이 균일(하위 전부 체크 + 투명도 동일, 또는 하위 없음)이면
+  레벨1 노드 통째(직속 geometry 포함·그룹 수 최소), 부분 선택이면 체크된 레벨2 단위 —
+  이때 레벨2에 속하지 않는 **레벨1 직속 geometry는 대상에서 빠짐**(수용된 한계).
+  캐시 키 = 레벨1명 또는 "레벨1 ▸ 레벨2"; 적용 시점 단위와 콤보 변경이 어긋나
+  캐시 키가 없으면 증분 갱신 대신 MarkStale("투명도 변경"). **영역당 레벨2 상한 200**
+  (`MaxLevel2PerArea`) — 플랫 geometry 모델링으로 행 폭주 방지, 초과 영역은 레벨1 단위로만
+  취급 + 행에 "(하위 N개 초과 — 펼침 생략)" 명시(무언 생략 금지).
 - **[투명도 적용]** = `ColorOverrideEngine.ApplyStructureTransparency`(`VisualModule.Structure`):
   체크 영역에 **투명도만** 오버라이드(색은 원본 유지 — 반투명 백도면). §10 그대로
   ResetModule→재도색이라 체크 해제 영역 잔존 없음. 투명도 콤보 변경은
@@ -638,9 +649,13 @@ master 기준 UX audit의 항목별 판정·근거·보류 목록은 **`docs/UX_
   searcher `GetDocumentId`와 동일 규칙) 불일치 시 적용/숨김을 막고 재조회 안내.
 - Overview 배선: 공종 현황 표 첫 행 + NWD Preflight에 Structure 추가. 탭 위치는 Overview 다음
   (파일 규약 01번이자 "배경 먼저 세팅" 동선).
-- **잔여**: 영역별 3D 선택·포커스, block no별 공정 시각화(원 후보), ScopePanel 배선 —
-  전부 필요해질 때. Windows 검증 포인트: 레벨1이 실제 영역 깊이인가(래퍼 unwrap 동작),
-  대형 Str에서 `SetHidden`/투명도 배치 시간.
+- **행 ⊙ 버튼 = 3D 선택·포커스** (2026-07): 그 영역(레벨1 전체/레벨2 하나)을
+  `CurrentSelection.CopyFrom` + `FocusOnCurrentSelection` — 기존 탭 리스트 선택 동기화와
+  동일 패턴, 강조는 Navisworks 기본 선택 하이라이트.
+- **잔여**: block no별 공정 시각화(원 후보), ScopePanel 배선 — 전부 필요해질 때.
+  Windows 검증 포인트: 레벨1/2가 실제 영역 깊이인가(래퍼 unwrap 동작), 대형 Str에서
+  `SetHidden`/투명도 배치 시간, 레벨2 행 수가 실무에서 상한(200) 이내인지,
+  "⊙"/"▸" 글리프 렌더링(Malgun Gothic 기준 문제 없어야 정상).
 
 ## 레슨런 (하드 트러블슈팅 기록 — 다시 헤매지 말 것)
 

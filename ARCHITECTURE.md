@@ -227,11 +227,14 @@ Apply:
 
 **Structure 탭 (`UI/StructureTab.cs` — 실적 데이터·매칭 없음, CLAUDE.md §15):**
 - `Services/StructureAreaService.Probe`가 Str 파일(`NwdScope.Structure`, 키워드 STR)의
-  레벨1 영역 노드를 읽기 전용 열거 (ScopePreflight 미러 — 인덱스·geometry walk 없음,
-  미발견 시 전체 fallback 안 함)
+  레벨1 영역 노드 + 레벨2 하위(영역당 상한 200)를 읽기 전용 열거 (ScopePreflight 미러 —
+  인덱스·geometry walk 없음, 미발견 시 전체 fallback 안 함)
 - 영역별 체크박스 + 투명도 콤보 → [투명도 적용] = `ApplyStructureTransparency`
   (`VisualModule.Structure`, **투명도만** — 색은 원본 유지, 반투명 백도면)
-- [선택 항목만 남김] = 체크 안 된 영역 `SetHidden` 토글 — 다른 공종 가시화의 배경 역할
+- [선택 항목만 남김] = 체크 안 된 영역/하위 `SetHidden` 토글 — 다른 공종 가시화의 배경 역할
+- ▸/▾ 레벨2 펼침(기본 접힘) — 레벨1 체크 = 하위 전체 토글(혼합 시 중간 상태), 레벨1 콤보 =
+  하위 전파. 적용/숨김 단위: 균일 영역 = 레벨1 통째, 부분 선택 = 체크된 레벨2 단위
+- 행 ⊙ = 3D 선택·포커스 (Navisworks 선택 하이라이트)
 
 **Overview 탭 (`UI/OverviewTab.cs`, 첫 화면):**
 - 공종 현황 표: 각 탭이 `IOverviewSource.GetOverviewStatus()`로 노출하는 스냅샷
