@@ -659,17 +659,37 @@ namespace NavisVisualizer.UI
                         return;
                     }
 
+                    // OASIS 마스터(System_Summary)를 선택적으로 로드 — 연결되면 설명·그룹·전체 정의를
+                    // 마스터에서 가져오고, 안 되면 Excel 기준으로 graceful degrade (사용자 결정 Q1-b).
+                    // 형상은 Excel, sub-system 정의는 마스터 — 매칭은 여전히 요소 ID 기반이라 무관.
+                    Dictionary<string, SubSystemMasterData> master = null;
+                    string masterNote;
+                    try
+                    {
+                        var settings = SqlConnectionSettings.Load();
+                        master = new Dictionary<string, SubSystemMasterData>(StringComparer.OrdinalIgnoreCase);
+                        foreach (var m in SqlLoader.LoadSubSystemMaster(settings))
+                            master[m.SubSystemNo] = m;
+                        masterNote = $" · 마스터 {master.Count}개";
+                    }
+                    catch
+                    {
+                        master = null;
+                        masterNote = " · 마스터 미연결(Excel 기준)";
+                    }
+
                     _elements = list;
-                    _master = null;                // 형상 전용 — 마스터/날짜 없음
-                    _paletteMode = true;           // 시스템(앞2자리) 팔레트로 색칠
-                    RebuildNames(out _);
+                    _master = master;              // 있으면 설명·그룹 조회에 사용 (목록 축은 Excel — Q2-b)
+                    _paletteMode = true;           // 시스템(앞2자리) 팔레트로 색칠 (Q3)
+                    RebuildNames(out int outsideMaster);
                     AfterElementsLoaded();         // 여기서 RebuildSystemColors도 실행됨
 
                     _loadLabel = $"Excel 형상: {Path.GetFileName(dlg.FileName)} · {DateTime.Now:HH:mm}";
                     _dotOasis.ForeColor = DotLoaded;
                     _lblOasis.ForeColor = Color.Black;
-                    _lblOasis.Text = $"형상 요소 {list.Count:N0}건 · Sub-system {_subSystemNames.Count}개 · 시스템 {_systemColors.Count}개 · "
-                        + string.Join(" · ", notes);
+                    _lblOasis.Text = $"형상 요소 {list.Count:N0}건 · Sub-system {_subSystemNames.Count}개 · 시스템 {_systemColors.Count}개{masterNote}"
+                        + (outsideMaster > 0 ? $" · 마스터 외 {outsideMaster}개" : "")
+                        + " · " + string.Join(" · ", notes);
                     _loadTip.SetToolTip(_lblOasis, _lblOasis.Text);
                 }
                 catch (Exception ex)
@@ -820,7 +840,11 @@ namespace NavisVisualizer.UI
             if (_master != null)
             {
                 outsideMaster = names.Count(n => !_master.ContainsKey(n));
-                names.UnionWith(_master.Keys);
+                // OASIS 모드는 마스터 전체 목록(요소 0건 포함)을 축으로 쓴다. 팔레트(Excel 형상) 모드는
+                // "형상 있는 sub-system만" 보여주되(Q2-b) 설명·단계·그룹은 GetMaster로 마스터에서 조회 —
+                // 전체 390+로 목록을 부풀리지 않는다. outsideMaster는 두 모드 다 Excel/요소 코드 오탐 지표.
+                if (!_paletteMode)
+                    names.UnionWith(_master.Keys);
             }
             _subSystemNames = names.OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
         }
@@ -1730,8 +1754,9 @@ namespace NavisVisualizer.UI
 
             if (_paletteMode)
             {
-                // Excel 형상 = 진척/단계 없음 — 요소 진행 대신 시스템(앞2자리) 색 구분 수를 보인다.
-                linesOut.Add($"시스템(앞2자리) {_systemColors.Count}개 · 형상 색 구분 (진척/단계 없음)");
+                // Excel 형상: 색은 시스템(앞2자리) 기준. 마스터가 있으면 위 '단계:' 줄이 그 sub-system들의
+                // 커미셔닝 단계 분포(마스터 기준)를 함께 보여준다(요소 자체엔 날짜가 없음).
+                linesOut.Add($"시스템(앞2자리) {_systemColors.Count}개 색 구분 (형상 보기 — 색은 시스템 기준)");
             }
             else
             {
