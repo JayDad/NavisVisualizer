@@ -177,55 +177,63 @@ namespace NavisVisualizer.UI
             _areasDocId = DocId(doc);
             _areaRows.Clear();
 
-            _syncing = true;   // 행 구성·설정 복원 중 부모↔자식 동기화 핸들러 연쇄 차단
-            foreach (var area in result.Areas)
+            // 행 구성·설정 복원 중 부모↔자식 동기화 핸들러 연쇄 차단. 예외가 나도 가드가
+            // 참으로 고착돼 이후 세션 내내 동기화·MarkStale이 죽는 일이 없도록 try/finally로 복원.
+            _syncing = true;
+            try
             {
-                var l1 = MakeRow(area, null);
-
-                bool hasPrev = prevL1.TryGetValue(area.Name, out var p);
-                bool parentPrevChecked = !hasPrev || p.State != CheckState.Unchecked;
-                string parentPrevT = hasPrev && l1.TransparencyBox.Items.Contains(p.T) ? p.T : null;
-                if (parentPrevT != null) l1.TransparencyBox.Text = parentPrevT;
-
-                if (!area.ChildrenTruncated)
+                foreach (var area in result.Areas)
                 {
-                    foreach (var childArea in area.Children)
+                    var l1 = MakeRow(area, null);
+
+                    bool hasPrev = prevL1.TryGetValue(area.Name, out var p);
+                    bool parentPrevChecked = !hasPrev || p.State != CheckState.Unchecked;
+                    string parentPrevT = hasPrev && l1.TransparencyBox.Items.Contains(p.T) ? p.T : null;
+                    if (parentPrevT != null) l1.TransparencyBox.Text = parentPrevT;
+
+                    if (!area.ChildrenTruncated)
                     {
-                        var c = MakeRow(childArea, l1);
-                        // 하위 개별 설정이 없으면 부모의 이전 상태를 상속.
-                        c.Check.Checked = parentPrevChecked;
-                        if (parentPrevT != null) c.TransparencyBox.Text = parentPrevT;
-                        if (prevL2.TryGetValue(ChildKey(l1, c), out var cp))
+                        foreach (var childArea in area.Children)
                         {
-                            c.Check.Checked = cp.Checked;
-                            if (c.TransparencyBox.Items.Contains(cp.T)) c.TransparencyBox.Text = cp.T;
+                            var c = MakeRow(childArea, l1);
+                            // 하위 개별 설정이 없으면 부모의 이전 상태를 상속.
+                            c.Check.Checked = parentPrevChecked;
+                            if (parentPrevT != null) c.TransparencyBox.Text = parentPrevT;
+                            if (prevL2.TryGetValue(ChildKey(l1, c), out var cp))
+                            {
+                                c.Check.Checked = cp.Checked;
+                                if (c.TransparencyBox.Items.Contains(cp.T)) c.TransparencyBox.Text = cp.T;
+                            }
+                            l1.ChildRows.Add(c);
                         }
-                        l1.ChildRows.Add(c);
                     }
-                }
 
-                if (l1.ChildRows.Count > 0)
-                {
-                    l1.Expanded = hasPrev && p.Expanded;
-                    l1.ExpandBtn = new Button { Text = l1.Expanded ? "▾" : "▸", Width = 22, Height = 20, FlatStyle = FlatStyle.Flat };
-                    l1.ExpandBtn.FlatAppearance.BorderSize = 0;
-                    var captured = l1;
-                    l1.ExpandBtn.Click += (s2, e2) =>
+                    if (l1.ChildRows.Count > 0)
                     {
-                        captured.Expanded = !captured.Expanded;
-                        captured.ExpandBtn.Text = captured.Expanded ? "▾" : "▸";
-                        RebuildAreaTable();
-                    };
-                    SyncParentCheckState(l1);   // 자식 복원 결과 기준으로 부모 상태 확정 (혼합 = 중간 상태)
-                }
-                else
-                {
-                    l1.Check.Checked = parentPrevChecked;
-                }
+                        l1.Expanded = hasPrev && p.Expanded;
+                        l1.ExpandBtn = new Button { Text = l1.Expanded ? "▾" : "▸", Width = 22, Height = 20, FlatStyle = FlatStyle.Flat };
+                        l1.ExpandBtn.FlatAppearance.BorderSize = 0;
+                        var captured = l1;
+                        l1.ExpandBtn.Click += (s2, e2) =>
+                        {
+                            captured.Expanded = !captured.Expanded;
+                            captured.ExpandBtn.Text = captured.Expanded ? "▾" : "▸";
+                            RebuildAreaTable();
+                        };
+                        SyncParentCheckState(l1);   // 자식 복원 결과 기준으로 부모 상태 확정 (혼합 = 중간 상태)
+                    }
+                    else
+                    {
+                        l1.Check.Checked = parentPrevChecked;
+                    }
 
-                _areaRows.Add(l1);
+                    _areaRows.Add(l1);
+                }
             }
-            _syncing = false;
+            finally
+            {
+                _syncing = false;
+            }
 
             RebuildAreaTable();
 
