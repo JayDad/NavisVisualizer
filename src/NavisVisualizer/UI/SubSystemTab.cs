@@ -100,7 +100,7 @@ namespace NavisVisualizer.UI
                 DataText = _elements.Count > 0
                     ? $"OASIS 요소 {_elements.Count:N0}건 · SS {_subSystemNames.Count}개" : "미로드",
                 IndexText = anyBuilt ? idx.ToString("N0") : "-",
-                ApplyStateText = _applyState.Text,
+                ApplyStateText = _applyState.Text + (_hiddenByKeepOnly != null ? " · 숨김 활성" : ""),
                 ApplyStale = _applyState.IsStale,
                 MatchedText = _appliedOnce ? _matchedIds.Count.ToString("N0") : "-",
                 UnmatchedText = _appliedOnce ? _unmatchedIds.Count.ToString("N0") : "-",
@@ -177,9 +177,11 @@ namespace NavisVisualizer.UI
         {
             _indexBuilt = false;
             _indexSig = null;
-            // 옛 문서의 숨김 컬렉션은 복원 불가 — 참조만 버리고 버튼 표기 원복.
-            _hiddenByKeepOnly = null;
-            if (_btnKeepOnly != null) _btnKeepOnly.Text = "선택 항목만 남김";
+            // isolate 숨김 상태는 여기서 건드리지 않는다 (CableLineTab과 동일하게 보존). 이 이벤트는
+            // 진짜 문서 전환뿐 아니라 같은 문서의 FileNameChanged(§16 — NWD Export의 SaveFile)에서도
+            // 오므로, 참조를 버리면 숨김 요소가 복원 불가로 남는다("전체 보기"·해제·재로드가 못 되살림).
+            // 문서 전환 후의 stale 컬렉션은 다음 RestoreKeepOnlyHidden(해제/재로드/토글) 호출의
+            // try/catch가 안전하게 정리한다.
             _eqSearcher.Reset();
             _pipingSearcher.Reset();
             _eitEqSearcher.Reset();
@@ -276,7 +278,8 @@ namespace NavisVisualizer.UI
             btnRowOut.Controls.AddRange(new Control[] { btnReport, btnViewpoint, btnNwd });
 
             _progressBar = new ProgressBar { Dock = DockStyle.Fill, Height = 12, Visible = false };
-            _lblStats = new Label { Dock = DockStyle.Fill, Text = "로드된 데이터 없음", AutoSize = false, Height = 92 };
+            // 최대 6줄(전체·단계·요소진행·선택·매칭 + MCC 지연 담기 append) 대비 높이 확보.
+            _lblStats = new Label { Dock = DockStyle.Fill, Text = "로드된 데이터 없음", AutoSize = false, Height = 110 };
 
             layout.Controls.Add(loadPanel);
             layout.Controls.Add(modeGroup);
