@@ -473,23 +473,26 @@ namespace NavisVisualizer.Loaders
 
         /// <summary>
         /// Sub-system 형상 전용 Excel — 정식 진척이 아니라 "sub-system별 형상만 보여주기 위한" 목록.
-        /// 하나의 엑셀에 시트명 Hydrotest/MEQ/Cable로 각 공종 (ID, Sub-system) 표가 들어 있다:
+        /// 하나의 엑셀에 시트명에 키워드 Hydrotest/MEQ/Cable이 '포함'된 시트로 각 공종
+        /// (ID, Sub-system) 표가 들어 있다 (정확 일치 아님 — "01_Hydrotest", "MEQ_List" 등도 매칭):
         ///   Hydrotest → Piping (Test Package No.) / MEQ → Equipment (Tag No.) / Cable → Cable (Cable No)
         /// 각 시트에서 ID·Sub-system 컬럼만 읽어 날짜 없는 SubSystemElement(FromBare)로 만든다.
         /// 시트/컬럼이 없으면 그 공종만 조용히 건너뛰고 <paramref name="notes"/>에 사유를 남긴다.
+        /// 한 시트가 여러 키워드를 포함해 중복 소비되지 않도록 이미 쓴 시트는 제외한다.
         /// </summary>
         public static List<SubSystemElement> LoadSubSystemShapes(string filePath, out List<string> notes)
         {
             notes = new List<string>();
             var result = new List<SubSystemElement>();
             var subNames = new[] { "Sub-system", "Sub-System", "SubSystem", "Sub System", "SUB-SYSTEM", "Subsystem" };
+            // Keyword = 시트명에 포함되면 매칭할 키워드 (정확 일치 아님).
             var specs = new[]
             {
-                new { Sheet = "Hydrotest", Disc = SubSystemDiscipline.Piping,
+                new { Keyword = "Hydrotest", Disc = SubSystemDiscipline.Piping,
                       IdNames = new[] { "Test Package No.", "Test Package No", "TestPkgId", "Test Pkg No", "PKGNO" } },
-                new { Sheet = "MEQ", Disc = SubSystemDiscipline.Equipment,
+                new { Keyword = "MEQ", Disc = SubSystemDiscipline.Equipment,
                       IdNames = new[] { "Tag No.", "Tag No", "TagNo", "TAG NO", "TAG" } },
-                new { Sheet = "Cable", Disc = SubSystemDiscipline.Cable,
+                new { Keyword = "Cable", Disc = SubSystemDiscipline.Cable,
                       IdNames = new[] { "Cable No", "Cable No.", "CableNo", "CABLE NO", "Cable Number" } },
             };
 
@@ -497,19 +500,24 @@ namespace NavisVisualizer.Loaders
             using (var reader = ExcelReaderFactory.CreateReader(stream))
             {
                 var dataSet = reader.AsDataSet();
+                var usedSheets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var spec in specs)
                 {
+                    // 시트명이 키워드와 정확히 같지 않고 '포함'만 해도 매칭. 이미 다른 키워드로
+                    // 소비된 시트는 제외해 한 시트가 두 공종으로 중복 소비되는 것을 막는다.
                     var table = dataSet.Tables.Cast<System.Data.DataTable>()
-                        .FirstOrDefault(t => t.TableName.Equals(spec.Sheet, StringComparison.OrdinalIgnoreCase));
-                    if (table == null) { notes.Add($"{spec.Sheet} 시트 없음"); continue; }
+                        .FirstOrDefault(t => !usedSheets.Contains(t.TableName ?? "")
+                            && (t.TableName ?? "").IndexOf(spec.Keyword, StringComparison.OrdinalIgnoreCase) >= 0);
+                    if (table == null) { notes.Add($"{spec.Keyword} 시트 없음"); continue; }
+                    usedSheets.Add(table.TableName ?? "");
 
                     int headerRow = FindHeaderRowInTable(table, spec.IdNames);
-                    if (headerRow < 0) { notes.Add($"{spec.Sheet}: ID 헤더 없음"); continue; }
+                    if (headerRow < 0) { notes.Add($"{spec.Keyword}: ID 헤더 없음"); continue; }
 
                     var cols = BuildColumnMap(table, headerRow);
                     int idCol = FindColumn(cols, spec.IdNames);
                     int subCol = FindColumn(cols, subNames);
-                    if (idCol < 0 || subCol < 0) { notes.Add($"{spec.Sheet}: 컬럼 부족"); continue; }
+                    if (idCol < 0 || subCol < 0) { notes.Add($"{spec.Keyword}: 컬럼 부족"); continue; }
 
                     int added = 0;
                     var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -522,7 +530,7 @@ namespace NavisVisualizer.Loaders
                         result.Add(SubSystemElement.FromBare(id, sub, spec.Disc));
                         added++;
                     }
-                    notes.Add($"{spec.Sheet} {added}건");
+                    notes.Add($"{table.TableName}({spec.Keyword}) {added}건");
                 }
             }
             return result;

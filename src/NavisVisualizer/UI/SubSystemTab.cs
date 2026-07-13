@@ -637,7 +637,7 @@ namespace NavisVisualizer.UI
         {
             using (var dlg = new OpenFileDialog
             {
-                Title = "Sub-system 형상 Excel (시트: Hydrotest / MEQ / Cable)",
+                Title = "Sub-system 형상 Excel (시트명에 Hydrotest / MEQ / Cable 포함)",
                 Filter = "Excel 파일 (*.xlsx;*.xls;*.xlsb)|*.xlsx;*.xls;*.xlsb|모든 파일|*.*"
             })
             {
@@ -654,7 +654,7 @@ namespace NavisVisualizer.UI
                         _lblOasis.ForeColor = DotFailed;
                         _lblOasis.Text = "형상 0건 — 시트/컬럼 확인";
                         _loadTip.SetToolTip(_lblOasis, string.Join(" · ", notes));
-                        MessageBox.Show("형상 데이터를 찾지 못했습니다.\n시트명(Hydrotest/MEQ/Cable)과 ID·Sub-system 컬럼을 확인하세요.\n\n"
+                        MessageBox.Show("형상 데이터를 찾지 못했습니다.\n시트명에 Hydrotest/MEQ/Cable이 포함돼 있고 ID·Sub-system 컬럼이 있는지 확인하세요.\n\n"
                             + string.Join("\n", notes), "형상 Excel", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                         return;
                     }
