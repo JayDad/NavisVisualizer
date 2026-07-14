@@ -15,7 +15,8 @@ namespace NavisVisualizer.Tests
         private const string Str = "01-02_Trion_TopsidesLQ_Str.nwc";
         private const string HydroPkg = "02-02_Trion_Topsides_HYDROPKG.nwd";
         private const string Meq = "04-02_Trion_Topsides_MEQ.nwd";
-        private const string Eit = "05-02_Trion_Topsides_EIT.nwd";
+        private const string Eit = "05-02_Trion_Topsides_EIT.nwd";           // 통합/EQ 파일 (파일명에 Tray 없음)
+        private const string EitTrayFile = "05-02-01_Trion_Topsides_EIT_Tray.nwd"; // granular 트레이 파일
         private const string Cable = "07_Trion_All_Cable.nwd";
         private const string PipSupport = "09-02_Trion_Topsides_PIPSupport.nwd";
         private const string Spl = "03-02_Trion_Topsides_SPL.nwd"; // 규약상 존재 가능 (스풀 별도 추출 시)
@@ -68,16 +69,30 @@ namespace NavisVisualizer.Tests
         }
 
         [TestMethod]
-        public void EitTray_Matches_Eit_Only()
+        public void EitTray_Matches_TrayFiles_And_Chains_To_Eit()
         {
-            Assert.IsTrue(NwdScope.EitTray.MatchesFileName(Eit));
+            // Tray 탭 스코프는 granular *_EIT_Tray 파일만 "TRAY"로 직접 매칭 (EQ/통합 파일 walk 회피 = 효율).
+            Assert.IsTrue(NwdScope.EitTray.MatchesFileName(EitTrayFile));
 
+            // 통합 *_EIT.nwd(파일명에 Tray 없음)는 직접 매칭 안 됨 — fallback(Eit)로 잡아 정확성 유지.
+            Assert.IsFalse(NwdScope.EitTray.MatchesFileName(Eit));
+            Assert.AreSame(NwdScope.Eit, NwdScope.EitTray.Fallback);
+            Assert.IsTrue(NwdScope.EitTray.Fallback.MatchesFileName(Eit));
+            Assert.IsNull(NwdScope.Eit.Fallback);
+
+            // 넓은 Eit 스코프(Sub-system EIT EQ용)는 통합/트레이 파일 모두 "EIT"로 잡는다.
+            Assert.IsTrue(NwdScope.Eit.MatchesFileName(Eit));
+            Assert.IsTrue(NwdScope.Eit.MatchesFileName(EitTrayFile));
+
+            // 교차 오탐 없음 (양 스코프 모두 타 공종 파일 미매칭)
             Assert.IsFalse(NwdScope.EitTray.MatchesFileName(Container));
             Assert.IsFalse(NwdScope.EitTray.MatchesFileName(Str));
             Assert.IsFalse(NwdScope.EitTray.MatchesFileName(HydroPkg));
             Assert.IsFalse(NwdScope.EitTray.MatchesFileName(Meq));
             Assert.IsFalse(NwdScope.EitTray.MatchesFileName(Cable));
             Assert.IsFalse(NwdScope.EitTray.MatchesFileName(PipSupport));
+            Assert.IsFalse(NwdScope.Eit.MatchesFileName(Meq));
+            Assert.IsFalse(NwdScope.Eit.MatchesFileName(Cable));
         }
 
         [TestMethod]
@@ -125,14 +140,15 @@ namespace NavisVisualizer.Tests
             // 레벨 타겟한다. 각 공종 스코프가 자기 파일만 매칭하는지 검증.
             Assert.IsTrue(NwdScope.Equipment.MatchesFileName(Meq));
             Assert.IsTrue(NwdScope.Hydrotest.MatchesFileName(HydroPkg));
-            Assert.IsTrue(NwdScope.EitTray.MatchesFileName(Eit));
+            // Sub-system EIT EQ는 넓은 Eit("EIT") 스코프 사용 (트레이 전용 EitTray가 아님).
+            Assert.IsTrue(NwdScope.Eit.MatchesFileName(Eit));
             Assert.IsTrue(NwdScope.Cable.MatchesFileName(Cable));
 
             // 교차 오탐 없음 — Equipment 스코프가 Piping/EIT/Cable 파일을 잡으면 안 됨
             Assert.IsFalse(NwdScope.Equipment.MatchesFileName(HydroPkg));
             Assert.IsFalse(NwdScope.Equipment.MatchesFileName(Eit));
             Assert.IsFalse(NwdScope.Hydrotest.MatchesFileName(Meq));
-            Assert.IsFalse(NwdScope.EitTray.MatchesFileName(Meq));
+            Assert.IsFalse(NwdScope.Eit.MatchesFileName(Meq));
         }
 
         [TestMethod]

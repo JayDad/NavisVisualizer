@@ -72,7 +72,8 @@ namespace NavisVisualizer.UI
             ("Spool",              NwdScope.Spool,     false),   // SPL→HYDROPKG 체인
             ("Hydrotest",          NwdScope.Hydrotest, false),
             ("Equipment",          NwdScope.Equipment, false),
-            ("EIT Tray / EIT EQ",  NwdScope.EitTray,   true),
+            ("EIT Tray",           NwdScope.EitTray,   true),    // EIT_Tray→EIT 체인 (트레이 파일 우선, EQ 파일 walk 회피)
+            ("EIT EQ (Sub-system)",NwdScope.Eit,       true),    // 넓은 EIT — Sub-system EIT EQ 공종
             ("Cable",              NwdScope.Cable,     false),
         };
 

@@ -1112,7 +1112,8 @@ namespace NavisVisualizer.UI
             // = 그 파일에서만 — 미발견 시 전체 트리 안 훑고 0건 + 진단). 요소 있는 공종만 빌드.
             BuildDiscipline(doc, SubSystemDiscipline.Equipment,    _eqSearcher,     NwdScope.Equipment);
             BuildDiscipline(doc, SubSystemDiscipline.Piping,       _pipingSearcher, NwdScope.Hydrotest);
-            BuildDiscipline(doc, SubSystemDiscipline.EitEquipment, _eitEqSearcher,  NwdScope.EitTray);
+            // EIT EQ는 넓은 Eit("EIT") 스코프 — EQ 파일이 필요하므로 트레이 전용 EitTray("TRAY")가 아님.
+            BuildDiscipline(doc, SubSystemDiscipline.EitEquipment, _eitEqSearcher,  NwdScope.Eit);
             BuildDiscipline(doc, SubSystemDiscipline.Cable,        _cableSearcher,  NwdScope.Cable);
 
             _needsIndexRebuild = false;

@@ -29,7 +29,9 @@ BuildIndexForTags / BuildIndexForBoxes에 `NwdScope` 파라미터, null = 전체
   "SPL이 있어도 둘 다 walk"라 의미가 흐려 우선순위 체인으로 교체 (2026-07 사용자 결정).
   대신 Spool/Hydrotest searcher가 분리되어, SPL 없는 문서에선 같은 HYDROPKG 인덱스를
   탭별로 각각 빌드 (파일 단위 walk + lazy 빌드라 비용 미미)
-- `NwdScope.Equipment` = MEQ / `NwdScope.EitTray` = EIT (`ElecTagSearcher` 분리) /
+- `NwdScope.Equipment` = MEQ / `NwdScope.EitTray` = TRAY→EIT 체인 (Tray 탭 전용 — granular
+  `*_EIT_Tray` 파일만 우선, EQ 파일 walk 회피, 통합 `*_EIT.nwd`만 있으면 `NwdScope.Eit`로 fallback.
+  `ElecTagSearcher`) / `NwdScope.Eit` = EIT (넓은 스코프 — Sub-system EIT EQ 공종 + EitTray fallback) /
   `NwdScope.Cable` = CABLE / `NwdScope.SubSystem` = MEQ·SPL·HYDROPKG (`SubSystemSearcher` 분리
   — 요소인 Equipment TAG·Piping PKG가 어느 배관 파일에 있든 커버하는 합집합 유지)
 - 구 `TagSearcher` 공유 인스턴스는 `SpoolTagSearcher`/`HydroTagSearcher`/`ElecTagSearcher`/
@@ -49,9 +51,15 @@ BuildIndexForTags / BuildIndexForBoxes에 `NwdScope` 파라미터, null = 전체
   요구라 위 전체-모델 fallback을 끈다. 스코프 파일 미발견/인덱스 0건이어도 전체 트리를 walk하지
   않고 빈 인덱스 + 진단 노트("하드 스코프: 전체 fallback 안 함 — 파일명 규약 확인")를 남긴다
   (federated 매칭이 어긋날 때 전 트리 순회로 인한 지연 방지 — EIT 적용 최다 지연 대책의 짝).
-  `EitTrayTab`·`SubSystemTab` EIT EQ 빌드 둘 다 hardScope(ElecTagSearcher 공유 인스턴스라 일관 유지).
-  스코프 키워드 "EIT"는 granular 복수 파일명(`05-02-01_..._EIT_Tray`, `05-02-02_LQRooms_EIT_Tray`)을
-  전부 부분일치로 수집 — `ResolveScopeRoots`가 전 모델 순회라 파일 수 무관.
+  `EitTrayTab`(EitTray 스코프)·`SubSystemTab` EIT EQ 빌드(Eit 스코프) 둘 다 hardScope.
+  **스코프 분리(2026-07)**: 구 공유 "EIT" 키워드는 Tray 탭이 EQ 파일까지 walk해 비효율이었다
+  (Overview에도 EIT·EIT_Tray가 한 행에 묶임). Tray 탭은 `NwdScope.EitTray`(키워드 "TRAY" —
+  granular `*_EIT_Tray` 파일만) + fallback `NwdScope.Eit`("EIT" — 통합 파일만 있는 문서 대비)로
+  분리하고, Sub-system EIT EQ는 넓은 `NwdScope.Eit`("EIT")를 쓴다. `ResolveScopeRoots`가
+  fallback 체인을 hardScope보다 먼저 시도하므로 하드 스코프여도 통합 파일 fallback이 동작한다.
+  **리스크(Windows 검증)**: 트레이가 오직 `*_EIT_Tray` 파일에만 있다는 규약 전제 — 통합
+  `*_EIT.nwd`에도 섞였으면 "TRAY"가 트레이 파일을 잡는 순간 fallback이 안 돌아 통합 파일 트레이를
+  놓친다. 구 "EIT" 스코프 시절과 매칭 건수 대조 필수.
 
 **잔여 / 주의**
 - **Windows 실측 검증 필요**: federated NWD를 열었을 때 하위 파일이 `doc.Models` 복수로
