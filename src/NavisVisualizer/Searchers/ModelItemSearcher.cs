@@ -215,12 +215,13 @@ namespace NavisVisualizer.Searchers
                 var roots = ResolveScopeRoots(doc, scope, hardScope);
                 _scopeRoots = roots;   // isolate 스코프용 — 공종 파일 루트 노출 (하드 스코프면 그 nwd만)
 
-                // 루트(파일)별로 태그 깊이를 따로 탐지해 그 루트만 그 깊이로 인덱싱한다.
-                // (구 구현은 첫 발견 깊이 하나를 전 루트에 공통 적용 — federated에서 파일별
-                //  트리 깊이가 다르면 깊이가 다른 파일의 항목이 조용히 미매칭됐다: 2차 audit P1.
-                //  루트 "안"에서 여러 깊이에 태그가 섞인 경우의 첫-깊이 한정은 §2 리스크 그대로.)
-                var depths = new List<int>();   // 태그가 발견된 루트들의 깊이 (진단용)
-                int rootsWithoutTags = IndexRootsAtOwnDepth(roots, normalizedTags, depths);
+                // 게이트 walk로 known tag를 만나면 인덱싱 후 그 서브트리는 정지(태그=컴포지트
+                // 이름, 아래는 자기 geometry라 더 펼칠 필요 없음 — 사용자 지적 2026-07). 매칭 안 된
+                // 노드만 자식 게이트로 계속 하강 → 여러 깊이에 섞인 태그를 전부 잡되(§2 다중 깊이
+                // 해결), 매칭 서브트리·geometry 숲은 안 훑어 빠르고 인덱스도 린(known tag만).
+                // (구 IndexRootsAtOwnDepth는 첫 매칭 깊이 하나만 인덱싱 → 다른 깊이 항목 미매칭 §2.)
+                var depths = new List<int>();   // 태그가 발견된 깊이들 (진단용, 다중 가능)
+                int rootsWithoutTags = IndexRootsKnownTags(roots, normalizedTags, depths);
 
                 // 스코프 모델 어디서도 태그를 못 찾으면 스코프 오판 가능성 — 전체 모델로 재탐지 (하드 스코프 제외)
                 if (depths.Count == 0 && !hardScope && scope != null && !LastScopeFellBack && _lastScopeNarrowed)
@@ -231,7 +232,7 @@ namespace NavisVisualizer.Searchers
                     _scopeRoots = roots;   // fallback 시 스코프도 전체 모델로 갱신
                     LastScopeFellBack = true;
                     LastScopeNote = $"스코프 {scope.Label}: 태그 미발견 → 전체 모델 fallback";
-                    rootsWithoutTags = IndexRootsAtOwnDepth(roots, normalizedTags, depths);
+                    rootsWithoutTags = IndexRootsKnownTags(roots, normalizedTags, depths);
                 }
 
                 if (depths.Count == 0)
@@ -253,10 +254,11 @@ namespace NavisVisualizer.Searchers
                 }
                 else
                 {
-                    // 진단: 루트 간 깊이 상이·태그 없는 루트는 노트로 드러낸다 (조용한 누락 방지).
+                    // 진단: 태그가 여러 깊이에 걸쳐 있으면(정상 — 다중 깊이 walk가 전부 잡음) 깊이 목록,
+                    // 태그 없는 루트 개수를 노트로 드러낸다 (조용한 누락 방지).
                     var distinct = depths.Distinct().OrderBy(d => d).ToList();
                     if (distinct.Count > 1)
-                        LastScopeNote = (LastScopeNote ?? "") + $" · 루트별 태그 깊이 상이({string.Join(",", distinct)})";
+                        LastScopeNote = (LastScopeNote ?? "") + $" · 태그 깊이 다중({string.Join(",", distinct)})";
                     if (rootsWithoutTags > 0)
                         LastScopeNote = (LastScopeNote ?? "") + $" · 태그 없는 루트 {rootsWithoutTags}개 제외";
                 }
@@ -268,102 +270,66 @@ namespace NavisVisualizer.Searchers
         }
 
         /// <summary>
-        /// 각 루트에서 태그 깊이를 BFS로 찾아 그 루트만 그 깊이로 인덱싱한다.
-        /// 태그가 안 나온 루트는 건너뛰고(인덱싱 안 함) 그 개수를 반환한다.
-        /// 발견된 깊이는 <paramref name="depths"/>에 누적 (진단용).
+        /// 각 루트를 known-tag 게이트 walk로 인덱싱한다(다중 깊이). 태그를 하나도 못 찾은 루트
+        /// 개수를 반환하고, 발견된 깊이는 <paramref name="depths"/>에 누적한다(진단용, 다중 가능).
         /// </summary>
-        private int IndexRootsAtOwnDepth(List<ModelItem> roots, HashSet<string> normalizedTags, List<int> depths)
+        private int IndexRootsKnownTags(List<ModelItem> roots, HashSet<string> normalizedTags, List<int> depths)
         {
             int rootsWithoutTags = 0;
             foreach (var root in roots)
-            {
-                int depth = FindTagDepthInRoot(root, normalizedTags);
-                if (depth >= 0)
-                {
-                    depths.Add(depth);
-                    IndexAtDepth(root, 0, depth, normalizedTags);
-                }
-                else
-                {
+                if (!WalkAndIndexKnownTags(root, normalizedTags, 0, depths))
                     rootsWithoutTags++;
-                }
-            }
             return rootsWithoutTags;
         }
 
         /// <summary>
-        /// 한 루트 안에서 태그가 있는 가장 얕은 깊이를 level-order(BFS)로 찾는다 (성능 audit 4-1).
-        /// 구 DFS는 첫 분기가 태그 없는 대형 geometry 서브트리면 그 안을 깊이 한도(20)까지
-        /// 헛순회한 뒤에야 다음 분기로 넘어갔다 — BFS는 얕은 깊이부터 전 분기를 확인하므로
-        /// 대상 깊이 위쪽 노드만 방문한다(= IndexAtDepth가 어차피 방문할 집합).
-        /// 태그가 여러 깊이에 있으면 가장 얕은 깊이가 결정적으로 선택된다
-        /// (구 DFS는 순회 순서에 따라 달라짐 — "첫 매칭 깊이만 인덱싱" 리스크 자체는 §2 그대로).
-        /// 루트 간 깊이 차이는 호출부(IndexRootsAtOwnDepth)가 루트별 탐지로 흡수한다.
+        /// known tag만 인덱싱하는 게이트 walk. 노드 이름이 known tag와 정확 일치(또는 "tag/suffix"
+        /// 접두 일치)하면 인덱싱 후 **그 서브트리는 정지** — 태그는 컴포지트 이름이고 그 아래는 자기
+        /// geometry라 더 펼칠 필요가 없다(사용자 지적 2026-07). 정확 일치라 federated 파일 노드
+        /// (예: MEBTray1.nwc — digit 보유지만 known tag는 아님)는 정지 대상이 아니라 계속 하강한다.
+        /// 매칭 안 된 노드는 WalkAndIndex와 동일 게이트(자식이 tag-like 또는 구조 컨테이너일 때만
+        /// 하강)로 내려가 여러 깊이에 섞인 태그를 전부 잡는다(§2 다중 깊이 해결). 반환: 이 서브트리에서
+        /// 태그를 하나라도 찾았는가. 발견 깊이는 depths에 누적.
         /// </summary>
-        private int FindTagDepthInRoot(ModelItem root, HashSet<string> normalizedTags)
+        private bool WalkAndIndexKnownTags(ModelItem item, HashSet<string> knownTags, int depth, List<int> depths)
         {
-            var current = new List<ModelItem> { root };
-            for (int depth = 0; depth <= 20 && current.Count > 0; depth++)
+            string name = item.DisplayName?.Trim();
+            if (!string.IsNullOrEmpty(name))
             {
-                var next = new List<ModelItem>();
-                foreach (var item in current)
+                string key = name.TrimStart('/').Trim().ToUpperInvariant();
+                bool matched = false;
+                if (!string.IsNullOrEmpty(key))
                 {
-                    if (item == null) continue;
-                    string name = item.DisplayName?.Trim();
-                    if (!string.IsNullOrEmpty(name))
-                    {
-                        string key = name.TrimStart('/').Trim().ToUpperInvariant();
-                        // Check exact match or prefix match (tag/VENSKID → tag)
-                        if (normalizedTags.Contains(key))
-                            return depth;
-                        int slash = key.IndexOf('/');
-                        if (slash > 0 && normalizedTags.Contains(key.Substring(0, slash)))
-                            return depth;
-                    }
-                    foreach (var child in item.Children)
-                        next.Add(child);
+                    if (knownTags.Contains(key)) { AddToIndex(key, item); matched = true; }
+                    int slash = key.IndexOf('/');
+                    if (slash > 0 && knownTags.Contains(key.Substring(0, slash)))
+                    { AddToIndex(key.Substring(0, slash), item); matched = true; }
                 }
-                current = next;
-            }
-            return -1;
-        }
-
-        /// <summary>
-        /// Index nodes at the target depth only — 알려진 태그와 일치하는 노드만 담는다
-        /// (성능 audit 4-2). 대상 깊이의 전 노드를 담으면 사전이 데이터와 무관한 노드로
-        /// 부풀어 메모리·빌드 시간을 낭비한다. 레벨 타겟 인덱스는 소스 전환 시 재빌드되므로
-        /// (_needsIndexRebuild) 활성 소스의 태그만으로 충분하다.
-        /// </summary>
-        private void IndexAtDepth(ModelItem item, int currentDepth, int targetDepth, HashSet<string> knownTags)
-        {
-            if (currentDepth == targetDepth)
-            {
-                // Index this node
-                string name = item.DisplayName?.Trim();
-                if (!string.IsNullOrEmpty(name))
+                if (matched)
                 {
-                    string key = name.TrimStart('/').Trim();
-                    if (!string.IsNullOrEmpty(key))
-                    {
-                        key = key.ToUpperInvariant();
-                        if (knownTags.Contains(key))
-                            AddToIndex(key, item);
-
-                        int slash = key.IndexOf('/');
-                        if (slash > 0)
-                        {
-                            string prefix = key.Substring(0, slash);
-                            if (knownTags.Contains(prefix))
-                                AddToIndex(prefix, item);
-                        }
-                    }
+                    if (!depths.Contains(depth)) depths.Add(depth);
+                    return true;   // 정확 매칭 → 아래는 자기 geometry, 더 안 펼침
                 }
-                return; // Don't go deeper
             }
 
-            // Haven't reached target depth yet — keep going
+            // 매칭 안 됨 → 자식에 tag-like 또는 구조 컨테이너가 있을 때만 하강 (WalkAndIndex와 동일 게이트).
+            var children = new List<ModelItem>();
+            bool descend = false;
             foreach (var child in item.Children)
-                IndexAtDepth(child, currentDepth + 1, targetDepth, knownTags);
+            {
+                children.Add(child);
+                if (descend) continue;
+                string cn = child.DisplayName?.Trim();
+                bool childTagLike = !string.IsNullOrEmpty(cn) && ContainsDigit(cn);
+                if (childTagLike || (!child.HasGeometry && child.Children.Any()))
+                    descend = true;
+            }
+            if (!descend) return false;
+
+            bool found = false;
+            foreach (var child in children)
+                found |= WalkAndIndexKnownTags(child, knownTags, depth + 1, depths);
+            return found;
         }
 
         private void WalkAndIndex(ModelItem item)
