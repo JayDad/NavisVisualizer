@@ -59,6 +59,7 @@ namespace NavisVisualizer.UI
         private HashSet<string> _listFilter;
         private string _cableFilterText;   // 재입력 시 prefill 원문
         private Button _btnListFilter;
+        private Form _findWindow;           // Cable 찾기 결과 비모달 창 (재호출 시 이전 창 닫음)
 
         private Document _subscribedDoc;
         private bool _suppressSelectionSync;
@@ -107,6 +108,7 @@ namespace NavisVisualizer.UI
             {
                 UnsubscribeSelection();
                 _main.IndexesInvalidated -= OnIndexesInvalidated;
+                try { _findWindow?.Close(); } catch { }
             };
         }
 
@@ -454,6 +456,7 @@ namespace NavisVisualizer.UI
             _needsIndexRebuild = true;
             _listFilter = null;   // 리스트 필터는 소스별 부분집합 — 소스 전환 시 해제
             _cableFilterText = null;
+            try { _findWindow?.Close(); } catch { }   // 소스 전환 → 이전 결과 창 무효
             if (_btnListFilter != null) _btnListFilter.Text = "Cable 찾기";
             _tabFilter.TabPages[0].Text = $"전체 ({_cables.Count})";
             _tabFilter.TabPages[1].Text = "매칭";
@@ -665,6 +668,7 @@ namespace NavisVisualizer.UI
                 // _cableFilterText는 남겨 다음에 다시 열 때 prefill (소스 전환 시에만 초기화 — SpoolTab _focusSpoolText 패턴)
                 _btnListFilter.Text = "Cable 찾기";
                 if (doc != null && _cableHidden != null) RestoreHidden(doc);
+                try { _findWindow?.Close(); } catch { }   // 필터 해제 → 결과 창도 닫음(내용 무의미)
                 FilterList();
                 UpdateStats();
                 return;
@@ -720,7 +724,48 @@ namespace NavisVisualizer.UI
             MessageBox.Show($"입력 {tokens.Count:N0}건 중 로드 데이터와 일치 {hit:N0}건.\n" +
                 (_matchedCableNos.Count > 0
                     ? "3D에는 리스트 케이블만 남기고 나머지 매칭 케이블을 숨겼습니다 (버튼 재클릭으로 해제)."
-                    : "가시화 적용 전이라 리스트만 필터됐습니다 — [가시화 적용] 후 다시 필터하면 3D에도 반영됩니다."));
+                    : "가시화 적용 전이라 리스트만 필터됐습니다 — [가시화 적용] 후 다시 찾으면 매칭 목록 창이 열립니다."));
+
+            // 매칭이 있으면(=가시화 적용 후) 결과 창 — 행 선택 시 3D 포커스/하이라이트
+            if (_matchedCableNos.Count > 0) ShowFindResults(filter);
+        }
+
+        /// <summary>Cable 찾기 결과를 비모달 창으로 띄운다. 행 선택 → 그 케이블을 3D에서 선택·포커스.
+        /// 매칭 O/X는 마지막 가시화 적용이 채운 _matchedCableNos 기준(그래서 적용 후에만 호출).</summary>
+        private void ShowFindResults(HashSet<string> filter)
+        {
+            var referenceDate = _dtpReference.Value;
+            // 입력(정규화)에 해당하는 로드 케이블만 그리드에 (정규화 키로 중복 제거)
+            var inData = _cables
+                .Where(c => filter.Contains(CableLineData.NormalizeCableNo(c.CableNo)))
+                .GroupBy(c => CableLineData.NormalizeCableNo(c.CableNo), StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.First())
+                .ToList();
+            if (inData.Count == 0) return;
+
+            var rows = inData.Select(c => new FindResultsWindow.Row
+            {
+                Id = c.CableNo,
+                Stage = _lastHighlightMode ? "하이라이트" : CableLineStageInfo.Labels[c.GetStageAtDate(referenceDate)],
+                Matched = _matchedCableNos.Contains(c.CableNo),
+            }).ToList();
+
+            try { _findWindow?.Close(); } catch { }
+            _findWindow = FindResultsWindow.Show(this, $"Cable 찾기 결과 — {rows.Count}건",
+                "Cable No", rows,
+                ids =>
+                {
+                    var doc = _main.GetDocument();
+                    if (doc == null || _needsIndexRebuild || _main.CableLineSearcher.NeedsRebuild(doc)) return;
+                    var found = _main.CableLineSearcher.FindBySpoolIds(
+                        ids.Select(CableLineData.NormalizeCableNo).Distinct(StringComparer.OrdinalIgnoreCase));
+                    var collection = new ModelItemCollection();
+                    foreach (var items in found.Values) collection.AddRange(items);
+                    if (collection.Count == 0) return;
+                    _suppressSelectionSync = true;
+                    try { doc.CurrentSelection.CopyFrom(collection); doc.ActiveView.FocusOnCurrentSelection(); }
+                    finally { _suppressSelectionSync = false; }
+                });
         }
 
         private static bool CableMatchesKeyword(CableLineData c, string keywordUpper)

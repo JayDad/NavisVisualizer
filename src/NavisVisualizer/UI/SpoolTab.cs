@@ -50,6 +50,7 @@ namespace NavisVisualizer.UI
         // 복수 Spool 찾기 다이얼로그 프리필용 마지막 입력 원문. 포커스는 일회성(각 클릭이 인자로 전달,
         // '가시화 적용'이 전체 보기) — 활성 셋을 필드로 보관하지 않는다.
         private string _focusSpoolText = "";
+        private Form _findWindow;           // 복수 Spool 찾기 결과 비모달 창 (재호출 시 이전 창 닫음)
         private Button   _btnResetModule;   // 이 공종(Spool) 색만 제거
         private Button   _btnReset;
         private Button   _btnWriteProps;
@@ -74,6 +75,8 @@ namespace NavisVisualizer.UI
             _colorSettings = CloneDefaults(ColorSetting.SpoolDefaults);
             _scopeFilter = new ScopeFilter(main.SectionSvc);
             InitializeComponent();
+            // 탭이 닫히면 열려 있던 복수 Spool 찾기 결과 창도 닫는다.
+            this.HandleDestroyed += (s, e) => { try { _findWindow?.Close(); } catch { } };
         }
 
         private void InitializeComponent()
@@ -417,6 +420,9 @@ namespace NavisVisualizer.UI
                 ? list : new List<SpoolData>();
             _matchedSpoolIds.Clear();
             _unmatchedSpoolIds.Clear();
+            // 소스 전환 → 매칭·인덱스가 무효 → 열려 있던 결과 창은 옛 소스 기준이라 닫는다
+            // (CableLineTab.ApplyActiveSourceData와 동일 — 안 닫으면 클릭해도 인덱스 재빌드 필요로 무반응).
+            try { _findWindow?.Close(); } catch { }
 
             // 소스 전환 → 매칭 집합이 바뀌므로 범위 판정도 무효화. 재적용 경로가
             // 현재 범위를 새 매칭 기준으로 다시 계산하고, 재적용이 없으면(매칭 없음)
@@ -625,6 +631,51 @@ namespace NavisVisualizer.UI
             // 피드백: 리스트 중 데이터에 있는 개수 (모델 매칭은 stats의 매칭 수로 확인)
             int inData = _spools.Count(s => set.Contains(s.SpoolId));
             _lblStats.Text += $"\n복수 Spool 찾기: 리스트 {set.Count}개 중 데이터 {inData}개 강조 · 나머지 투명 ([가시화 적용]으로 전체 보기)";
+
+            // 매칭 결과 창 — 행을 선택하면 3D에서 포커스/하이라이트
+            ShowFindResults(set);
+        }
+
+        /// <summary>복수 Spool 찾기 결과를 비모달 창으로 띄운다. 행 선택 → 그 스풀을 3D에서 선택·포커스.
+        /// 매칭 O/X는 방금 ApplySpools가 갱신한 _matchedSpoolIds 기준(그 시점 인덱스로 정확).</summary>
+        private void ShowFindResults(HashSet<string> pastedIds)
+        {
+            var referenceDate = _dtpReference.Value;
+            // 입력 중 데이터에 있는 스풀만 그리드에 (없는 건 오타 가능 — 요약 note로 개수만)
+            var inData = _spools
+                .Where(s => pastedIds.Contains(s.SpoolId))
+                .GroupBy(s => s.SpoolId, StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.First())
+                .ToList();
+            if (inData.Count == 0)
+            {
+                MessageBox.Show("입력한 스풀 번호가 로드된 데이터에 없습니다.", "복수 Spool 찾기");
+                return;
+            }
+            var rows = inData.Select(s => new FindResultsWindow.Row
+            {
+                Id = s.SpoolId,
+                Stage = SpoolStageInfo.Labels.TryGetValue(s.GetStageAtDate(referenceDate), out var lbl) ? lbl : "-",
+                Matched = _matchedSpoolIds.Contains(s.SpoolId),
+            }).ToList();
+            int notInData = pastedIds.Count - inData.Count;
+
+            try { _findWindow?.Close(); } catch { }
+            _findWindow = FindResultsWindow.Show(this, $"복수 Spool 찾기 결과 — {rows.Count}건",
+                "Spool ID", rows,
+                ids =>
+                {
+                    var doc = _main.GetDocument();
+                    if (doc == null || !_main.SpoolTagSearcher.IsIndexBuilt
+                        || _needsIndexRebuild || _main.SpoolTagSearcher.NeedsRebuild(doc)) return;
+                    var found = _main.SpoolTagSearcher.FindBySpoolIds(ids);
+                    var collection = new Autodesk.Navisworks.Api.ModelItemCollection();
+                    foreach (var items in found.Values) collection.AddRange(items);
+                    if (collection.Count == 0) return;
+                    doc.CurrentSelection.CopyFrom(collection);
+                    doc.ActiveView.FocusOnCurrentSelection();
+                },
+                notInData > 0 ? $"데이터없음 {notInData}개(입력 오타 가능)" : null);
         }
 
         private string SourceLabel() =>
