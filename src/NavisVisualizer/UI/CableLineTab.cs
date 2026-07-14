@@ -23,7 +23,7 @@ namespace NavisVisualizer.UI
     /// 하이라이트(stage 날짜 없으면 단색), ② 날짜 기반 4단계 공정 시각화, ③ 집계 범위
     /// Clipping 영역 = 단면 통과 clash 판정(선분-vs-볼륨), ④ 겹침 완화(숨김 isolate).
     /// (구 전용 clash 추출 버튼·필터 포커스는 2026-07 사용자 결정으로 삭제 — 추출은
-    /// Clipping 영역 + 매칭 Status 엑셀 출력이 대체, 부분집합 보기는 리스트 필터 Import가
+    /// Clipping 영역 + 매칭 Status 엑셀 출력이 대체, 부분집합 보기는 'Cable 찾기'(텍스트 입력)가
     /// 원래 의도.) 미매칭은 스코프와
     /// 직교(전역 고정, 코너 라벨 — §7/L3).
     /// </summary>
@@ -54,9 +54,10 @@ namespace NavisVisualizer.UI
         // 겹침 완화용 숨김(isolate 버튼들 공유 — 상호배타). null = 숨김 없음.
         private ModelItemCollection _cableHidden;
 
-        // Excel로 받은 케이블 부분집합 필터 (정규화 키). null = 필터 없음.
+        // 텍스트로 받은 케이블 부분집합 필터 (정규화 키). null = 필터 없음.
         // 리스트를 이 집합으로 좁히고, 매칭 케이블이 있으면 3D도 그것만 남기고 숨긴다.
         private HashSet<string> _listFilter;
+        private string _cableFilterText;   // 재입력 시 prefill 원문
         private Button _btnListFilter;
 
         private Document _subscribedDoc;
@@ -196,9 +197,9 @@ namespace NavisVisualizer.UI
             var searchPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 28, AutoSize = true };
             searchPanel.Controls.Add(new Label { Text = "검색(Cable/Equip):", AutoSize = true, Padding = new Padding(0, 4, 0, 0) });
             _txtSearch = new TextBox { Width = 170 };
-            // 리스트 필터는 debounce로만 갱신 — Enter는 즉시 확정 (성능 audit P0-1).
+            // 검색 리스트는 debounce로만 갱신 — Enter는 즉시 확정 (성능 audit P0-1).
             // (구 "필터 포커스" 투명 dim은 2026-07 사용자 결정으로 삭제 — 원래 의도였던
-            //  "가시화할 케이블 리스트만 보기"는 리스트 필터 Import가 담당. clash 추출 버튼도
+            //  "가시화할 케이블 리스트만 보기"는 'Cable 찾기'(텍스트 입력)가 담당. clash 추출 버튼도
             //  삭제 — 집계 범위 Clipping 영역 + 매칭 Status 엑셀 출력으로 동일 결과.)
             _searchDebounce = new Debouncer(FilterList);
             _txtSearch.TextChanged += (s, e) => _searchDebounce.Trigger();
@@ -220,10 +221,10 @@ namespace NavisVisualizer.UI
             new System.Windows.Forms.ToolTip().SetToolTip(btnCopy, "선택한 행을 복사합니다. 선택이 없으면 표시 중인 전체 행을 복사합니다.");
             btnCopy.Click += (s, e) => CopyListToClipboard();
             searchPanel.Controls.Add(btnCopy);
-            _btnListFilter = new Button { Text = "리스트 필터 Import", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(6, 0, 6, 0) };
+            _btnListFilter = new Button { Text = "Cable 찾기", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(6, 0, 6, 0) };
             _btnListFilter.Click += BtnListFilter_Click;
             new System.Windows.Forms.ToolTip().SetToolTip(_btnListFilter,
-                "가시화하고 싶은 케이블 리스트(Cable No 목록 Excel)를 불러와 리스트와 3D를 그 부분집합만 표시합니다 (재클릭 = 해제).");
+                "가시화하고 싶은 케이블 번호를 텍스트로 붙여넣어(공백/개행/콤마 구분) 리스트와 3D를 그 부분집합만 표시합니다 (재클릭 = 해제).");
             searchPanel.Controls.Add(_btnListFilter);
             // 버튼명만으로는 용도가 안 보여 상시 안내 병기 (사용자 요청 2026-07)
             searchPanel.Controls.Add(new Label
@@ -452,7 +453,8 @@ namespace NavisVisualizer.UI
             _scopePanel.ResetToFullModel();
             _needsIndexRebuild = true;
             _listFilter = null;   // 리스트 필터는 소스별 부분집합 — 소스 전환 시 해제
-            if (_btnListFilter != null) _btnListFilter.Text = "리스트 필터 Import";
+            _cableFilterText = null;
+            if (_btnListFilter != null) _btnListFilter.Text = "Cable 찾기";
             _tabFilter.TabPages[0].Text = $"전체 ({_cables.Count})";
             _tabFilter.TabPages[1].Text = "매칭";
             _tabFilter.TabPages[2].Text = "미매칭";
@@ -533,8 +535,8 @@ namespace NavisVisualizer.UI
             // 색칠 전 isolate 숨김 해제 (hide는 §10 누적 리셋이 안 잡음).
             RestoreHidden(doc);
 
-            // 하이라이트 우선 모드: stage 날짜가 하나도 없으면 단색 하이라이트.
-            _lastHighlightMode = !_cables.Any(c => c.HasAnyStageDate);
+            // 하이라이트 우선 모드: 진척 신호(stage 날짜 또는 길이 완료)가 하나도 없으면 단색 하이라이트.
+            _lastHighlightMode = !_cables.Any(c => c.HasProgressSignal);
 
             var activeSettings = new Dictionary<CableLineStage, ColorSetting>();
             foreach (var kv in _colorRows)
@@ -647,9 +649,11 @@ namespace NavisVisualizer.UI
         }
 
         /// <summary>
-        /// Excel 케이블 리스트로 부분집합 필터(토글). 진척 데이터가 아니라 "보여줄 케이블 목록"만
-        /// 담은 파일 — 리스트를 그 집합으로 좁히고, 가시화 적용 상태면 3D도 그 케이블만 남기고
-        /// 나머지 매칭 케이블을 숨긴다(기존 isolate 숨김 메커니즘 공유). 다시 누르면 해제.
+        /// 텍스트로 붙여넣은 케이블 번호 목록으로 부분집합 필터(토글). 진척 데이터가 아니라 "보여줄
+        /// 케이블 목록"만 — 리스트를 그 집합으로 좁히고, 가시화 적용 상태면 3D도 그 케이블만 남기고
+        /// 나머지 매칭 케이블을 숨긴다(기존 isolate 숨김 메커니즘 공유 — 케이블은 투명 dim 대신
+        /// 숨김 isolate: 2만 케이블에서 투명은 프레임레이트 붕괴, §13). 다시 누르면 해제.
+        /// Spool '복수 Spool 찾기'와 동일한 TextListPrompt 텍스트창(공백/개행/콤마 구분).
         /// </summary>
         private void BtnListFilter_Click(object sender, EventArgs e)
         {
@@ -658,7 +662,8 @@ namespace NavisVisualizer.UI
             if (_listFilter != null)
             {
                 _listFilter = null;
-                _btnListFilter.Text = "리스트 필터 Import";
+                _cableFilterText = null;
+                _btnListFilter.Text = "Cable 찾기";
                 if (doc != null && _cableHidden != null) RestoreHidden(doc);
                 FilterList();
                 UpdateStats();
@@ -667,62 +672,55 @@ namespace NavisVisualizer.UI
 
             if (_cables.Count == 0)
             {
-                MessageBox.Show("먼저 케이블 데이터(Excel/OASIS)를 로드하세요. 리스트 필터는 로드된 케이블의 부분집합입니다.");
+                MessageBox.Show("먼저 케이블 데이터(Excel/OASIS)를 로드하세요. Cable 찾기는 로드된 케이블의 부분집합입니다.");
                 return;
             }
 
-            using (var dlg = new OpenFileDialog
+            var text = TextListPrompt.Prompt(this, "Cable 찾기",
+                "가시화할 케이블 번호를 붙여넣으세요 (공백·개행·콤마 어느 구분이든 인식).\n" +
+                "리스트에 있는 케이블만 리스트/3D에 남고 나머지는 숨겨집니다.",
+                _cableFilterText);
+            if (text == null) return;   // 취소
+
+            var tokens = TextListPrompt.Parse(text);
+            if (tokens.Count == 0)
             {
-                Title = "케이블 리스트 Excel (Cable No 목록)",
-                Filter = "Excel 파일 (*.xlsx;*.xls;*.xlsb)|*.xlsx;*.xls;*.xlsb|모든 파일|*.*"
-            })
-            {
-                if (dlg.ShowDialog() != DialogResult.OK) return;
-                List<string> nos;
-                try { nos = ExcelLoader.LoadCableNoList(dlg.FileName); }
-                catch (Exception ex)
-                {
-                    MessageBox.Show($"리스트 로드 실패:\n{ex.Message}", "오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    return;
-                }
-                if (nos.Count == 0)
-                {
-                    MessageBox.Show("파일에서 케이블 번호를 찾지 못했습니다 ('Cable No' 헤더 또는 첫 컬럼).");
-                    return;
-                }
-
-                var filter = new HashSet<string>(
-                    nos.Select(CableLineData.NormalizeCableNo), StringComparer.OrdinalIgnoreCase);
-                int hit = _cables.Count(c => filter.Contains(CableLineData.NormalizeCableNo(c.CableNo)));
-
-                _listFilter = filter;
-                _btnListFilter.Text = $"리스트 필터 해제 ({hit:N0}건)";
-                FilterList();
-                UpdateStats();
-
-                // 3D isolate: 가시화 적용된 매칭 케이블 중 리스트 밖은 숨긴다.
-                if (doc != null && _matchedCableNos.Count > 0)
-                {
-                    if (_cableHidden != null) RestoreHidden(doc);
-                    var toHide = new ModelItemCollection();
-                    foreach (var cableNo in _matchedCableNos)
-                    {
-                        if (filter.Contains(CableLineData.NormalizeCableNo(cableNo))) continue;
-                        var col = _main.OverrideEngine.GetCableLineItems(cableNo);
-                        if (col != null) foreach (ModelItem mi in col) toHide.Add(mi);
-                    }
-                    if (toHide.Count > 0)
-                    {
-                        doc.Models.SetHidden(toHide, true);
-                        _cableHidden = toHide;
-                    }
-                }
-
-                MessageBox.Show($"리스트 {nos.Count:N0}건 중 로드 데이터와 일치 {hit:N0}건.\n" +
-                    (_matchedCableNos.Count > 0
-                        ? "3D에는 리스트 케이블만 남기고 나머지 매칭 케이블을 숨겼습니다 (버튼 재클릭으로 해제)."
-                        : "가시화 적용 전이라 리스트만 필터됐습니다 — [가시화 적용] 후 다시 필터하면 3D에도 반영됩니다."));
+                MessageBox.Show("케이블 번호를 하나 이상 입력하세요.");
+                return;
             }
+
+            var filter = new HashSet<string>(
+                tokens.Select(CableLineData.NormalizeCableNo), StringComparer.OrdinalIgnoreCase);
+            int hit = _cables.Count(c => filter.Contains(CableLineData.NormalizeCableNo(c.CableNo)));
+
+            _listFilter = filter;
+            _cableFilterText = text;
+            _btnListFilter.Text = $"Cable 찾기 해제 ({hit:N0}건)";
+            FilterList();
+            UpdateStats();
+
+            // 3D isolate: 가시화 적용된 매칭 케이블 중 리스트 밖은 숨긴다.
+            if (doc != null && _matchedCableNos.Count > 0)
+            {
+                if (_cableHidden != null) RestoreHidden(doc);
+                var toHide = new ModelItemCollection();
+                foreach (var cableNo in _matchedCableNos)
+                {
+                    if (filter.Contains(CableLineData.NormalizeCableNo(cableNo))) continue;
+                    var col = _main.OverrideEngine.GetCableLineItems(cableNo);
+                    if (col != null) foreach (ModelItem mi in col) toHide.Add(mi);
+                }
+                if (toHide.Count > 0)
+                {
+                    doc.Models.SetHidden(toHide, true);
+                    _cableHidden = toHide;
+                }
+            }
+
+            MessageBox.Show($"입력 {tokens.Count:N0}건 중 로드 데이터와 일치 {hit:N0}건.\n" +
+                (_matchedCableNos.Count > 0
+                    ? "3D에는 리스트 케이블만 남기고 나머지 매칭 케이블을 숨겼습니다 (버튼 재클릭으로 해제)."
+                    : "가시화 적용 전이라 리스트만 필터됐습니다 — [가시화 적용] 후 다시 필터하면 3D에도 반영됩니다."));
         }
 
         private static bool CableMatchesKeyword(CableLineData c, string keywordUpper)

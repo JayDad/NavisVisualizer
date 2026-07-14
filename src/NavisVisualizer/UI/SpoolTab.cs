@@ -607,10 +607,12 @@ namespace NavisVisualizer.UI
         {
             if (_spools.Count == 0) { MessageBox.Show("스풀 데이터를 먼저 로드하세요."); return; }
 
-            string text = PromptSpoolList(_focusSpoolText);
+            string text = TextListPrompt.Prompt(this, "복수 Spool 찾기 — 스풀 번호 목록",
+                "스풀 번호를 붙여넣으세요 — 공백·개행·콤마 어느 구분이든 인식합니다.\n"
+                + "리스트에 든 스풀만 공정색으로 두고, 나머지 매칭 스풀은 투명 처리됩니다.", _focusSpoolText);
             if (text == null) return;   // 취소
 
-            var set = ParseIdList(text);
+            var set = TextListPrompt.Parse(text);
             if (set.Count == 0)
             {
                 MessageBox.Show("스풀 번호를 입력하세요 (공백·개행·콤마로 구분).", "복수 Spool 찾기");
@@ -623,67 +625,6 @@ namespace NavisVisualizer.UI
             // 피드백: 리스트 중 데이터에 있는 개수 (모델 매칭은 stats의 매칭 수로 확인)
             int inData = _spools.Count(s => set.Contains(s.SpoolId));
             _lblStats.Text += $"\n복수 Spool 찾기: 리스트 {set.Count}개 중 데이터 {inData}개 강조 · 나머지 투명 ([가시화 적용]으로 전체 보기)";
-        }
-
-        /// <summary>공백·탭·개행·콤마·세미콜론 어느 것으로 구분돼도 id 리스트로 파싱 (대소문자 무시 dedup).</summary>
-        private static HashSet<string> ParseIdList(string text)
-        {
-            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            if (!string.IsNullOrEmpty(text))
-                foreach (var tok in text.Split(new[] { ' ', '\t', '\r', '\n', ',', ';' },
-                    StringSplitOptions.RemoveEmptyEntries))
-                {
-                    var t = tok.Trim();
-                    if (t.Length > 0) set.Add(t);
-                }
-            return set;
-        }
-
-        /// <summary>스풀 번호 목록 입력용 모달 텍스트창. OK면 입력 원문, 취소면 null.</summary>
-        private string PromptSpoolList(string prefill)
-        {
-            using (var form = new Form
-            {
-                Text = "복수 Spool 찾기 — 스풀 번호 목록",
-                Width = 460,
-                Height = 380,
-                StartPosition = FormStartPosition.CenterParent,
-                FormBorderStyle = FormBorderStyle.Sizable,
-                MinimizeBox = false,
-                MaximizeBox = false,
-                ShowInTaskbar = false,
-            })
-            {
-                var lbl = new Label
-                {
-                    Dock = DockStyle.Top,
-                    Height = 46,
-                    Padding = new Padding(8, 6, 8, 0),
-                    Text = "스풀 번호를 붙여넣으세요 — 공백·개행·콤마 어느 구분이든 인식합니다.\n"
-                         + "리스트에 든 스풀만 공정색으로 두고, 나머지 매칭 스풀은 투명 처리됩니다.",
-                };
-                var txt = new TextBox
-                {
-                    Dock = DockStyle.Fill,
-                    Multiline = true,
-                    ScrollBars = ScrollBars.Vertical,
-                    AcceptsReturn = true,
-                    WordWrap = false,
-                    Font = new Font("Consolas", 9F),
-                    Text = prefill ?? "",
-                };
-                var pnl = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 42, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(6) };
-                var ok = new Button { Text = "적용", Width = 90, DialogResult = DialogResult.OK };
-                var cancel = new Button { Text = "취소", Width = 90, DialogResult = DialogResult.Cancel };
-                pnl.Controls.Add(ok);
-                pnl.Controls.Add(cancel);
-                form.Controls.Add(txt);
-                form.Controls.Add(pnl);
-                form.Controls.Add(lbl);
-                form.AcceptButton = ok;      // 멀티라인+AcceptsReturn이라 Enter는 줄바꿈, [적용]은 버튼으로
-                form.CancelButton = cancel;
-                return form.ShowDialog(this) == DialogResult.OK ? txt.Text : null;
-            }
         }
 
         private string SourceLabel() =>

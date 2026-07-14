@@ -652,7 +652,7 @@ namespace NavisVisualizer.Models
     {
         NotStarted, // 0  착수 전
         Pulling,    // 1  포설중 (PULLING START)
-        Pulled,     // 2  포설완료 (PULLING END)
+        Pulled,     // 2  포설완료 (PULLING END 날짜 또는 포설길이 ≥ 설계길이)
         Terminated, // 3  결선완료 (FROM CONN AND TO CONN)
     }
 
@@ -674,8 +674,9 @@ namespace NavisVisualizer.Models
 
     /// <summary>
     /// 케이블 1가닥 (형상 탭). 매칭 키 = Cable No (컴포넌트 DisplayName). 진척은 stage 날짜
-    /// 역순 스캔. 길이/%는 표시 전용(§13-6 — PULLING LTH 의미 미확정이라 색에 안 씀).
-    /// stage 날짜가 하나도 없으면(맨 목록) 탭이 '하이라이트 우선' 모드로 전환한다.
+    /// 역순 스캔 + 포설완료는 길이 조건 병행(PulledLth ≥ DesignLth, 2026-07 사용자 확정).
+    /// PullingProgress(%)는 표시 전용. 진척 신호(HasProgressSignal)가 하나도 없으면(맨 목록)
+    /// 탭이 '하이라이트 우선' 모드로 전환한다.
     /// </summary>
     public class CableLineData
     {
@@ -711,7 +712,7 @@ namespace NavisVisualizer.Models
             _searchKey ?? (_searchKey =
                 ((CableNo ?? "") + "\t" + (FromEquip ?? "") + "\t" + (ToEquip ?? "")).ToUpperInvariant());
 
-        /// <summary>stage 날짜가 하나라도 있는가 — 없으면 하이라이트 전용 모드.</summary>
+        /// <summary>stage 날짜가 하나라도 있는가.</summary>
         public bool HasAnyStageDate
         {
             get
@@ -722,15 +723,43 @@ namespace NavisVisualizer.Models
             }
         }
 
+        /// <summary>진척 신호(stage 날짜 또는 길이 완료)가 있는가 — 없으면(맨 목록) 하이라이트 전용 모드.
+        /// 길이만으로 포설완료인 케이블도 진척 있음으로 봐서 stage 색을 받게 한다.</summary>
+        public bool HasProgressSignal =>
+            HasAnyStageDate
+            || (DesignLth.HasValue && PulledLth.HasValue && DesignLth.Value > 0 && PulledLth.Value >= DesignLth.Value);
+
         public CableLineStage GetStageAtDate(DateTime referenceDate)
         {
-            var stages = CableLineStageInfo.OrderedStages;
-            for (int i = stages.Length - 1; i >= 0; i--)
-            {
-                if (StageDates.TryGetValue(stages[i], out var date) && date.HasValue && date.Value.Date <= referenceDate.Date)
-                    return stages[i];
-            }
+            // 결선완료 — 날짜 기반 (FROM/TO CONN 둘 다 → StageDates[Terminated])
+            if (StageDates.TryGetValue(CableLineStage.Terminated, out var term)
+                && term.HasValue && term.Value.Date <= referenceDate.Date)
+                return CableLineStage.Terminated;
+
+            // 포설완료 — PULLING END 날짜(기준일 이내) 또는 포설 길이 ≥ 설계 길이 (사용자 규칙 2026-07)
+            if (IsPulled(referenceDate))
+                return CableLineStage.Pulled;
+
+            // 포설중 — PULLING START 날짜
+            if (StageDates.TryGetValue(CableLineStage.Pulling, out var pull)
+                && pull.HasValue && pull.Value.Date <= referenceDate.Date)
+                return CableLineStage.Pulling;
+
             return CableLineStage.NotStarted;
+        }
+
+        /// <summary>
+        /// 포설완료 판정: PULLING END 날짜가 기준일 이내로 입력됐거나, 포설 실적 길이(PulledLth)가
+        /// 설계 길이(DesignLth) 이상이면 완료. 길이 조건은 날짜가 없어 현재 상태로 본다(기준일 무관 —
+        /// EIT %판정과 동일 성격). DesignLth가 없거나 0이면 길이 조건은 불가 → 날짜만으로 판정.
+        /// </summary>
+        public bool IsPulled(DateTime referenceDate)
+        {
+            if (StageDates.TryGetValue(CableLineStage.Pulled, out var end)
+                && end.HasValue && end.Value.Date <= referenceDate.Date)
+                return true;
+            return DesignLth.HasValue && PulledLth.HasValue
+                && DesignLth.Value > 0 && PulledLth.Value >= DesignLth.Value;
         }
 
         /// <summary>결선완료 = FROM CONN·TO CONN 둘 다 있을 때 Max(둘). StageDates[Terminated]에 세팅.</summary>
