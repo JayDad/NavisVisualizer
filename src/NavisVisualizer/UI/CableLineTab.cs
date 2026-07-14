@@ -662,7 +662,7 @@ namespace NavisVisualizer.UI
             if (_listFilter != null)
             {
                 _listFilter = null;
-                _cableFilterText = null;
+                // _cableFilterText는 남겨 다음에 다시 열 때 prefill (소스 전환 시에만 초기화 — SpoolTab _focusSpoolText 패턴)
                 _btnListFilter.Text = "Cable 찾기";
                 if (doc != null && _cableHidden != null) RestoreHidden(doc);
                 FilterList();
