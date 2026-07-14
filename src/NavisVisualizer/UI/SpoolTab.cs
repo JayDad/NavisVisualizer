@@ -47,8 +47,8 @@ namespace NavisVisualizer.UI
         private Autodesk.Navisworks.Api.ModelItemCollection _spoolHiddenByStage; // 숨긴 것 복원용
         private Button   _btnApply;
         private Button   _btnFindMultiple;  // 복수 Spool 찾기 (리스트만 공정색, 나머지 투명)
-        // 복수 Spool 찾기 활성 셋 (null = 전체 정상 색칠). _focusSpoolText = 다이얼로그 프리필용 원문.
-        private HashSet<string> _focusSpoolIds;
+        // 복수 Spool 찾기 다이얼로그 프리필용 마지막 입력 원문. 포커스는 일회성(각 클릭이 인자로 전달,
+        // '가시화 적용'이 전체 보기) — 활성 셋을 필드로 보관하지 않는다.
         private string _focusSpoolText = "";
         private Button   _btnResetModule;   // 이 공종(Spool) 색만 제거
         private Button   _btnReset;
@@ -535,20 +535,20 @@ namespace NavisVisualizer.UI
         /// <summary>가시화 적용 — 전체를 단계색으로 (복수 Spool 찾기 해제).</summary>
         private void BtnApply_Click(object sender, EventArgs e)
         {
-            _focusSpoolIds = null;                 // 가시화 적용 = 전체 보기 (포커스 해제)
-            ApplySpools(null);
+            ApplySpools(null);   // 전체 보기 (포커스 없음)
         }
 
         /// <summary>
         /// 색칠 공통 실행부. <paramref name="focusIds"/>가 있으면 그 스풀만 단계색, 나머지 매칭은 흐리게.
+        /// 문서·데이터 없어 적용을 못 하면 false (호출부가 상태·피드백을 갱신하지 않도록).
         /// </summary>
-        private void ApplySpools(HashSet<string> focusIds)
+        private bool ApplySpools(HashSet<string> focusIds)
         {
             var doc = _main.GetDocument();
             if (doc == null || _spools.Count == 0)
             {
                 MessageBox.Show("데이터를 먼저 로드하고 모델을 열어주세요.");
-                return;
+                return false;
             }
             if (_needsIndexRebuild || _main.SpoolTagSearcher.NeedsRebuild(doc))
                 BuildIndex();
@@ -595,6 +595,7 @@ namespace NavisVisualizer.UI
             UpdateTabCounts();
             UpdateStats(result);
             FilterList();
+            return true;
         }
 
         /// <summary>
@@ -616,9 +617,8 @@ namespace NavisVisualizer.UI
                 return;
             }
 
-            _focusSpoolText = text;
-            _focusSpoolIds = set;
-            ApplySpools(set);
+            _focusSpoolText = text;    // 입력 기억(다음 프리필) — 적용 성공 여부와 무관
+            if (!ApplySpools(set)) return;   // 문서 없음 등 미적용이면 강조 피드백 표기 안 함
 
             // 피드백: 리스트 중 데이터에 있는 개수 (모델 매칭은 stats의 매칭 수로 확인)
             int inData = _spools.Count(s => set.Contains(s.SpoolId));
