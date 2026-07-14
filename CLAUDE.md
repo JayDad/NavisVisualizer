@@ -73,11 +73,23 @@ federated 구조에서 `MEBTray1.nwc`(파일명에 digit)가 `/SM/MEB/ELEC` → 
 - **리스크(Windows 실측 대조 필요)**: 종전엔 digit 보유 **geometry 노드 이름도 인덱싱**됐다. 만약 어떤 모델이 태그를 컴포지트가 아닌 geometry leaf 이름에만 갖고 있으면 이제 미매칭이 된다 — 매칭 건수를 수정 전과 대조할 것. 인덱스 0건이면 기존 3중 fallback이 동작하나 부분 누락은 못 잡는다(§2 레벨 타겟과 동일 성격).
 - **[전환됨 2026-07 — Windows 검증 대기] EIT Tray = 레벨 타겟으로 전환**: general walk가 여전히 느려(자식 스캔 비용) `EitTrayTab.BuildIndex`를 `BuildIndex`→`BuildIndexForTags(trayIdSet, EIT, hardScope: true)`로 교체. "매칭 깊이 인덱싱 → 하위 geometry 트리 무시 → 옆으로"라 general walk의 자식 스캔이 사라짐. Sub-system EIT EQ가 별개 사유 searcher로 분리되면서 ElecTagSearcher는 이제 EIT Tray 전용 → 공유 충돌 없음. 소스 전환 시 `_needsIndexRebuild`(레벨 타겟은 트레이 셋 기반). **리스크(ELEC 트리 깊이 불균일 — MEBTray 사례)**: 트레이가 여러 깊이에 섞이면 첫 매칭 깊이만 인덱싱 → 일부 미색칠. Windows에서 general walk 시절 매칭 건수와 대조 필수. 되돌리려면 `BuildIndex(doc, NwdScope.EitTray, hardScope: true)` 한 줄로 복귀.
 
-**[변경됨] Spool 인덱스 = 레벨 타겟으로 전환 (2026-07 — 성능 극대화)**
-2만 스풀 기준 general `WalkAndIndex`가 스풀마다 "하강할지" 판단하려고 자식(전부 geometry인 경우 끝까지)을 COM으로 스캔 → 첫 빌드 ~1분. `SpoolTab.BuildIndex`를 `BuildIndex(NwdScope.Spool)`에서 **`BuildIndexForTags(spoolIdSet, NwdScope.Spool)`**(Equipment와 동일 레벨 타겟)로 교체. 스풀 id가 처음 매칭되는 깊이만 `IndexAtDepth`로 인덱싱하고 그 노드의 geometry 자식은 아예 안 건드림 → 자식 스캔 비용 제거.
-- **리스크(수용됨, Windows 검증 대기)**: `BuildIndexForTags`는 첫 매칭 깊이 하나만 인덱싱한다. 스풀이 **여러 깊이에 섞여** 모델링돼 있으면 다른 깊이의 스풀은 미인덱싱 → 그 스풀만 미매칭이 된다(색 안 칠해짐). general walk는 전 깊이를 훑어 이 문제가 없었음 — 속도와 맞바꾼 것. federated 스코프 자체를 못 찾거나 스코프 내 태그 0건이면 기존 3중 fallback(전체 재인덱싱)이 동작하나, **"일부 깊이만 누락"은 fallback이 안 잡는다**(0건이 아니므로). 실측 시 매칭 건수를 general walk 시절과 대조할 것.
-- 되돌리려면 `SpoolTab.BuildIndex`를 `BuildIndex(doc, NwdScope.Spool)` 한 줄로 복귀. Hydrotest/EIT는 아직 general walk 유지(스풀만 건수가 압도적이라 우선 적용).
-- **소스 전환 재빌드 필수**: 레벨 타겟 인덱스는 활성 소스 태그 셋으로 깊이를 찾으므로, Excel↔OASIS 전환 시 재빌드해야 한다. `NeedsRebuild(doc)`는 모델 변경만 감지(소스 바뀌어도 doc 동일) → SpoolTab에 `_needsIndexRebuild` 플래그 추가(Equipment와 동일 패턴): 소스 전환 시 true, BuildIndex 후 false, 전 NeedsRebuild 호출부에 OR. 누락 시 소스 전환 후 옛 소스 깊이 인덱스가 잔존해 신규 소스 스풀 미매칭 위험.
+**[되돌림 2026-07] Spool 인덱스 = general walk로 복귀 (레벨 타겟 다중 깊이 버그 실측 확인)**
+한때 성능을 위해 레벨 타겟(`BuildIndexForTags(spoolIdSet, NwdScope.Spool)`)으로 전환했으나,
+**실데이터에서 스풀이 level 3·level 4에 섞여 모델링된 경우 level 4 스풀이 미매칭되는** §2 리스크가
+그대로 터졌다(사용자 실측 2026-07). `FindTagDepthInRoot`가 가장 얕은 깊이 하나만 찾고
+`IndexAtDepth`가 그 깊이만 인덱싱(`return; // Don't go deeper`)하기 때문. → `SpoolTab.BuildIndex`를
+**`BuildIndex(doc, NwdScope.Spool)`(general walk)로 복귀**.
+- **다중 깊이 정확성은 게이트 walk가 필수** — "모든 깊이"로 점프할 방법이 없으므로 트리를 내려가야
+  한다. 다행히 general `WalkAndIndex`는 §15에서 최적화됨(자식 단일 열거 + geometry 게이트로 geometry
+  숲 진입 차단)이라, 종전 ~1분의 원인(이중 열거·geometry 과다 순회)이 이미 제거됨. Hydrotest도 general
+  walk를 쓰므로 검증된 경로.
+- **트레이드오프**: general walk는 digit 보유 노드를 모두 인덱싱(레벨 타겟은 태그 셋만) → 인덱스가
+  약간 커짐(일시 메모리). 매칭 정확성 우선이라 수용. 빌드 시간은 Windows 실측으로 확인.
+- 인덱스가 태그 셋에 비의존이 되어 소스 전환 재빌드는 불필요하지만 `_needsIndexRebuild` 플래그는
+  무해하게 유지(모델 변경 감지는 `NeedsRebuild(doc)`가 담당).
+- **아직 레벨 타겟인 탭**(Equipment/Cable/Sub-system EQ·Piping·Cable, EIT Tray)은 **동일 §2 다중 깊이
+  리스크 보유**. 그 공종도 요소가 여러 깊이에 섞여 미매칭이 나오면 같은 방식으로 general walk 복귀
+  (`BuildIndex(doc, scope[, hardScope])`) 또는 `BuildIndexForTags`를 게이트 다중깊이 walk로 확장.
 
 ### 3. Cable Stage 날짜화 (EIT Tray)
 

@@ -514,11 +514,13 @@ namespace NavisVisualizer.UI
             _lblStats.Text = "모델 태그 인덱스 생성 중…";
             Application.DoEvents();
 
-            // 레벨 타겟 인덱싱 (Equipment와 동일): 스풀 id가 처음 매칭되는 트리 깊이만
-            // 인덱싱하고 그 노드의 geometry 자식은 walk하지 않는다 → 2만 스풀에서 자식 스캔
-            // 비용 제거. 리스크: 스풀이 여러 깊이에 섞여 있으면 첫 깊이만 잡음(CLAUDE.md §2).
-            var spoolIdSet = new HashSet<string>(_spools.Select(s => s.SpoolId));
-            _main.SpoolTagSearcher.BuildIndexForTags(doc, spoolIdSet, NwdScope.Spool);
+            // general walk로 복귀 (2026-07 — 레벨 타겟의 "첫 매칭 깊이만 인덱싱"이 실데이터에서
+            // 깨졌다: 스풀이 level 3·level 4에 섞여 모델링돼 있으면 level 4 스풀이 미매칭됐다
+            // CLAUDE.md §2). general WalkAndIndex는 최적화됨(자식 단일 열거 + geometry 게이트로
+            // geometry 숲 진입 차단, §15) — 모든 깊이의 tag-like 노드를 정확히 인덱싱한다.
+            // FindBySpoolIds가 스풀 id로 조회하므로 인덱스가 태그 셋에 비의존(소스 전환 재빌드 불필요)
+            // 이지만, _needsIndexRebuild 플래그는 무해하게 유지(모델 변경 감지는 NeedsRebuild가 담당).
+            _main.SpoolTagSearcher.BuildIndex(doc, NwdScope.Spool);
             _needsIndexRebuild = false;
 
             _progressBar.Visible = false;
