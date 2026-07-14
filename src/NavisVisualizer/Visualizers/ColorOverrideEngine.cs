@@ -132,16 +132,25 @@ namespace NavisVisualizer.Visualizers
             return result;
         }
 
+        /// <summary>
+        /// Spool 가시화. <paramref name="focusIds"/>가 null이면 전체를 단계색으로 칠한다.
+        /// non-null이면 '복수 Spool 찾기': 그 셋에 든 스풀만 단계색으로 두고, 리스트 밖의 매칭
+        /// 스풀은 <paramref name="focusDim"/>(반투명 회색)으로 흐리게 처리한다. 매칭/미매칭 집계는
+        /// focus와 무관(포커스는 색만 바꿈). focusIds는 대소문자 무시 셋을 넘길 것.
+        /// </summary>
         public OverrideResult ApplySpool(
             Document doc,
             List<SpoolData> spools,
             Dictionary<SpoolStage, ColorSetting> colorSettings,
-            DateTime referenceDate)
+            DateTime referenceDate,
+            HashSet<string> focusIds = null,
+            ColorSetting focusDim = null)
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();
             int paintedItems = 0;
             var result = new OverrideResult();
             var stageItems = new Dictionary<SpoolStage, List<ModelItem>>();
+            var dimItems = new List<ModelItem>();   // 복수 Spool 찾기: 리스트 밖 매칭 스풀 (흐리게)
 
             var allSpoolIds = spools.Select(s => s.SpoolId).Distinct();
             var searchResult = _spoolTagSearcher.FindBySpoolIds(allSpoolIds);
@@ -154,6 +163,13 @@ namespace NavisVisualizer.Visualizers
                     continue;
                 }
                 result.MatchedCount++;
+
+                // 복수 Spool 찾기: 리스트 밖 스풀은 단계색 대신 dim 그룹으로
+                if (focusIds != null && !focusIds.Contains(spool.SpoolId))
+                {
+                    dimItems.AddRange(items);
+                    continue;
+                }
 
                 var stage = spool.GetStageAtDate(referenceDate);
                 if (!colorSettings.ContainsKey(stage)) continue;
@@ -185,8 +201,19 @@ namespace NavisVisualizer.Visualizers
                 }
             }
 
+            // 리스트 밖 스풀 흐리게 — stage명과 안 겹치는 캐시 키.
+            if (focusIds != null && focusDim != null && dimItems.Count > 0)
+            {
+                var dimCol = ToCollection(dimItems);
+                cache["__focusDim"] = dimCol;
+                ApplyOverride(doc, dimCol, focusDim);
+                AccumulatePainted(VisualModule.Spool, dimCol);
+                paintedItems += dimCol.Count;
+            }
+
             PerfLog.Record("가시화 적용(Spool)", sw.ElapsedMilliseconds, rows: spools.Count,
-                items: paintedItems, note: $"매칭 {result.MatchedCount} · 미매칭 {result.UnmatchedIds.Count}");
+                items: paintedItems, note: $"매칭 {result.MatchedCount} · 미매칭 {result.UnmatchedIds.Count}"
+                    + (focusIds != null ? $" · focus {focusIds.Count} · dim {dimItems.Count}" : ""));
             return result;
         }
 

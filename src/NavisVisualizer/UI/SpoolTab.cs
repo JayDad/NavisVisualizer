@@ -46,6 +46,10 @@ namespace NavisVisualizer.UI
         private Button   _btnHideOthers;    // 체크된 단계 스풀만 남기고 나머지 3D 숨김 (토글)
         private Autodesk.Navisworks.Api.ModelItemCollection _spoolHiddenByStage; // 숨긴 것 복원용
         private Button   _btnApply;
+        private Button   _btnFindMultiple;  // 복수 Spool 찾기 (리스트만 공정색, 나머지 투명)
+        // 복수 Spool 찾기 활성 셋 (null = 전체 정상 색칠). _focusSpoolText = 다이얼로그 프리필용 원문.
+        private HashSet<string> _focusSpoolIds;
+        private string _focusSpoolText = "";
         private Button   _btnResetModule;   // 이 공종(Spool) 색만 제거
         private Button   _btnReset;
         private Button   _btnWriteProps;
@@ -217,14 +221,16 @@ namespace NavisVisualizer.UI
                 }
             };
 
-            // 1행(가시화): 가시화 적용 · 체크 단계 외 숨김 · 3D 적용 상태
+            // 1행(가시화): 가시화 적용 · 복수 Spool 찾기 · 체크 단계 외 숨김 · 3D 적용 상태
             var btnPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 34, AutoSize = true };
-            _btnApply      = new Button { Text = "가시화 적용",       Width = 90  };
-            _btnHideOthers = new Button { Text = "체크 단계 외 숨김", Width = 140 };
-            _btnApply.Click      += BtnApply_Click;
-            _btnHideOthers.Click += BtnHideOthers_Click;
+            _btnApply        = new Button { Text = "가시화 적용",       Width = 90  };
+            _btnFindMultiple = new Button { Text = "복수 Spool 찾기",   Width = 120 };
+            _btnHideOthers   = new Button { Text = "체크 단계 외 숨김", Width = 140 };
+            _btnApply.Click        += BtnApply_Click;
+            _btnFindMultiple.Click += BtnFindMultiple_Click;
+            _btnHideOthers.Click   += BtnHideOthers_Click;
             _applyState.AttachApplyButton(_btnApply);
-            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnHideOthers, _applyState });
+            btnPanel.Controls.AddRange(new Control[] { _btnApply, _btnFindMultiple, _btnHideOthers, _applyState });
 
             // 2행(해제): 이 탭 가시화 해제(이 공종 색만) · 전체 가시화 해제(모든 공종)
             var btnPanelReset = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 34, AutoSize = true };
@@ -526,7 +532,17 @@ namespace NavisVisualizer.UI
             _progressBar.Style = ProgressBarStyle.Blocks;
         }
 
+        /// <summary>가시화 적용 — 전체를 단계색으로 (복수 Spool 찾기 해제).</summary>
         private void BtnApply_Click(object sender, EventArgs e)
+        {
+            _focusSpoolIds = null;                 // 가시화 적용 = 전체 보기 (포커스 해제)
+            ApplySpools(null);
+        }
+
+        /// <summary>
+        /// 색칠 공통 실행부. <paramref name="focusIds"/>가 있으면 그 스풀만 단계색, 나머지 매칭은 흐리게.
+        /// </summary>
+        private void ApplySpools(HashSet<string> focusIds)
         {
             var doc = _main.GetDocument();
             if (doc == null || _spools.Count == 0)
@@ -553,7 +569,8 @@ namespace NavisVisualizer.UI
             Application.DoEvents();
             try
             {
-                result = _main.OverrideEngine.ApplySpool(doc, _spools, activeSettings, referenceDate);
+                result = _main.OverrideEngine.ApplySpool(doc, _spools, activeSettings, referenceDate,
+                    focusIds, focusIds != null ? ColorSetting.FocusDim : null);
             }
             finally
             {
@@ -573,10 +590,100 @@ namespace NavisVisualizer.UI
             ReapplyCurrentScope(doc);
 
             _appliedOnce = true;
-            _applyState.SetApplied($"{SourceLabel()} · 기준일 {referenceDate:MM-dd}");
+            _applyState.SetApplied($"{SourceLabel()} · 기준일 {referenceDate:MM-dd}"
+                + (focusIds != null ? $" · 복수 Spool {focusIds.Count}개 강조" : ""));
             UpdateTabCounts();
             UpdateStats(result);
             FilterList();
+        }
+
+        /// <summary>
+        /// 복수 Spool 찾기 — 텍스트창(공백·개행·콤마 구분)에 스풀 번호 리스트를 붙여넣으면,
+        /// 그 스풀만 단계색(공정시각화) 유지하고 나머지 매칭 스풀은 투명하게 흐린다. 엑셀 import 아님.
+        /// '가시화 적용'을 누르면 전체 보기로 돌아온다.
+        /// </summary>
+        private void BtnFindMultiple_Click(object sender, EventArgs e)
+        {
+            if (_spools.Count == 0) { MessageBox.Show("스풀 데이터를 먼저 로드하세요."); return; }
+
+            string text = PromptSpoolList(_focusSpoolText);
+            if (text == null) return;   // 취소
+
+            var set = ParseIdList(text);
+            if (set.Count == 0)
+            {
+                MessageBox.Show("스풀 번호를 입력하세요 (공백·개행·콤마로 구분).", "복수 Spool 찾기");
+                return;
+            }
+
+            _focusSpoolText = text;
+            _focusSpoolIds = set;
+            ApplySpools(set);
+
+            // 피드백: 리스트 중 데이터에 있는 개수 (모델 매칭은 stats의 매칭 수로 확인)
+            int inData = _spools.Count(s => set.Contains(s.SpoolId));
+            _lblStats.Text += $"\n복수 Spool 찾기: 리스트 {set.Count}개 중 데이터 {inData}개 강조 · 나머지 투명 ([가시화 적용]으로 전체 보기)";
+        }
+
+        /// <summary>공백·탭·개행·콤마·세미콜론 어느 것으로 구분돼도 id 리스트로 파싱 (대소문자 무시 dedup).</summary>
+        private static HashSet<string> ParseIdList(string text)
+        {
+            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (!string.IsNullOrEmpty(text))
+                foreach (var tok in text.Split(new[] { ' ', '\t', '\r', '\n', ',', ';' },
+                    StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var t = tok.Trim();
+                    if (t.Length > 0) set.Add(t);
+                }
+            return set;
+        }
+
+        /// <summary>스풀 번호 목록 입력용 모달 텍스트창. OK면 입력 원문, 취소면 null.</summary>
+        private string PromptSpoolList(string prefill)
+        {
+            using (var form = new Form
+            {
+                Text = "복수 Spool 찾기 — 스풀 번호 목록",
+                Width = 460,
+                Height = 380,
+                StartPosition = FormStartPosition.CenterParent,
+                FormBorderStyle = FormBorderStyle.Sizable,
+                MinimizeBox = false,
+                MaximizeBox = false,
+                ShowInTaskbar = false,
+            })
+            {
+                var lbl = new Label
+                {
+                    Dock = DockStyle.Top,
+                    Height = 46,
+                    Padding = new Padding(8, 6, 8, 0),
+                    Text = "스풀 번호를 붙여넣으세요 — 공백·개행·콤마 어느 구분이든 인식합니다.\n"
+                         + "리스트에 든 스풀만 공정색으로 두고, 나머지 매칭 스풀은 투명 처리됩니다.",
+                };
+                var txt = new TextBox
+                {
+                    Dock = DockStyle.Fill,
+                    Multiline = true,
+                    ScrollBars = ScrollBars.Vertical,
+                    AcceptsReturn = true,
+                    WordWrap = false,
+                    Font = new Font("Consolas", 9F),
+                    Text = prefill ?? "",
+                };
+                var pnl = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 42, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(6) };
+                var ok = new Button { Text = "적용", Width = 90, DialogResult = DialogResult.OK };
+                var cancel = new Button { Text = "취소", Width = 90, DialogResult = DialogResult.Cancel };
+                pnl.Controls.Add(ok);
+                pnl.Controls.Add(cancel);
+                form.Controls.Add(txt);
+                form.Controls.Add(pnl);
+                form.Controls.Add(lbl);
+                form.AcceptButton = ok;      // 멀티라인+AcceptsReturn이라 Enter는 줄바꿈, [적용]은 버튼으로
+                form.CancelButton = cancel;
+                return form.ShowDialog(this) == DialogResult.OK ? txt.Text : null;
+            }
         }
 
         private string SourceLabel() =>
