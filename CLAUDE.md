@@ -800,6 +800,52 @@ UI/3D에 그리지 않는 것")은 타당함을 확인.
   `SetHidden`/투명도 배치 시간, 레벨2 행 수가 실무에서 상한(200) 이내인지,
   "⊙"/"▸" 글리프 렌더링(Malgun Gothic 기준 문제 없어야 정상).
 
+### 18. 공종별 리스트 필터 가시화 — 입력 리스트만 강조, 나머지 투명/숨김 (설계 메모)
+
+**목표**: 특정 리스트(예: 이번 주 대상 스풀·PKG·장비·케이블 번호)를 입력하면 **그 요소만 가시화
+(기존 단계색/불투명 유지)하고 나머지는 투명(dim) 또는 숨김**. Cable(형상) 탭의 `리스트 필터
+Import`(§13 — Cable No 목록으로 부분집합만 3D isolate)를 **전 공종(Spool/Hydrotest/Equipment/
+EIT/Sub-system)으로 일반화**.
+
+**입력**
+- Excel ID 목록 파일 (`ExcelLoader.LoadCableNoList` 패턴 — 헤더 또는 첫 컬럼) 또는 클립보드 붙여넣기.
+- 공종별 키: Spool=SpoolId / Hydrotest=PKGNO / Equipment=TAG / Cable=CABLE NO / Sub-system=요소 ID.
+- 로드한 데이터(활성 소스)와 **교집합만** 대상 — 리스트에 있어도 데이터·모델에 없으면 제외(건수 보고).
+
+**동작 2안 (규모로 선택)**
+- **(a) 투명 dim (필터 포커스)** — 리스트 밖 매칭 요소를 반투명(70~90%)으로, 리스트 요소는 기존
+  가시화 유지. 소~중 규모(Hydro PKG 수백·Equipment 수천)에 적합. `ColorOverrideEngine`의 투명
+  오버라이드(`ApplyStructureTransparency`/`UpdateGroupTransparency` 패턴) 재사용.
+- **(b) 숨김 isolate (`SetHidden`)** — 리스트 밖을 숨김. **대규모(Cable 2만)는 투명 dim이 프레임
+  레이트 붕괴**라 숨김이 필수(§13 실측 근거). Sub-system의 scoped isolate(`ComputeScopedHide`)와
+  같은 인프라.
+- 공종별 기본값을 규모로 지정하거나 토글 제공. 리스트 요소가 **여전히 단계색을 갖는다**는 게
+  "그것만 가시화"의 취지 — 별도 하이라이트 색 없이 기존 색 유지.
+
+**설계 재사용/주의**
+- 공용 컴포넌트 `ListFilterPanel`(입력 버튼 + 상태 라벨 + 토글)로 추출해 5개 탭 배선 — 탭별
+  중복 구현 방지. Cable 탭 기존 `리스트 필터 Import`도 이걸로 흡수.
+- **선택(Sub-system dual-list)·집계 범위(ScopePanel)와의 관계**: 선택/스코프는 "무엇을 볼지"의
+  다른 축 — 리스트 필터는 **명시적 ID 집합** 기반이라 직교. isolate/투명 인프라는 공유 가능.
+- 매칭 인덱스는 모델에서 만들므로 리스트 필터는 **그래픽만** 바꿈(NeedsRebuild 사유 아님).
+- 토글 복원(리스트 필터 해제 시 투명/숨김 원복), 교집합 0건 안내, 대규모 dim 경고.
+- **Windows 검증**: 공종별 규모에서 투명 dim vs 숨김 체감(프레임레이트), 붙여넣기 파싱, 리스트
+  ID ↔ 모델 노드명 정규화(케이블은 `NormalizeCableNo` 등 기존 규칙 재사용).
+
+### 참고: 속성 쓰기(User-Defined Property) 현황 — 확장 후보
+
+**현재 구현**: **Spool·Equipment 탭에만** `[속성 쓰기]` 버튼(출력 행). `Services/UserDataService`가
+**COM late-binding(IDispatch 리플렉션)**으로 매칭 노드에 커스텀 속성 카테고리를 삽입:
+`ComApiBridge.State` → `GetGUIPropertyNode(path, true)` → `SetUserDefined(0, 내부명, 표시명, propVec)`.
+`propVec`는 스풀/장비 **한 건당 1회 생성 후 그 매칭 아이템들에 재사용**(성능 §15 — 벡터 복사 가정,
+Windows 실측 대상). Spool=Spool Number/ISO/현재 단계/전 단계 날짜, Equipment=TAG/설명/Sub System/
+RFQ/Delivery/ETA/단계 날짜. 삽입 속성은 Navisworks 속성 패널의 커스텀 탭으로 노출돼 Search Set·
+clash·export에 활용 가능.
+
+**확장 잔여**: Hydrotest/EIT/Cable/Sub-system 탭엔 없음. 필요 시 `UserDataService`에
+`WriteXxxProperties`(공종 propVec 빌더) 추가 + 버튼 배선 — 매칭 결과(`FindBySpoolIds`)를 그대로
+넘기면 되므로 패턴 동일. Sub-system은 공종별 searcher가 4개라 propVec를 요소 discipline별로 빌드.
+
 ## 레슨런 (하드 트러블슈팅 기록 — 다시 헤매지 말 것)
 
 ### L1. 단면(Clipping): **Section Box는 COM `ClippingPlanes()`에 없다** (가장 값진 교훈)
