@@ -40,6 +40,7 @@ namespace NavisVisualizer.UI
 
         private DataSourcePanel _srcPanel;
         private TextBox _txtSearch;
+        private SearchScopeCombo _searchScope;   // 검색 범위(전체/열) 드롭다운
         private Debouncer _searchDebounce;   // 키 입력마다 리스트 재계산 방지 (성능 audit P0-1)
         private TabControl _tabFilter;
         private ListView _listView;
@@ -103,6 +104,10 @@ namespace NavisVisualizer.UI
             _searchDebounce = new Debouncer(FilterList);
             _txtSearch.TextChanged += (s, e) => _searchDebounce.Trigger();
             searchPanel.Controls.Add(_txtSearch);
+            // 검색 범위 드롭다운 — 전체(전 필드) 또는 특정 열만. 열 채우기·이벤트 연결은 Columns.Add 뒤
+            // (초기 SelectedIndex=0이 구성 중 FilterList를 호출하지 않도록 이벤트는 Populate 후 연결).
+            _searchScope = new SearchScopeCombo();
+            searchPanel.Controls.Add(_searchScope);
             var btnExport = new Button { Text = "매칭 Status 엑셀 출력", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(8, 1, 8, 1) };
             btnExport.Click += BtnExport_Click;
             searchPanel.Controls.Add(btnExport);
@@ -161,6 +166,8 @@ namespace NavisVisualizer.UI
             _listView.Columns.Add("Install %", 65);
             _listView.Columns.Add("단계", 75);
             _listView.Columns.Add("매칭", 40);
+            _searchScope.Populate(_listView);   // "전체" + 각 열 ("#" 컬럼 없음)
+            _searchScope.SelectedIndexChanged += (s, e) => FilterList();
             _listView.SelectedIndexChanged += ListView_SelectedIndexChanged;
             _listView.ColumnClick += ListView_ColumnClick;
             // ListView는 기본적으로 Ctrl+C를 지원하지 않으므로 공용 헬퍼로 배선.
@@ -714,7 +721,13 @@ namespace NavisVisualizer.UI
             if (_scopeKeys != null)
                 filtered = filtered.Where(t => InScope(t.TrayNumber));
             if (!string.IsNullOrEmpty(keyword))
-                filtered = filtered.Where(t => (t.TrayNumber ?? "").ToUpperInvariant().Contains(keyword));
+            {
+                int scopeCol = _searchScope?.SelectedColumn ?? -1;
+                if (scopeCol < 0)
+                    filtered = filtered.Where(t => (t.TrayNumber ?? "").ToUpperInvariant().Contains(keyword));
+                else
+                    filtered = filtered.Where(t => CellText(t, scopeCol).ToUpperInvariant().Contains(keyword));
+            }
 
             _listView.Items.Clear();
             foreach (var tray in filtered)
@@ -740,6 +753,26 @@ namespace NavisVisualizer.UI
                     matchSubItem.ForeColor = Color.Red;
                 item.Tag = tray;
                 _listView.Items.Add(item);
+            }
+        }
+
+        /// <summary>검색 범위(특정 열)용 — 열 인덱스의 표시 텍스트 (행 빌드 sub-item과 동일 값).
+        /// EIT Tray는 %기반 현재상태라 stage에 기준일 불필요(GetStage()).</summary>
+        private string CellText(EitTrayData tray, int col)
+        {
+            switch (col)
+            {
+                case 0: return tray.TrayNumber ?? "";
+                case 1: return tray.TrayLth.HasValue ? tray.TrayLth.Value.ToString("0.##") : "-";
+                case 2: return tray.TrayInstalled.HasValue ? tray.TrayInstalled.Value.ToString("0.##") : "-";
+                case 3: return tray.InstallProgress.HasValue ? $"{tray.InstallProgress.Value * 100:0}%" : "-";
+                case 4:
+                    var stage = tray.GetStage();
+                    return EitStageInfo.Labels.TryGetValue(stage, out var lbl) ? lbl : stage.ToString();
+                case 5:
+                    bool hasApplied = _matchedTrayNos.Count > 0 || _unmatchedTrayNos.Count > 0;
+                    return !hasApplied ? "-" : (_matchedTrayNos.Contains(tray.TrayNumber) ? "O" : "X");
+                default: return "";
             }
         }
 

@@ -67,6 +67,7 @@ namespace NavisVisualizer.UI
         private DataSourcePanel _srcPanel;
         private DateTimePicker _dtpReference;
         private TextBox _txtSearch;
+        private SearchScopeCombo _searchScope;   // 검색 범위(전체/열) 드롭다운
         private Debouncer _searchDebounce;   // 키 입력마다 리스트 재계산 방지 (성능 audit P0-1)
         private TabControl _tabFilter;
         private ListView _listView;
@@ -215,6 +216,10 @@ namespace NavisVisualizer.UI
                 }
             };
             searchPanel.Controls.Add(_txtSearch);
+            // 검색 범위 드롭다운 — 전체(전 필드) 또는 특정 열만. 열 채우기·이벤트 연결은 Columns.Add 뒤
+            // (초기 SelectedIndex=0이 구성 중 FilterList를 호출하지 않도록 이벤트는 Populate 후 연결).
+            _searchScope = new SearchScopeCombo();
+            searchPanel.Controls.Add(_searchScope);
             var btnExport = new Button { Text = "매칭 Status 엑셀 출력", AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(6, 0, 6, 0) };
             btnExport.Click += BtnExport_Click;
             searchPanel.Controls.Add(btnExport);
@@ -271,6 +276,8 @@ namespace NavisVisualizer.UI
             _listView.Columns.Add("Pulled", 60);
             _listView.Columns.Add("%", 46);
             _listView.Columns.Add("매칭", 40);
+            _searchScope.Populate(_listView, "#");   // "전체" + 각 열 (자동 행번호 "#" 제외)
+            _searchScope.SelectedIndexChanged += (s, e) => FilterList();
             _listView.RetrieveVirtualItem += (s, e) =>
             {
                 e.Item = (e.ItemIndex >= 0 && e.ItemIndex < _viewRows.Count)
@@ -965,7 +972,16 @@ namespace NavisVisualizer.UI
             if (_scopeKeys != null)
                 filtered = filtered.Where(c => InScope(c.CableNo));
             if (!string.IsNullOrEmpty(keyword))
-                filtered = filtered.Where(c => CableMatchesKeyword(c, keyword));
+            {
+                int scopeCol = _searchScope?.SelectedColumn ?? -1;
+                if (scopeCol < 0)
+                    filtered = filtered.Where(c => CableMatchesKeyword(c, keyword));
+                else
+                {
+                    var sel = SortKeySelector(scopeCol);   // 행마다 델리게이트 생성 방지 (2만 케이블)
+                    filtered = filtered.Where(c => (sel(c) ?? "").ToUpperInvariant().Contains(keyword));
+                }
+            }
 
             var rows = filtered.ToList();
             if (_sortColumn > 0)
