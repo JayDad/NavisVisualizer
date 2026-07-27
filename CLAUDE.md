@@ -334,7 +334,9 @@ EIT_Cable, EIT_EQ, EIT_Route, EIT_Tray, Mech_EQ, Piping_HydrotestPKG, Piping_Spo
   `SqlLoader.LoadCable` 철자 교체 + 표시 필드(FROM/TO MODULE·EQUIP, TYPE/CORE/SIZE, OUT DIA,
   TRAY SYS, SYSTEM, Pulling %) 매핑 + `CableLineTab` DataSourcePanel 듀얼소스 배선 완료.
   `PULLING LTH`는 샘플상 포설 실적 길이로 보이나(0/189=0%, 37/37=100%) 오너 확정 전까지 표시 전용
-  유지(§13-6). 프로젝트 컬럼 없음 → 전체 로드. 미사용: INSTALL_MODULE, SYSTEM DES, SUB-SYSTEM(+DES).
+  유지(§13-6). 미사용: INSTALL_MODULE, SYSTEM DES, SUB-SYSTEM(+DES).
+  **프로젝트 컬럼은 DB단 추가 완료(2026-07 사용자 확정 — 전 테이블 보유)** → 공사 필터 적용.
+  철자는 하드코딩하지 않고 `ProjectColumnResolver`가 테이블별로 해석한다(§20).
   **노드단위 집계는 폐기 — Cable(Node) 탭 삭제(2026-07 사용자 결정)**: `EIT_Route`에 홉 순서
   (SEQ)·NodeId 변환이 없어 개통 불가였고 형상 탭이 역할을 대체. `ApplyCable`/`CableNodeData`/
   `CableStage`/`LoadCablePull`/노드 필터포커스·박스숨김 일괄 제거. Tools 탭 box 중복 검사(§5)와
@@ -918,6 +920,53 @@ Cable      CABLE + ELE            Structure  STR (변경 없음)
 **착수 시 체크리스트**: `NwdScope` 키워드 + `NwdScopeTests` 동시 갱신(개발 규칙) / Overview
 Preflight로 공종별 스코프 발견 여부 확인 / 하드 스코프 2탭(EIT Tray·Sub-system)을 먼저 검증 /
 Trion 매칭 건수 회귀 대조.
+
+### 20. 공사(프로젝트) 선택 드롭다운 — 구현됨 2026-07 (Windows 검증 대기)
+
+OASIS 로드 시 적용할 공사를 탭 드롭다운에서 고른다. 표기는 `Trion (Q557)` 형식.
+**Excel import는 무관** — 파일이 곧 데이터라 공사 필터가 의미 없다.
+
+**전역 공유 + 세션 한정**: 선택은 `Loaders/ProjectContext`(static)에 있고 한 탭에서 바꾸면
+전 탭이 따라온다("지금 이 공사를 본다"는 한 개념 — 탭마다 다른 공사가 섞여 오독되는 사고를
+원천 차단). **저장하지 않는다**(사용자 결정) — 재시작하면 `oasis.config`의 `project=`로 복귀.
+
+**목록 구성 (뒤가 앞을 덮어씀)**
+1. **코드 내장** `ProjectCatalog.BuiltIn` = Q557 Trion / Q558 Ruya — **DB·config 없이도 즉시**
+   선택 가능. 목록을 DB에 종속시키면 접속 실패 시 아무것도 못 고르게 되므로 의도적으로 분리.
+2. `oasis.config`의 `project.<코드>=<이름>` — 공사 추가 시 **재빌드 불필요**
+3. `[목록 새로고침]` — DB `DISTINCT`로 실재 코드 발견·병합. 공사명은 DB에 없으므로(프로젝트
+   마스터 테이블 부재) 코드만 채우고 이름 미등록은 `(이름 미등록)`으로 표시
+
+**필터 컬럼 해석 = `Loaders/ProjectColumnResolver`** (하드코딩 금지)
+철자가 테이블마다 갈린다(Piping 계열 `PRJTNO` / EQ·Summary 계열 `PJTNO`). 게다가 나중에
+DB단에서 추가된 테이블은 어느 철자를 썼는지 코드가 알 수 없다 → `INFORMATION_SCHEMA` 1회
+조회(DB당 캐시)로 추측을 없앤다. 조회 실패 시에만 실측 기반 `KnownFallback`으로 degrade.
+**2026-07 사용자 확정: 전 테이블에 프로젝트 컬럼 추가 완료** → 구 "EIT_Cable/EIT_EQ는 컬럼
+없음" 서술은 폐기(§9 Cable 항목 갱신됨). 코드는 무수정으로 그대로 필터가 걸린다 — 해석
+방식이라 철자를 몰라도 동작.
+
+**컬럼이 없으면 조용히 넘어가지 않고 던진다**: 공사가 선택됐는데 그 테이블에 프로젝트 컬럼이
+없으면 예외 + 안내("DB에 컬럼을 추가하거나 '전체'를 선택하세요"). **다른 공사 데이터를 그
+공사인 양 조용히 칠하는 것이 최악**이라는 판단 — `SqlLoader`의 "조용히 빈 값 문제 원천 차단"
+원칙과 동일. 전 테이블 컬럼 보유 후엔 사실상 안전망.
+
+**전환 시 자동 재로드 안 함 (확정)**: 공사를 바꾸면 로드된 데이터를 지우지 않고 **경고 표시만**
+(`⚠ {이전 공사} 기준 · [OASIS 로드] 재실행 필요` + `ApplyStatePanel` stale). 자동 재로드는
+탭 6개가 동시에 SQL을 쳐서 수 초간 UI가 멈춘다. 잘못 눌렀다 되돌리면 표시도 원복.
+
+**잔여 / 미결**
+- **`전체`(WHERE 없음) 선택 시 공사 간 ID 충돌 위험**: 로더가 전부 ID 기준 first-wins 중복
+  제거(`seen.Add`)를 하므로, 두 공사에 같은 ID가 있으면 뒤에 읽힌 행이 **조용히 버려진다**.
+  매칭은 노드 이름으로 하므로 최악의 경우 Trion 모델에 Ruya 날짜가 칠해질 수 있다(누락보다
+  나쁜 오염). SQL 경로는 Excel 경로와 달리 **중복 건수를 보고하지 않는다**. 보완안 2개:
+  ① `project=` 미지정 시 기본값을 `전체` 대신 첫 공사로, ② SQL 로더도 중복 건수를 라벨에
+  표기(`전체 · 중복 N건 제외`). **실제 ID 충돌 여부 실측 확인이 선행** — 스풀 번호가
+  라인번호 기반이면 공사가 달라도 충돌 여지가 있다.
+- `전체` 항목 자체는 유지 — 프로젝트 컬럼이 아직 없는 테이블이 생겼을 때 볼 유일한 수단.
+- **NWD 스코프와는 무관** — 드롭다운은 "DB 공사"이고 스코프는 "열린 모델"의 속성이라 묶지
+  않았다(묶으면 Ruya를 고른 채 Trion 모델을 연 경우 스코프가 조용히 비는 새 실패 모드). §19 참조.
+- Windows 검증: `INFORMATION_SCHEMA` 조회 권한, `EIT_EQ` 철자 자동 해석, 탭 간 전역 동기화,
+  `ProjectContext.Changed`(static 이벤트) 구독 해제가 탭 Dispose에서 정상 동작하는지.
 
 ### 참고: 속성 쓰기(User-Defined Property) 현황 — 확장 후보
 
