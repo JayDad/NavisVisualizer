@@ -4,22 +4,29 @@
 # model 경로 · project · outputFolder 정도. 백슬래시 그대로, 따옴표 없이 적는다.
 
 [settings]
-# 저장 폴더 (비우면 모델 파일과 같은 폴더). 생산 공유용 Export_NWD 경로 — 2026-09 사용자 지정.
+# 저장 폴더. 비우면 각 모델 파일과 같은 폴더에 저장 — 프로젝트마다 공유 폴더가 달라 비워 둔다.
+# (Trion = Export_NWD\생산공유, RUYA = Export_Ruya_NWD). job별로 output= 으로 따로 지정할 수도 있다.
 # 네트워크 드라이브(Z:)는 로그인한 사용자에게 매핑돼 있어야 한다.
-outputFolder=Z:\06.PM\19. Digitalization\NavisVisualizer\Export_NWD\생산공유 모델경로
-# 토큰: {model}=모델 파일명(확장자 제외) {name}=job 이름 {date}=yyyyMMdd {time}=HHmm. .nwd 자동
-fileNamePattern={model}_{date}
+outputFolder=
+# 토큰: {modelbase}=모델명에서 끝 _날짜(yyMMdd/yyyyMMdd) 제거 {model}=모델명 {name}=job 이름
+#       {date}=yyyyMMdd {time}=HHmm — {date:yyMMdd}처럼 서식 지정 가능. .nwd 자동
+# 예) 99-Trion_Topsides_김의택책임님참고_260910.nwd → 99-Trion_Topsides_김의택책임님참고_260914.nwd
+#     RUYA-progress_260911.nwd                       → RUYA-progress_260914.nwd
+fileNamePattern={modelbase}_{date:yyMMdd}
 
 [job:Trion]
-model=D:\Models\Trion\00-02_Trion_Topsides_Subsystem.nwd
-# OASIS PJTNO/PRJTNO. 비우면 oasis.config의 project 사용
-project=Q557
+model=Z:\06.PM\19. Digitalization\NavisVisualizer\Export_NWD\생산공유\99-Trion_Topsides_김의택책임님참고_260910.nwd
+# OASIS PJTNO/PRJTNO. 비우면 oasis.config의 project 사용 — 프로젝트 2개면 job마다 지정해야 서로 다른 실적을 읽는다
+project=
+# 비우면 [settings] outputFolder → 그것도 비면 모델과 같은 폴더
+output=
 enabled=true
-# 가능값: Spool, Hydrotest, Equipment, EitTray, Cable  (실행 창 체크박스의 초기 상태)
+# 가능값: Spool, Hydrotest, Equipment, EitTray, Cable  (실행 창 체크박스의 초기 상태 — 실행 시 자동 갱신)
 disciplines=Spool,Hydrotest
 
-[job:Project B]
-model=D:\Models\ProjectB\00-02_ProjectB_Subsystem.nwd
+[job:RUYA]
+model=Z:\06.PM\19. Digitalization\NavisVisualizer\Export_Ruya_NWD\RUYA-progress_260911.nwd
 project=
-enabled=false
-disciplines=Equipment,Cable
+output=
+enabled=true
+disciplines=Spool,Hydrotest

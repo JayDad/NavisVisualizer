@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace NavisVisualizer.Services
 {
@@ -67,6 +69,9 @@ namespace NavisVisualizer.Services
         /// <summary>OASIS PJTNO/PRJTNO 필터. 비우면 oasis.config의 project 값 사용.
         /// 프로젝트 2개를 한 DB에서 읽는 구성이라 job마다 지정할 수 있어야 한다.</summary>
         public string ProjectNo { get; set; } = "";
+        /// <summary>job별 저장 폴더 override. 비우면 [settings] outputFolder, 그것도 비면 모델 파일 옆.
+        /// 프로젝트마다 공유 폴더가 다르므로(Trion=Export_NWD\생산공유, RUYA=Export_Ruya_NWD) 기본은 "모델 옆".</summary>
+        public string OutputFolder { get; set; } = "";
         /// <summary>마지막 실행 때 이 job이 체크돼 있었는가 (다음 실행 창의 기본값).</summary>
         public bool Enabled { get; set; } = true;
         /// <summary>마지막 실행 때 체크된 공종 (다음 실행 창의 기본값 — "어제 조합 기억").</summary>
@@ -104,12 +109,15 @@ namespace NavisVisualizer.Services
     public class BatchConfig
     {
         public const string FileName = "batch.config";
-        public const string DefaultFileNamePattern = "{model}_{date}";
+        /// <summary>기본 출력명 = 모델명(끝 날짜 접미사 제거) + 저장일 yyMMdd — 현장 규약
+        /// `99-Trion_..._260910.nwd` → `..._260914.nwd` (2026-09 사용자 지정).</summary>
+        public const string DefaultFileNamePattern = "{modelbase}_{date:yyMMdd}";
 
         /// <summary>저장 폴더. 비우면 모델 파일과 같은 폴더.</summary>
         public string OutputFolder { get; set; } = "";
-        /// <summary>출력 파일명 패턴. 토큰: {model}=모델 파일명(확장자 제외) / {name}=job 이름 /
-        /// {date}=yyyyMMdd / {time}=HHmm. 확장자 .nwd는 자동.</summary>
+        /// <summary>출력 파일명 패턴. 토큰: {model}=모델 파일명(확장자 제외) / {modelbase}=모델 파일명에서
+        /// 끝의 `_yyMMdd`·`_yyyyMMdd` 날짜 접미사를 뗀 것 / {name}=job 이름 / {date}=yyyyMMdd /
+        /// {time}=HHmm. `{date:yyMMdd}`처럼 .NET 날짜 서식을 지정할 수 있다. 확장자 .nwd는 자동.</summary>
         public string FileNamePattern { get; set; } = DefaultFileNamePattern;
         public List<BatchJob> Jobs { get; } = new List<BatchJob>();
         /// <summary>읽어온 파일 경로 (안내용). 기본 템플릿으로 생성됐으면 그 경로.</summary>
@@ -205,6 +213,8 @@ namespace NavisVisualizer.Services
                     {
                         case "model":   current.ModelPath = val; break;
                         case "project": current.ProjectNo = val; break;
+                        case "output":
+                        case "outputfolder": current.OutputFolder = val; break;
                         case "enabled": current.Enabled = IsTrue(val); break;
                         case "disciplines":
                             current.Disciplines = new HashSet<BatchDiscipline>(
@@ -238,7 +248,8 @@ namespace NavisVisualizer.Services
             sb.AppendLine("# - 이 파일은 실행 창에서 마지막 선택(enabled/disciplines)을 자동으로 되써 넣습니다.");
             sb.AppendLine("# - model 경로·project·outputFolder는 직접 고치세요 (백슬래시 그대로, 따옴표 없이).");
             sb.AppendLine("# - disciplines 가능값: Spool, Hydrotest, Equipment, EitTray, Cable");
-            sb.AppendLine("# - fileNamePattern 토큰: {model} {name} {date}(yyyyMMdd) {time}(HHmm). 확장자 .nwd 자동.");
+            sb.AppendLine("# - fileNamePattern 토큰: {modelbase}(모델명에서 끝 _날짜 제거) {model} {name} {date}(yyyyMMdd) {time}(HHmm).");
+            sb.AppendLine("#   {date:yyMMdd}처럼 서식 지정 가능. 확장자 .nwd 자동.");
             sb.AppendLine();
             sb.AppendLine("[settings]");
             sb.AppendLine($"outputFolder={OutputFolder}");
@@ -249,6 +260,7 @@ namespace NavisVisualizer.Services
                 sb.AppendLine($"[job:{job.Name}]");
                 sb.AppendLine($"model={job.ModelPath}");
                 sb.AppendLine($"project={job.ProjectNo}");
+                sb.AppendLine($"output={job.OutputFolder}");
                 sb.AppendLine($"enabled={(job.Enabled ? "true" : "false")}");
                 sb.AppendLine("disciplines=" + string.Join(",",
                     BatchDisciplineInfo.Ordered.Where(d => job.Disciplines.Contains(d)).Select(d => d.ToString())));
@@ -256,18 +268,33 @@ namespace NavisVisualizer.Services
             return sb.ToString();
         }
 
-        /// <summary>출력 NWD 전체 경로. 폴더 미지정이면 모델 파일 옆.</summary>
+        // 모델 파일명 끝의 날짜 접미사: _260910 (yyMMdd) 또는 _20260910 (yyyyMMdd)
+        private static readonly Regex DateSuffix = new Regex(@"_(\d{8}|\d{6})$");
+        // {date} {date:fmt} {time} {time:fmt}
+        private static readonly Regex DateTimeToken = new Regex(@"\{(date|time)(?::([^}]+))?\}", RegexOptions.IgnoreCase);
+
+        /// <summary>`99-Trion_..._260910` → `99-Trion_...` (접미사 없으면 그대로).</summary>
+        public static string StripDateSuffix(string fileNameWithoutExt) =>
+            DateSuffix.Replace(fileNameWithoutExt ?? "", "");
+
+        /// <summary>출력 NWD 전체 경로. job output → settings outputFolder → 모델 파일 옆 순.</summary>
         public string BuildOutputPath(BatchJob job, DateTime at)
         {
-            string folder = string.IsNullOrWhiteSpace(OutputFolder)
-                ? (Path.GetDirectoryName(job.ModelPath) ?? "")
-                : OutputFolder;
+            string folder = !string.IsNullOrWhiteSpace(job.OutputFolder) ? job.OutputFolder
+                : !string.IsNullOrWhiteSpace(OutputFolder) ? OutputFolder
+                : (Path.GetDirectoryName(job.ModelPath) ?? "");
             string pattern = string.IsNullOrWhiteSpace(FileNamePattern) ? DefaultFileNamePattern : FileNamePattern;
             string name = pattern
+                .Replace("{modelbase}", StripDateSuffix(job.ModelFileNameWithoutExt))
                 .Replace("{model}", job.ModelFileNameWithoutExt)
-                .Replace("{name}", job.Name)
-                .Replace("{date}", at.ToString("yyyyMMdd"))
-                .Replace("{time}", at.ToString("HHmm"));
+                .Replace("{name}", job.Name);
+            name = DateTimeToken.Replace(name, m =>
+            {
+                bool isDate = m.Groups[1].Value.Equals("date", StringComparison.OrdinalIgnoreCase);
+                string fmt = m.Groups[2].Success ? m.Groups[2].Value : (isDate ? "yyyyMMdd" : "HHmm");
+                try { return at.ToString(fmt, CultureInfo.InvariantCulture); }
+                catch (FormatException) { return m.Value; }   // 잘못된 서식은 그대로 남겨 눈에 띄게
+            });
             foreach (char c in Path.GetInvalidFileNameChars())
                 name = name.Replace(c, '_');
             if (!name.EndsWith(".nwd", StringComparison.OrdinalIgnoreCase))
@@ -279,19 +306,21 @@ namespace NavisVisualizer.Services
         public const string DefaultTemplate =
 @"[settings]
 outputFolder=
-fileNamePattern={model}_{date}
+fileNamePattern={modelbase}_{date:yyMMdd}
 
-[job:Project A]
-model=C:\CHANGE_ME\ProjectA_Subsystem.nwd
+[job:Trion]
+model=Z:\06.PM\19. Digitalization\NavisVisualizer\Export_NWD\생산공유\99-Trion_Topsides_김의택책임님참고_260910.nwd
 project=
+output=
 enabled=true
 disciplines=Spool,Hydrotest
 
-[job:Project B]
-model=C:\CHANGE_ME\ProjectB_Subsystem.nwd
+[job:RUYA]
+model=Z:\06.PM\19. Digitalization\NavisVisualizer\Export_Ruya_NWD\RUYA-progress_260911.nwd
 project=
-enabled=false
-disciplines=Equipment,Cable
+output=
+enabled=true
+disciplines=Spool,Hydrotest
 ";
     }
 }

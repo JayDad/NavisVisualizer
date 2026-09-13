@@ -128,7 +128,53 @@ namespace NavisVisualizer.Tests
 
             string path = cfg.BuildOutputPath(cfg.Jobs[0], new DateTime(2026, 9, 14));
 
-            Assert.AreEqual(Path.Combine(@"C:\M", "00-02_Trion_Topsides_Subsystem_20260914.nwd"), path);
+            // 기본 패턴 = {modelbase}_{date:yyMMdd}. 접미사 없는 모델명은 그대로.
+            Assert.AreEqual(Path.Combine(@"C:\M", "00-02_Trion_Topsides_Subsystem_260914.nwd"), path);
+        }
+
+        [TestMethod]
+        public void BuildOutputPath_ModelBase_ReplacesTrailingDateWithSaveDate()
+        {
+            // 현장 규약 (2026-09): 99-…_260910.nwd 를 열어 …_260914.nwd 로 저장 (같은 공유 폴더)
+            var cfg = BatchConfig.Parse(new[]
+            {
+                "[settings]",
+                @"outputFolder=Z:\06.PM\19. Digitalization\NavisVisualizer\Export_NWD\생산공유",
+                "fileNamePattern={modelbase}_{date:yyMMdd}",
+                "[job:Trion]",
+                @"model=Z:\06.PM\19. Digitalization\NavisVisualizer\Export_NWD\생산공유\99-Trion_Topsides_김의택책임님참고_260910.nwd",
+            });
+
+            string path = cfg.BuildOutputPath(cfg.Jobs[0], new DateTime(2026, 9, 14, 7, 30, 0));
+
+            Assert.AreEqual(
+                Path.Combine(@"Z:\06.PM\19. Digitalization\NavisVisualizer\Export_NWD\생산공유",
+                    "99-Trion_Topsides_김의택책임님참고_260914.nwd"),
+                path);
+        }
+
+        [TestMethod]
+        public void StripDateSuffix_HandlesSixAndEightDigits_LeavesOthers()
+        {
+            Assert.AreEqual("99-Trion_X", BatchConfig.StripDateSuffix("99-Trion_X_260910"));
+            Assert.AreEqual("99-Trion_X", BatchConfig.StripDateSuffix("99-Trion_X_20260910"));
+            Assert.AreEqual("00-02_Trion_Topsides_Subsystem", BatchConfig.StripDateSuffix("00-02_Trion_Topsides_Subsystem"));
+            Assert.AreEqual("PKG_1234", BatchConfig.StripDateSuffix("PKG_1234"));   // 4자리는 날짜 아님
+            Assert.AreEqual("", BatchConfig.StripDateSuffix(null));
+        }
+
+        [TestMethod]
+        public void BuildOutputPath_CustomDateFormat_AndInvalidFormatLeftVisible()
+        {
+            var cfg = BatchConfig.Parse(new[]
+            {
+                "[settings]",
+                "fileNamePattern={name}_{date:yyyy-MM-dd}_{time:HHmmss}",
+                "[job:J]",
+                @"model=C:\M\x.nwd",
+            });
+            string name = Path.GetFileName(cfg.BuildOutputPath(cfg.Jobs[0], new DateTime(2026, 9, 14, 7, 5, 9)));
+            Assert.AreEqual("J_2026-09-14_070509.nwd", name);
         }
 
         [TestMethod]
@@ -149,15 +195,48 @@ namespace NavisVisualizer.Tests
         }
 
         [TestMethod]
-        public void DefaultTemplate_ParsesToTwoPlaceholderJobs()
+        public void DefaultTemplate_ParsesToTrionAndRuya_SavedNextToEachModel()
         {
             var cfg = BatchConfig.Parse(BatchConfig.DefaultTemplate.Split('\n'));
 
             Assert.AreEqual(2, cfg.Jobs.Count);
-            Assert.IsTrue(cfg.Jobs[0].Enabled);
-            Assert.IsFalse(cfg.Jobs[1].Enabled);
-            Assert.IsTrue(cfg.Jobs.All(j => j.ModelPath.Contains("CHANGE_ME")),
-                "placeholder 경로는 눈에 띄게 CHANGE_ME를 포함해야 한다");
+            Assert.AreEqual("Trion", cfg.Jobs[0].Name);
+            Assert.AreEqual("RUYA", cfg.Jobs[1].Name);
+            Assert.IsTrue(cfg.Jobs.All(j => j.Enabled));
+            Assert.AreEqual("", cfg.OutputFolder, "프로젝트마다 공유 폴더가 달라 전역 저장 폴더는 비운다");
+            Assert.AreEqual(BatchConfig.DefaultFileNamePattern, cfg.FileNamePattern);
+
+            var at = new DateTime(2026, 9, 14);
+            Assert.AreEqual(
+                Path.Combine(@"Z:\06.PM\19. Digitalization\NavisVisualizer\Export_NWD\생산공유",
+                    "99-Trion_Topsides_김의택책임님참고_260914.nwd"),
+                cfg.BuildOutputPath(cfg.Jobs[0], at));
+            Assert.AreEqual(
+                Path.Combine(@"Z:\06.PM\19. Digitalization\NavisVisualizer\Export_Ruya_NWD",
+                    "RUYA-progress_260914.nwd"),
+                cfg.BuildOutputPath(cfg.Jobs[1], at));
+        }
+
+        [TestMethod]
+        public void BuildOutputPath_JobOutputOverridesSettingsFolder_AndRoundTrips()
+        {
+            var cfg = BatchConfig.Parse(new[]
+            {
+                "[settings]",
+                @"outputFolder=D:\global",
+                "[job:A]",
+                @"model=C:\M\a_260910.nwd",
+                @"output=E:\perjob",
+                "[job:B]",
+                @"model=C:\M\b_260910.nwd",
+            });
+
+            Assert.AreEqual(Path.Combine(@"E:\perjob", "a_260914.nwd"), cfg.BuildOutputPath(cfg.Jobs[0], new DateTime(2026, 9, 14)));
+            Assert.AreEqual(Path.Combine(@"D:\global", "b_260914.nwd"), cfg.BuildOutputPath(cfg.Jobs[1], new DateTime(2026, 9, 14)));
+
+            var again = BatchConfig.Parse(cfg.Serialize().Split('\n'));
+            Assert.AreEqual(@"E:\perjob", again.Jobs[0].OutputFolder);
+            Assert.AreEqual("", again.Jobs[1].OutputFolder);
         }
 
         [TestMethod]

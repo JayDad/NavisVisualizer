@@ -907,6 +907,17 @@ EIT/Sub-system)으로 일반화**.
 4. federated 대형 NWD 1 job 소요(PerfLog `배치 모델 열기`/`배치 job` + 공종별 인덱스·적용 행) —
    "커피 한 잔" 안에 끝나는지. 아니면 `--hidden auto close`로 작업 스케줄러 새벽 실행 전환.
 5. 기준일: 파일명 `{date}`는 **실행일**(DateTime.Now), 단계 판정은 창의 기준일(기본 오늘). 둘을 섞지 않음.
+   **파일명 규약(2026-09 사용자 지정)**: 프로젝트 2개, 각자 공유 폴더가 다름 —
+   Trion `Z:\…\Export_NWD\생산공유\99-Trion_Topsides_김의택책임님참고_260910.nwd` /
+   RUYA `Z:\…\Export_Ruya_NWD\RUYA-progress_260911.nwd`. 출력 = **각 모델과 같은 폴더**에 끝 `_yyMMdd`만
+   저장일로 교체 → 패턴 `{modelbase}_{date:yyMMdd}`(기본값), `[settings] outputFolder`는 비움
+   (job별 `output=` override 가능; 우선순위 job → settings → 모델 옆).
+   **RUYA의 OASIS PJTNO 미확정** — job `project=`가 비면 oasis.config 기본값(Trion)으로 필터돼
+   RUYA 모델에 Trion 실적을 칠하게 된다. 코드 받는 즉시 sample·batch.config에 기입할 것.
+   `{modelbase}` = 모델명에서 끝 `_\d{6}|_\d{8}` 제거, `{date:fmt}`/`{time:fmt}` = .NET 서식.
+   **소스 파일은 고정**(매일 0910본을 열어 재도색) — 출력을 다음 날 소스로 굴리지 않는다: 색은 아이템 단위
+   덮어쓰기라 누적 이득이 없고, 체인이 끊기면(파일 손상·이름 변경) 원인 추적이 어렵다. 소스 파일명이 그날
+   날짜와 같으면(`_260914` 소스를 9/14에 실행) 출력 == 소스라 precheck가 막는다 — 소스 경로를 바꿀 것.
 6. 도크 탭의 TableLayoutPanel 레이아웃(좁은 320px에서 공종 체크박스 행 wrap, 결과 텍스트 Percent 행).
 
 **잔여/확장 후보**: Sub-system 편입("전체 sub-system" 정의 필요), 저장 후 Viewpoint 자동 저장,
