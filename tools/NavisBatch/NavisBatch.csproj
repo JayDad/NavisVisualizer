@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    바탕화면 '딸각' 러너 (CLAUDE.md §19). Navisworks Automation API로 Navisworks Simulate를
+    기동하고 플러그인 진입점 NavisVisualizer.Batch(HDHHI_OE)를 실행한다.
+    플러그인 본체(NavisVisualizer.dll)는 참조하지 않는다 — Autodesk API 어셈블리가 Navisworks
+    프로세스 밖에서 로드되면 안 되기 때문. 러너는 Automation 래퍼 DLL 하나만 든다.
+    deploy.bat이 %APPDATA%\NavisVisualizer\NavisBatch\ 로 복사하고 바탕화면 바로가기를 만든다.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <PlatformTarget>x64</PlatformTarget>
+    <AssemblyName>NavisBatch</AssemblyName>
+    <RootNamespace>NavisBatch</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <ApplicationIcon />
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Private=true: 러너 exe 옆에 복사돼야 Navisworks 폴더 밖에서도 로드된다 (플러그인 csproj와 다른 점). -->
+    <Reference Include="Autodesk.Navisworks.Automation">
+      <HintPath>C:\Program Files\Autodesk\Navisworks Simulate 2022\Autodesk.Navisworks.Automation.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+</Project>

@@ -40,6 +40,52 @@ namespace NavisVisualizer.Services
                 return false;
             }
 
+            if (SaveCore(doc, outputPath, out Exception ex, out string logPath))
+                return true;
+
+            var inner = ex.InnerException;
+            MessageBox.Show(
+                "NWD 저장에 실패했습니다.\n\n" +
+                $"대상: {outputPath}\n" +
+                $"오류: {ex.GetType().Name}: {ex.Message}" +
+                (inner != null ? $"\n내부 오류: {inner.GetType().Name}: {inner.Message}" : "") +
+                $"\n\n상세 로그: {logPath}\n" +
+                "(재현 시 이 로그 파일을 전달해 주세요)\n\n" +
+                "우선 Navisworks에서 수동으로 저장해 보세요: File > Save As",
+                "NWD Export",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+            return false;
+        }
+
+        /// <summary>
+        /// 대화상자 없는 NWD 저장 — 일괄 갱신(배치)용 (CLAUDE.md §19). 무인 실행에서 MessageBox는
+        /// 곧 정지이므로 precheck 안내·예외를 전부 <paramref name="error"/> 문자열로 돌려주고
+        /// (예외는 ErrorLog에도 기록) 호출부가 결과 화면/로그에 싣는다. 동작은 ExportNwd와 동일.
+        /// </summary>
+        public bool ExportNwdSilent(Document doc, string outputPath, out string error)
+        {
+            error = null;
+            string precheck = PrecheckSavePath(doc, outputPath);
+            if (precheck != null)
+            {
+                error = precheck.Replace("\n", " ");
+                return false;
+            }
+            if (SaveCore(doc, outputPath, out Exception ex, out string logPath))
+                return true;
+            var inner = ex.InnerException;
+            error = $"{ex.GetType().Name}: {ex.Message}" +
+                    (inner != null ? $" / 내부: {inner.GetType().Name}: {inner.Message}" : "") +
+                    $" (로그: {logPath})";
+            return false;
+        }
+
+        /// <summary>SaveFile + PerfLog/ErrorLog. 성공 true. 실패면 예외와 로그 경로를 돌려준다.</summary>
+        private static bool SaveCore(Document doc, string outputPath, out Exception error, out string logPath)
+        {
+            error = null;
+            logPath = null;
             var sw = Stopwatch.StartNew();
             try
             {
@@ -52,20 +98,9 @@ namespace NavisVisualizer.Services
             }
             catch (Exception ex)
             {
-                string logPath = ErrorLog.Append("NWD Export", ex,
+                error = ex;
+                logPath = ErrorLog.Append("NWD Export", ex,
                     $"대상: {outputPath}\n문서: {SafeDocName(doc)}\n소요: {sw.ElapsedMilliseconds}ms");
-                var inner = ex.InnerException;
-                MessageBox.Show(
-                    "NWD 저장에 실패했습니다.\n\n" +
-                    $"대상: {outputPath}\n" +
-                    $"오류: {ex.GetType().Name}: {ex.Message}" +
-                    (inner != null ? $"\n내부 오류: {inner.GetType().Name}: {inner.Message}" : "") +
-                    $"\n\n상세 로그: {logPath}\n" +
-                    "(재현 시 이 로그 파일을 전달해 주세요)\n\n" +
-                    "우선 Navisworks에서 수동으로 저장해 보세요: File > Save As",
-                    "NWD Export",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Warning);
                 return false;
             }
         }

@@ -1,0 +1,24 @@
+# NavisVisualizer 일괄 갱신(배치) 설정 — 예시
+# 실제 파일 위치: %APPDATA%\NavisVisualizer\batch.config  (deploy.bat이 없을 때만 이 샘플을 복사)
+# 실행 창에서 마지막 선택(enabled/disciplines)을 자동으로 되써 넣으므로, 손으로 고칠 것은
+# model 경로 · project · outputFolder 정도. 백슬래시 그대로, 따옴표 없이 적는다.
+
+[settings]
+# 비우면 모델 파일과 같은 폴더에 저장
+outputFolder=D:\발행
+# 토큰: {model}=모델 파일명(확장자 제외) {name}=job 이름 {date}=yyyyMMdd {time}=HHmm. .nwd 자동
+fileNamePattern={model}_{date}
+
+[job:Trion]
+model=D:\Models\Trion\00-02_Trion_Topsides_Subsystem.nwd
+# OASIS PJTNO/PRJTNO. 비우면 oasis.config의 project 사용
+project=Q557
+enabled=true
+# 가능값: Spool, Hydrotest, Equipment, EitTray, Cable  (실행 창 체크박스의 초기 상태)
+disciplines=Spool,Hydrotest
+
+[job:Project B]
+model=D:\Models\ProjectB\00-02_ProjectB_Subsystem.nwd
+project=
+enabled=false
+disciplines=Equipment,Cable

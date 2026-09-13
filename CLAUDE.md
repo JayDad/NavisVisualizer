@@ -852,6 +852,66 @@ EIT/Sub-system)으로 일반화**.
 - **Windows 검증**: 공종별 규모에서 투명 dim vs 숨김 체감(프레임레이트), 붙여넣기 파싱, 리스트
   ID ↔ 모델 노드명 정규화(케이블은 `NormalizeCableNo` 등 기존 규칙 재사용).
 
+### 19. 일괄 갱신(배치) — "아침에 딸각" (구현됨 2026-09 — Windows 검증 대기)
+
+**배경(사용자 요구)**: 매일 아침 잊지 않고 "OASIS 최신 실적 → 모델 색칠 → 다른 이름 저장"을
+버튼 한 번으로. 프로젝트(모델 파일) 2개, **날마다 돌리고 싶은 공종이 달라** 실행 시 체크박스로
+고르되 **마지막 조합을 기억**. 대상은 사용자 본인 PC(Simulate 설치).
+
+**핵심 제약**: 색칠은 `OverridePermanentColor`(Navisworks 문서 API)라 **Navisworks 프로세스 밖에서는
+불가** — "SQL만으로 NWD 갱신"은 없다. 사람이 켤 필요는 없게(Automation API) 만들되, 프로세스는 뜬다.
+
+**구성 (탭 코드 무수정 — 같은 함수를 UI 없이 한 번 더 부르는 얇은 층)**
+- `Services/BatchConfig.cs` — `%APPDATA%\NavisVisualizer\batch.config` (oasis.config와 같은 key=value
+  형식, `[settings]` + `[job:이름]` 섹션). **JSON 대신 이 형식**: Windows 경로 백슬래시를 이스케이프
+  없이 적을 수 있어 손편집 실수가 없다. `enabled`/`disciplines`는 [실행] 시점에 되써 넣는
+  **마지막 선택 기억**. 파일 없으면 placeholder 템플릿(`CHANGE_ME` 경로)을 자동 생성.
+  job별 `project=`로 OASIS PJTNO 필터 override(프로젝트 2개가 한 DB — oasis.config의 단일 project로는 부족).
+  `batch.config.sample` 커밋, 실파일은 .gitignore. `BatchConfigTests` 존재(Autodesk 비의존).
+- `Services/BatchRunner.cs` — job당 `doc.OpenFile → SqlLoader.LoadXxx → searcher.BuildIndex… →
+  engine.ApplyXxx → ExportNwdSilent`. 공종 5개(Spool/Hydrotest/Equipment/EIT Tray/Cable) — 각 탭의
+  BuildIndex+BtnApply_Click과 **동일 호출**(EIT hardScope, Cable 하이라이트 모드 포함).
+  **Sub-system 제외**: 선택 목록·모드가 탭 상태라 "무엇을 칠할지" 정의가 없음 (사용자 결정 2026-09).
+  색 = `ColorSetting.*Defaults` **전 단계** 고정(탭의 세션 색은 메모리뿐 — §19 미착수 빨강 기본값이
+  여기서 곧바로 효과). 공종 하나 실패해도 나머지 계속, 하나라도 성공하면 저장. `batch.log` 이력 append.
+- **job마다 searcher 5개 + 엔진을 새로 생성**: Navisworks는 Document 인스턴스를 재사용하며 파일만
+  갈아끼우므로, 이전 job의 painted 컬렉션을 든 엔진으로 `ResetModule`을 부르면 죽은 ModelItem을
+  리셋하게 된다. 도크 패널 searcher/엔진과도 공유 안 함(격리) — 대신 배치가 칠한 색은 각 탭의
+  `이 탭 가시화 해제`가 모름(`전체 가시화 해제`로만 원복). 수용.
+- `ExportService.ExportNwdSilent` — precheck·예외를 문자열로 반환, **MessageBox 없음**(무인 실행에서
+  모달 = 정지). 기존 `ExportNwd`는 `SaveCore` 공유 후 대화상자만 얹는 구조로 리팩터(동작 동일).
+- `UI/BatchPanel.cs` — job 체크 + 공종 체크박스 행 + 기준일 + [실행]/[설정 파일 열기]/[다시 읽기]/
+  [저장 폴더 열기]/[배치 로그] + 진행바/상태 + 결과 텍스트. **Autodesk 네임스페이스 import 금지**
+  (WinForms `Application`/`Color` 충돌 — `Autodesk.Navisworks.Api.Application.ActiveDocument` 완전 수식).
+  도크 패널 `일괄 갱신` 탭(Overview 다음)과 독립 창(`ShowStandalone` — 모달 ShowDialog: 러너의
+  `ExecuteAddInPlugin`이 창 닫힐 때까지 반환하지 않아야 처리 중 Navisworks가 안 닫힘) 양쪽에 동일 컨트롤.
+  도크 탭에서 실행 시 현재 문서가 교체되므로 모델이 열려 있으면 확인(자동 실행 `auto`는 생략).
+- `Plugin.cs` `BatchEntryPlugin` — `[Plugin("NavisVisualizer.Batch","HDHHI_OE")]` AddInPlugin.
+  인자 `auto`(기억된 선택으로 즉시 실행) / `close`(끝나면 창 닫기). 반환 = 저장 실패 job 수.
+- `tools/NavisBatch/` — 바탕화면 러너 exe (net48 콘솔, `Autodesk.Navisworks.Automation` **Private=true**
+  — 플러그인 csproj와 달리 Navisworks 폴더 밖에서 로드돼야 하므로 복사). `new NavisworksApplication()`
+  → `ExecuteAddInPlugin("NavisVisualizer.Batch.HDHHI_OE", args)`. **기본은 Navisworks 보이게 + 끝나도
+  안 닫음**(색칠된 모델을 바로 볼 수 있게, L6 안전 기본값). `--hidden` = 숨김 + 종료(무인 스케줄:
+  `NavisBatch.exe --hidden auto close`). `Visible`은 리플렉션(L4). 플러그인 DLL은 참조하지 않는다.
+- `deploy.bat` — 플러그인 배포 후 러너 빌드 → `%APPDATA%\NavisVisualizer\NavisBatch\` 복사 →
+  바탕화면 `Navis Batch Update.lnk`(PowerShell WScript.Shell; .bat 코드페이지 안전 위해 ASCII 이름) →
+  `batch.config` 없을 때만 sample 복사(덮어쓰기 금지). 러너 빌드 실패는 경고만(플러그인 탭으로 대체 가능).
+
+**Windows 검증 항목**
+1. `Document.OpenFile`이 열린 문서가 dirty일 때 "저장?" 대화상자를 띄우는가 — 띄우면 배치 정지 →
+   `doc.Clear()` 선행 또는 도크 탭 확인창에서 먼저 저장 유도. (API 호출은 GUI 프롬프트 없이 교체한다고 봄.)
+2. Automation: `NavisworksApplication` 생성·`ExecuteAddInPlugin` 이름 형식(`이름.개발자ID`)·`Visible` 존재.
+   보이는 모드에서 **러너 종료 후 Navisworks가 남는가** — 같이 닫히면 러너에 "닫을 때까지 대기" 옵션 추가.
+3. `SaveFile` 후 `doc.FileName`이 출력 경로로 바뀜(§16) → 다음 job은 새 파일을 열므로 무관. 배치 후
+   도크 탭 사용 시 인덱스 1회 재빌드는 정상.
+4. federated 대형 NWD 1 job 소요(PerfLog `배치 모델 열기`/`배치 job` + 공종별 인덱스·적용 행) —
+   "커피 한 잔" 안에 끝나는지. 아니면 `--hidden auto close`로 작업 스케줄러 새벽 실행 전환.
+5. 기준일: 파일명 `{date}`는 **실행일**(DateTime.Now), 단계 판정은 창의 기준일(기본 오늘). 둘을 섞지 않음.
+6. 도크 탭의 TableLayoutPanel 레이아웃(좁은 320px에서 공종 체크박스 행 wrap, 결과 텍스트 Percent 행).
+
+**잔여/확장 후보**: Sub-system 편입("전체 sub-system" 정의 필요), 저장 후 Viewpoint 자동 저장,
+전주 스냅샷 보관과 §8 주간 증감 연계(날짜별 NWD 누적이 그 소스), 작업 스케줄러 등록 스크립트.
+
 ### 참고: 속성 쓰기(User-Defined Property) 현황 — 확장 후보
 
 **현재 구현**: **Spool·Equipment 탭에만** `[속성 쓰기]` 버튼(출력 행). `Services/UserDataService`가

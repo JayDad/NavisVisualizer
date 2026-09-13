@@ -53,6 +53,7 @@ namespace NavisVisualizer.UI
         private CableLineTab _cableLineTab;
         private SubSystemTab _subSystemTab;
         private ToolsTab _toolsTab;
+        private BatchPanel _batchPanel;
 
         /// <summary>
         /// 문서 이벤트(문서 전환·같은 파일 재로드)로 모든 인덱스가 무효화됐을 때 발생.
@@ -145,6 +146,13 @@ namespace NavisVisualizer.UI
             _overviewTab.Dock = DockStyle.Fill;
             ovPage.Controls.Add(_overviewTab);
 
+            // 일괄 갱신 — 등록 모델을 열어 OASIS 최신 실적으로 색칠 후 다른 이름 저장 (CLAUDE.md §19).
+            // 이 패널의 searcher/엔진과는 무관 (BatchRunner가 job마다 새로 생성 — 격리).
+            var batchPage = new TabPage("일괄 갱신");
+            _batchPanel = new BatchPanel();
+            _batchPanel.Dock = DockStyle.Fill;
+            batchPage.Controls.Add(_batchPanel);
+
             // 구조 탭 — Str 레벨1 영역 체크박스+투명도, 선택 항목만 남김 (다른 공종의 백도면).
             // 실적 데이터·searcher 없음: 영역 노드를 StructureAreaService로 직접 열거.
             var stPage = new TabPage("Structure");
@@ -192,6 +200,7 @@ namespace NavisVisualizer.UI
             toolPage.Controls.Add(_toolsTab);
 
             _tabControl.TabPages.Add(ovPage);
+            _tabControl.TabPages.Add(batchPage);
             _tabControl.TabPages.Add(stPage);
             _tabControl.TabPages.Add(htPage);
             _tabControl.TabPages.Add(spPage);

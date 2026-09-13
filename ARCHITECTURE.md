@@ -25,6 +25,9 @@ Excel (.xlsx/.xls/.xlsb)          OASIS SQL Server ([Navis] 스키마)
 | **EIT Tray** | 4 (Tray 설치 → Cable 완료) | Tray Number (leading `/` 정규화 후) | 재귀 탐색 (WalkAndIndex) | `ElecTagSearcher` 전용 (EIT) |
 | **Sub-system** | 2모드: 마스터 단계 5 (Walkdown→PCC) / 요소 진행 3단계 | Tag No. + Test Package No. (Sub-system 축 통합) | 재귀 탐색 (WalkAndIndex) | `SubSystemSearcher` 전용 (MEQ·SPL·HYDROPKG) |
 
+전 공종 공통: **미착수(NotStarted) 기본색 = 빨강**(2026-09 — 완성 단계에서 미착수 찾기가 주 용도).
+회색은 미매칭(`ColorSetting.Unmatched`, 90% 투명)에만 남아 "회색 = 데이터에 없음"으로 의미가 분리된다.
+
 ### Searcher 분리 근거
 - **매칭 전략 축**: `WalkAndIndex`(digit full-walk) 계열과 Equipment 레벨-타겟은 인덱스 구조가
   근본적으로 달라 물리적 분리 (단일 공유 시: Equipment 먼저 적용 → 다른 탭이 비어 있는
@@ -222,7 +225,7 @@ Apply:
 
 ### 6. UI Architecture (`UI/`)
 
-**탭 구성:** Overview | Structure | Hydrotest | Spool | Equipment | EIT Tray | Cable(형상) | Sub-system | 고급 진단(구 Tools)
+**탭 구성:** Overview | 일괄 갱신 | Structure | Hydrotest | Spool | Equipment | EIT Tray | Cable(형상) | Sub-system | 고급 진단(구 Tools)
 (구 Cable Pull/Cable(Node) 노드·박스 집계 탭은 2026-07 삭제 — 고급 진단의 box 중복 검사만 유지)
 
 **Structure 탭 (`UI/StructureTab.cs` — 실적 데이터·매칭 없음, CLAUDE.md §17):**
@@ -235,6 +238,15 @@ Apply:
 - ▸/▾ 레벨2 펼침(기본 접힘) — 레벨1 체크 = 하위 전체 토글(혼합 시 중간 상태), 레벨1 콤보 =
   하위 전파. 적용/숨김 단위: 균일 영역 = 레벨1 통째, 부분 선택 = 체크된 레벨2 단위
 - 행 ⊙ = 3D 선택·포커스 (Navisworks 선택 하이라이트)
+
+**일괄 갱신 탭 (`UI/BatchPanel.cs` + `Services/BatchRunner.cs`/`BatchConfig.cs`, CLAUDE.md §19):**
+- `%APPDATA%\NavisVisualizer\batch.config`에 등록된 프로젝트(모델 파일)를 체크 + 공종 체크박스
+  (Spool/Hydrotest/Equipment/EIT Tray/Cable) → [실행] = job마다 `doc.OpenFile` → `SqlLoader` →
+  인덱스 → `ColorOverrideEngine.Apply*`(기본 팔레트·전 단계) → `ExportNwdSilent`(다른 이름 저장).
+  체크 상태는 실행 시 config에 되써 넣어 다음 실행의 기본값이 된다.
+- job마다 searcher/엔진을 새로 만든다(문서 교체 시 이전 painted 핸들 무효 — 격리). 대화상자 없음.
+- 같은 컨트롤을 독립 창으로도 띄운다: AddInPlugin `NavisVisualizer.Batch` ← 바탕화면 러너
+  `tools/NavisBatch`(Automation API)가 호출. `deploy.bat`이 러너 배포 + 바로가기 생성.
 
 **Overview 탭 (`UI/OverviewTab.cs`, 첫 화면):**
 - 공종 현황 표: 각 탭이 `IOverviewSource.GetOverviewStatus()`로 노출하는 스냅샷
