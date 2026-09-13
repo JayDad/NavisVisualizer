@@ -912,8 +912,8 @@ EIT/Sub-system)으로 일반화**.
    RUYA `Z:\…\Export_Ruya_NWD\RUYA-progress_260911.nwd`. 출력 = **각 모델과 같은 폴더**에 끝 `_yyMMdd`만
    저장일로 교체 → 패턴 `{modelbase}_{date:yyMMdd}`(기본값), `[settings] outputFolder`는 비움
    (job별 `output=` override 가능; 우선순위 job → settings → 모델 옆).
-   **RUYA의 OASIS PJTNO 미확정** — job `project=`가 비면 oasis.config 기본값(Trion)으로 필터돼
-   RUYA 모델에 Trion 실적을 칠하게 된다. 코드 받는 즉시 sample·batch.config에 기입할 것.
+   OASIS 프로젝트 필터는 job별 필수: Trion=`Q557`, RUYA=`Q558`(2026-09 사용자 확인). 비우면 oasis.config
+   기본값으로 필터돼 다른 프로젝트 실적을 칠하게 된다.
    `{modelbase}` = 모델명에서 끝 `_\d{6}|_\d{8}` 제거, `{date:fmt}`/`{time:fmt}` = .NET 서식.
    **소스 파일은 고정**(매일 0910본을 열어 재도색) — 출력을 다음 날 소스로 굴리지 않는다: 색은 아이템 단위
    덮어쓰기라 누적 이득이 없고, 체인이 끊기면(파일 손상·이름 변경) 원인 추적이 어렵다. 소스 파일명이 그날

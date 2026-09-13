@@ -310,14 +310,14 @@ fileNamePattern={modelbase}_{date:yyMMdd}
 
 [job:Trion]
 model=Z:\06.PM\19. Digitalization\NavisVisualizer\Export_NWD\생산공유\99-Trion_Topsides_김의택책임님참고_260910.nwd
-project=
+project=Q557
 output=
 enabled=true
 disciplines=Spool,Hydrotest
 
 [job:RUYA]
 model=Z:\06.PM\19. Digitalization\NavisVisualizer\Export_Ruya_NWD\RUYA-progress_260911.nwd
-project=
+project=Q558
 output=
 enabled=true
 disciplines=Spool,Hydrotest

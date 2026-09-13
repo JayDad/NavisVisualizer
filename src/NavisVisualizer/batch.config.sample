@@ -16,8 +16,8 @@ fileNamePattern={modelbase}_{date:yyMMdd}
 
 [job:Trion]
 model=Z:\06.PM\19. Digitalization\NavisVisualizer\Export_NWD\생산공유\99-Trion_Topsides_김의택책임님참고_260910.nwd
-# OASIS PJTNO/PRJTNO. 비우면 oasis.config의 project 사용 — 프로젝트 2개면 job마다 지정해야 서로 다른 실적을 읽는다
-project=
+# OASIS PJTNO/PRJTNO. 프로젝트 2개라 job마다 지정 (Trion=Q557 · RUYA=Q558). 비우면 oasis.config의 project 사용
+project=Q557
 # 비우면 [settings] outputFolder → 그것도 비면 모델과 같은 폴더
 output=
 enabled=true
@@ -26,7 +26,7 @@ disciplines=Spool,Hydrotest
 
 [job:RUYA]
 model=Z:\06.PM\19. Digitalization\NavisVisualizer\Export_Ruya_NWD\RUYA-progress_260911.nwd
-project=
+project=Q558
 output=
 enabled=true
 disciplines=Spool,Hydrotest
