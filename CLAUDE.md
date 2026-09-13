@@ -4,7 +4,7 @@
 
 ## 향후 고려사항
 
-### 1. Federated NWD 모델 스코핑 (구현됨 — Windows 검증 대기)
+### 1. Federated NWD 모델 스코핑 (구현됨 — Windows 검증 대기) — **§19로 확장됨: 별칭 프로파일 + 문서별 매핑, 전체 fallback 폐지**
 
 **구현 현황**: 파일명 규약 확정(2026-07)에 따라 `Searchers/NwdScope.cs`(키워드 매칭, Autodesk
 비의존 — `NwdScopeTests` 존재) + `ModelItemSearcher` 스코프 지원(BuildIndex /
@@ -44,11 +44,12 @@ BuildIndexForTags / BuildIndexForBoxes에 `NwdScope` 파라미터, null = 전체
 - 2단계 매칭: ① `Model.FileName`/RootItem DisplayName (개별 공종 nwd만 열거나 append 구성)
   ② federated NWD를 연 경우 트리 안 **파일 노드**(확장자 보유 DisplayName)만 얕게(depth≤3)
   따라가며 매칭 — geometry 트리는 안 내려감. 디렉터리명 오탐 방지 위해 파일명만 비교
-- 3중 자동 fallback (규약 깨져도 동작 유지): 체인 전체 대상 모델 없음 / Equipment 스코프 내
-  태그 미발견 / 스코프 인덱스 0건 → 전체 모델 재인덱싱. `LastScopeNote`/`LastScopeFellBack`로
-  노출되어 각 탭 매칭 Status CSV `인덱스 스코프` 행 + Tools 탭 박스 중복 검사에서 확인 가능
-- **하드 스코프(`BuildIndex(..., hardScope: true)` — 2026-07)**: EIT Tray 탭은 "EIT nwd에서만"이
-  요구라 위 전체-모델 fallback을 끈다. 스코프 파일 미발견/인덱스 0건이어도 전체 트리를 walk하지
+- ~~3중 자동 fallback (체인 전체 대상 모델 없음 / 태그 미발견 / 인덱스 0건 → 전체 모델 재인덱싱)~~
+  → **폐지(2026-09, §19)**: 미지정이면 인덱스 0건 + `LastScopeUnmapped`, 적용 시 `ScopeGate`가
+  파일 지정/전체 검색을 명시적으로 묻는다. `LastScopeNote`는 각 탭 매칭 Status CSV `인덱스 스코프`
+  행 + Overview + Tools 탭 박스 중복 검사에서 확인 가능
+- **하드 스코프(`hardScope: true` — 2026-07) → 2026-09 전 탭 기본 동작이 되면서 파라미터 제거(§19)**:
+  EIT Tray 탭은 "EIT nwd에서만"이 요구라 위 전체-모델 fallback을 껐다. 스코프 파일 미발견/인덱스 0건이어도 전체 트리를 walk하지
   않고 빈 인덱스 + 진단 노트("하드 스코프: 전체 fallback 안 함 — 파일명 규약 확인")를 남긴다
   (federated 매칭이 어긋날 때 전 트리 순회로 인한 지연 방지 — EIT 적용 최다 지연 대책의 짝).
   `EitTrayTab`(EitTray 스코프)·`SubSystemTab` EIT EQ 빌드(Eit 스코프) 둘 다 hardScope.
@@ -66,7 +67,9 @@ BuildIndexForTags / BuildIndexForBoxes에 `NwdScope` 파라미터, null = 전체
   풀리는지, 단일 Model 밑 파일 노드로 오는지 (양쪽 다 대응해 뒀지만 실측 확인).
   fallback 발동 여부는 매칭 Status CSV의 `인덱스 스코프` 행으로 확인
 - Cable node box nwd 파일명 규약 확정 시 `NwdScope.Cable` 키워드 추가 (현재는 0건 fallback으로 동작)
-- 파일명 규약 변경 시 `NwdScope`의 키워드 + `NwdScopeTests`를 같이 갱신할 것
+- 파일명 규약 변경 시 `NwdScope`의 기본 키워드(Trion) 또는 `ScopeProfiles`(프로젝트별 별칭) +
+  `NwdScopeTests`/`ScopeMappingTests`를 같이 갱신할 것. 새 프로젝트는 코드 수정 없이 별칭 파일
+  (`scope_aliases.cfg`) 또는 Overview 매핑으로 대응 (§19)
 - Str(구조)은 `NwdScope.Structure`(키워드 STR)로 구현됨 — Structure 탭(§17).
   PIPSupport는 플러그인 신설 시 키워드(PIPSUPPORT)로 스코프 추가
 
@@ -851,6 +854,49 @@ EIT/Sub-system)으로 일반화**.
 - 토글 복원(리스트 필터 해제 시 투명/숨김 원복), 교집합 0건 안내, 대규모 dim 경고.
 - **Windows 검증**: 공종별 규모에서 투명 dim vs 숨김 체감(프레임레이트), 붙여넣기 파싱, 리스트
   ID ↔ 모델 노드명 정규화(케이블은 `NormalizeCableNo` 등 기존 규칙 재사용).
+
+### 19. 모델 파일 매핑 — 별칭 프로파일 + 문서별 직접 지정, 전체 fallback 폐지 (2026-09 구현 — Windows 검증 대기)
+
+**배경**: Ruya 모델(`RUYA-progress_260911.nwd` ← `BJ-RUY-{ELE|HSE|INS|TEL|SPOOL(SUP/HVA/ARC/MIF)|
+MEC|STR(PVV)|COOEC(CONST/rvm)}`)을 대조한 결과, `NwdScope` 키워드가 Trion 규약(SPL/HYDROPKG/MEQ/
+EIT/TRAY/CABLE) 전용이라 STR 외 전부 미매칭 → 소프트 스코프 탭은 15개 파일 전체 walk(느림),
+하드 스코프 탭은 0건. "어느 파일이 어느 공종인가"는 프로젝트마다 바뀌는 운영 데이터이므로 코드에서
+분리 (사용자 결정 2026-09: ⓐ 전체 fallback 폐지·명시 선택, ⓑ 자명한 별칭만 내장 + 현장 다중 선택).
+
+**구조 (ARCHITECTURE.md "NWD 파일 스코핑" 참조)**
+- `Searchers/ScopeProfiles.cs` — 프로파일(이름·문서 감지 패턴·스코프 Key별 별칭). 내장 Trion(기본
+  키워드 그대로) / Ruya(Spool=SPOOL, Equipment=MEC, Structure=STR — **Hydrotest/Eit/EitTray/Cable은
+  빈 별칭 = 현장 지정**). `NwdScope.AliasProvider`(static)로 `Keywords`에 반영. 사용자 별칭 파일
+  `%APPDATA%\NavisVisualizer\scope_aliases.cfg` (`Ruya.Eit=ELE|INS|TEL`, `X.pattern=…`) — 매핑
+  대화상자 [별칭 저장]이 쓴다
+- `Searchers/ScopeMappingConfig.cs` + `Services/ScopeMappingStore.cs` — 문서별 매핑
+  (`scopes\{문서명}.scope.cfg`: `profile=`, `Spool=files:a|b`, `Hydrotest=all`). 파일 노드 이름 키
+- `Services/ScopeMappingService.cs` — 해석 단일 진입점 `Resolve(doc, scope)`: 문서별 매핑 → 프로파일
+  자동 인식(체인) → 미지정. `EnumerateFileNodes`(Model 루트 + 중첩 파일 노드 depth≤3). 직접 지정에서
+  상위만 체크·하위 해제 → `ExcludedFiles` → `ModelItemSearcher.IsExcludedFileNode`가 walk에서 skip
+  (SPOOL 선택 + SUP/HVA/ARC/MIF 제외, STR 선택 + PVV 제외 — 성능·의미 둘 다)
+- `UI/ScopeGate.cs` — 인덱스 빌드 직전 게이트. 미지정이면 3택 프롬프트([파일 직접 지정…] /
+  [전체 모델에서 찾기(느림)] / [취소]). 전 탭(Spool/Hydro/Equip/EIT/Cable/Structure/Sub-system 공종별/
+  Tools box)에 배선. 취소 시 0건 인덱스 + 노트로 진행
+- `UI/ScopeMappingDialog.cs` — 공종 1개 매핑: ◉ 자동(별칭 편집·저장 + 인식 결과) / ○ 파일 직접
+  선택(파일 노드 트리 체크박스, 부모 체크 = 하위 동기화, 하위 해제 = 제외, 자동 인식 파일 초록 굵게) /
+  ○ 전체 모델. 확인 시 저장 → 다음부터 안 묻음
+- Overview: 구 Preflight 표 → **매핑 표**(방식/판정/적용 파일/별칭, 행 더블클릭 = 변경) + 프로파일
+  콤보(`(자동 감지: Ruya)` + 목록). 변경 시 `MainDockablePanel.InvalidateScopeIndexes()`
+- 제거: `hardScope` 파라미터(전 탭 기본), `LastScopeFellBack`→`LastScopeUnmapped`, `_lastScopeNarrowed`·
+  3중 fallback 블록, `ScopePreflight.cs`(서비스가 대체), `TryCollectScopeRoots`/`CollectFileNodeRoots`
+
+**Ruya 초기 동작 (예상)**: Overview 매핑 표에 Structure/Spool/Equipment ✓, 나머지 ✕ 미지정 →
+Hydrotest는 [파일 직접 지정…]에서 SPOOL 체크(PKG가 SPOOL 안이면), EIT Tray/EIT EQ는 ELE(+INS/TEL),
+Cable은 ELE 또는 확인 후. 지정 결과가 확정되면 별칭에 승격(`scope_aliases.cfg` 또는 `ScopeProfiles.Ruya`).
+
+**Windows 검증**: ① 파일 노드 트리가 실제 federated 구조(2단 중첩 SPOOL▸SUP)로 열거되는가 ② 하위 제외가
+walk에서 실제로 건너뛰는가(SUP 태그가 인덱스에 없어야) ③ Trion 문서에서 프로파일 자동 감지 = Trion으로
+종전과 동일 매칭 건수(회귀) ④ 매핑 저장 파일 생성·재열기 시 복원 ⑤ 게이트 프롬프트가 인덱스 빌드마다
+반복되지 않는가(저장 후 통과) ⑥ TreeView 체크 동기화(AfterCheck 재진입 가드).
+
+**잔여**: 별칭 편집은 공종별 대화상자에서만(프로파일 전체 편집 화면 없음 — 파일 직접 편집). 프로파일
+자동 감지 패턴(RUYA/RUY, Trion)은 컨테이너 파일명 기준 — 다른 이름 규약이면 Overview 콤보로 수동 선택.
 
 ### 참고: 속성 쓰기(User-Defined Property) 현황 — 확장 후보
 

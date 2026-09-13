@@ -112,9 +112,16 @@ namespace NavisVisualizer.UI
 
         private void OnDocFileNameChanged(object sender, EventArgs e) => InvalidateIndexes();
 
-        /// <summary>패널 소유 searcher 전부 리셋 + 사유 캐시 보유 탭들에 통지.</summary>
+        /// <summary>
+        /// Overview에서 모델 파일 매핑/프로파일을 바꾼 뒤 호출 — 스코프 루트가 달라졌을 수 있으므로
+        /// 모든 인덱스를 무효화해 다음 적용 때 새 매핑으로 재빌드하게 한다 (문서 이벤트 무효화와 동일 경로).
+        /// </summary>
+        public void InvalidateScopeIndexes() => InvalidateIndexes();
+
+        /// <summary>패널 소유 searcher 전부 리셋 + 사유 캐시 보유 탭들에 통지 + 문서별 매핑 캐시 비움.</summary>
         private void InvalidateIndexes()
         {
+            ScopeMappingService.InvalidateCache();
             SpoolTagSearcher.Reset();
             HydroTagSearcher.Reset();
             ElecTagSearcher.Reset();

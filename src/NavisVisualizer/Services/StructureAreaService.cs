@@ -21,13 +21,13 @@ namespace NavisVisualizer.Services
 
     /// <summary>
     /// Structure 탭용 영역 열거 — 열린 문서에서 Str 스코프(NwdScope.Structure) 파일 노드를
-    /// ScopePreflight와 동일한 2단계 매칭(① Model.FileName/RootItem DisplayName,
-    /// ② federated 트리의 파일 노드만 depth≤3 얕은 하강)으로 찾고, 그 레벨1 자식(영역
+    /// ScopeMappingService(프로파일 별칭 자동 인식 / 사용자 직접 지정)로 찾고, 그 레벨1 자식(영역
     /// 노드: /QR/LG/STRU/HHI …)만 반환한다. geometry 트리는 내려가지 않아 인덱스 빌드
-    /// 없이 즉시 수준. 하드 스코프 성격: Str 파일 미발견 시 전체 모델을 훑지 않고
-    /// 빈 목록 + 진단 노트만 남긴다 (파일명 규약 불일치를 드러내는 쪽이 안전).
+    /// 없이 즉시 수준. Str 파일 미지정 시 전체 모델을 훑지 않고 빈 목록 + 진단 노트만 남긴다
+    /// (전 탭 공통 — 전체 fallback 폐지 2026-09). 직접 지정에서 뺀 하위 파일(STR 안의 PVV.nwd 등)은
+    /// 영역 목록에서도 제외된다.
     /// ModelItemSearcher를 안 쓰는 이유: 태그 매칭이 아니라 노드 열거라 인덱스가 불필요하고,
-    /// searcher의 LastScopeNote 등 다른 탭 진단 상태를 건드리면 안 되기 때문 (ScopePreflight와 동일 취지).
+    /// searcher의 LastScopeNote 등 다른 탭 진단 상태를 건드리면 안 되기 때문 (ScopeMappingService는 무상태).
     /// </summary>
     public static class StructureAreaService
     {
@@ -41,6 +41,8 @@ namespace NavisVisualizer.Services
             /// <summary>발견 파일/미발견 사유 — 상태 라벨·Overview 노출용.</summary>
             public string ScopeNote = "-";
             public bool Found => Areas.Count > 0;
+            /// <summary>Str 파일이 미지정(별칭 미매칭·지정 파일 미발견) — 탭이 파일 지정을 안내.</summary>
+            public bool Unmapped;
         }
 
         public static Result Probe(Document doc)
@@ -52,26 +54,17 @@ namespace NavisVisualizer.Services
                 return result;
             }
 
-            var roots = new List<ModelItem>();
-            var files = new List<string>();
-            foreach (Model model in doc.Models)
-            {
-                string fileName = null;
-                try { fileName = model.FileName; } catch { /* 일부 모델은 FileName 조회 실패 가능 */ }
-                string rootName = model.RootItem?.DisplayName;
-
-                if (NwdScope.Structure.MatchesFileName(fileName) || NwdScope.Structure.MatchesFileName(rootName))
-                {
-                    roots.Add(model.RootItem);
-                    files.Add(NwdScope.StripDirectory(fileName ?? rootName ?? "?"));
-                    continue;
-                }
-                CollectFileNodeRoots(model.RootItem, 0, roots, files);
-            }
+            // 스코프 해석은 ScopeMappingService 단일 진입점 (프로파일 별칭 자동 인식 또는 사용자 직접
+            // 지정, 2026-09). 미지정이면 전체 모델을 훑지 않고 빈 목록 + 노트 (Structure 탭이 파일 지정 안내).
+            var res = ScopeMappingService.Resolve(doc, NwdScope.Structure);
+            var roots = res.Roots;
+            var files = res.Files;
+            var excluded = res.ExcludedFiles;
+            result.Unmapped = !res.IsMapped;
 
             if (roots.Count == 0)
             {
-                result.ScopeNote = "스코프 STR: 대상 파일 미발견 — 파일명 규약 확인 (전체 모델 fallback 안 함)";
+                result.ScopeNote = res.Note + " — Structure 파일을 지정하세요 (전체 모델 fallback 없음)";
                 return result;
             }
 
@@ -85,6 +78,9 @@ namespace NavisVisualizer.Services
                 foreach (ModelItem child in top.Children)
                 {
                     string name = child.DisplayName?.Trim();
+                    // 직접 지정 매핑에서 뺀 하위 파일 노드(예: STR 안의 PVV.nwd)는 영역으로 나열하지 않음.
+                    if (!string.IsNullOrEmpty(name) && excluded.Contains(name) && NwdScope.LooksLikeFileNode(name))
+                        continue;
                     if (string.IsNullOrEmpty(name))
                     {
                         // 무명 노드도 숨김/투명 대상에서 빠지지 않게 포함. 합성 이름은 위치 기반이라
@@ -104,8 +100,8 @@ namespace NavisVisualizer.Services
             }
 
             result.ScopeNote = result.Areas.Count > 0
-                ? $"스코프 STR: {string.Join(", ", files.Distinct())} · 영역 {result.Areas.Count}개"
-                : $"스코프 STR: {string.Join(", ", files.Distinct())} · 레벨1 자식 없음";
+                ? $"{res.Note} · 영역 {result.Areas.Count}개"
+                : $"{res.Note} · 레벨1 자식 없음";
             return result;
         }
 
@@ -149,26 +145,6 @@ namespace NavisVisualizer.Services
                     area.Children.Add(child);
                 }
                 child.Items.Add(c);
-            }
-        }
-
-        /// <summary>federated 트리에서 파일 노드만 얕게 따라가며 Str 매칭 루트 수집 (ResolveScopeRoots ② 미러).</summary>
-        private static void CollectFileNodeRoots(ModelItem item, int depth, List<ModelItem> roots, List<string> files)
-        {
-            if (item == null || depth > 3) return;
-            foreach (ModelItem child in item.Children)
-            {
-                string dn = child.DisplayName?.Trim();
-                if (!NwdScope.LooksLikeFileNode(dn)) continue;
-                if (NwdScope.Structure.MatchesFileName(dn))
-                {
-                    roots.Add(child);
-                    files.Add(dn);   // 매칭 파일의 하위는 더 볼 필요 없음
-                }
-                else
-                {
-                    CollectFileNodeRoots(child, depth + 1, roots, files);
-                }
             }
         }
 
