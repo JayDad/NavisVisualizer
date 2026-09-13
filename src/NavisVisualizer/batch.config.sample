@@ -4,8 +4,9 @@
 # model 경로 · project · outputFolder 정도. 백슬래시 그대로, 따옴표 없이 적는다.
 
 [settings]
-# 비우면 모델 파일과 같은 폴더에 저장
-outputFolder=D:\발행
+# 저장 폴더 (비우면 모델 파일과 같은 폴더). 생산 공유용 Export_NWD 경로 — 2026-09 사용자 지정.
+# 네트워크 드라이브(Z:)는 로그인한 사용자에게 매핑돼 있어야 한다.
+outputFolder=Z:\06.PM\19. Digitalization\NavisVisualizer\Export_NWD\생산공유 모델경로
 # 토큰: {model}=모델 파일명(확장자 제외) {name}=job 이름 {date}=yyyyMMdd {time}=HHmm. .nwd 자동
 fileNamePattern={model}_{date}
 
