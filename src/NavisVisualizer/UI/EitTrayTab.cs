@@ -437,6 +437,9 @@ namespace NavisVisualizer.UI
         {
             var doc = _main.GetDocument();
             if (doc == null) return;
+            // 스코프 미지정이면 먼저 파일 지정을 묻는다 (전체 모델 자동 fallback 폐지 — 2026-09).
+            // 취소하면 인덱스 0건으로 진행 (매칭 Status·Overview의 스코프 노트에 미지정으로 표시).
+            ScopeGate.EnsureMapped(this, doc, NwdScope.EitTray);
             _progressBar.Style = ProgressBarStyle.Marquee;
             _progressBar.Visible = true;
             // 단순 marquee만으로는 무엇을 하는지 알 수 없어 단계 문구 병기 (UX audit P0-3)
@@ -444,12 +447,11 @@ namespace NavisVisualizer.UI
             Application.DoEvents();
             // 레벨 타겟: 로드된 트레이 ID 셋으로 매칭 깊이만 인덱싱하고 그 아래(geometry)는 안 봄
             // — "매칭 → 하위 트리 무시 → 옆으로" (general walk의 자식 스캔 비용 제거, 최다 지연 대책).
-            // 하드 스코프: EIT nwd에서만 (미발견 시 전체 트리 안 훑고 0건 + "파일명 규약 확인" 노트).
-            // §2 리스크: 트레이가 여러 깊이에 섞이면 첫 매칭 깊이만 인덱싱 → 매칭 건수 대조 필요(Windows).
+            // 매핑된 EIT Tray 파일에서만 (미지정 시 전체 트리 안 훑고 0건 + 노트 — 전 탭 공통 규칙).
             var trayIds = new HashSet<string>(
                 _trays.Select(t => EitTrayData.NormalizeId(t.TrayNumber)),
                 StringComparer.OrdinalIgnoreCase);
-            _main.ElecTagSearcher.BuildIndexForTags(doc, trayIds, NwdScope.EitTray, hardScope: true);
+            _main.ElecTagSearcher.BuildIndexForTags(doc, trayIds, NwdScope.EitTray);
             _needsIndexRebuild = false;
             _progressBar.Visible = false;
             _progressBar.Style = ProgressBarStyle.Blocks;
@@ -835,7 +837,7 @@ namespace NavisVisualizer.UI
                 UnmatchedText = hasApplied ? _unmatchedTrayNos.Count.ToString("N0") : "-",
                 UnmatchedCount = hasApplied ? _unmatchedTrayNos.Count : 0,
                 ScopeNote = _main.ElecTagSearcher.LastScopeNote ?? "-",
-                ScopeFellBack = _main.ElecTagSearcher.LastScopeFellBack,
+                ScopeUnmapped = _main.ElecTagSearcher.LastScopeUnmapped,
             };
         }
     }

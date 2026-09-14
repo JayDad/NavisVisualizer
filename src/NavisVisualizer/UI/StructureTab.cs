@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
 using System.Windows.Forms;
+using NavisVisualizer.Searchers;
 using NavisVisualizer.Services;
 using NavisVisualizer.Visualizers;
 
@@ -46,6 +47,7 @@ namespace NavisVisualizer.UI
 
         private readonly List<AreaRow> _areaRows = new List<AreaRow>();   // 레벨1 행만 (레벨2는 ChildRows)
         private string _scopeNote = "-";
+        private bool _scopeUnmapped;   // Str 파일 미지정 (Overview 경고 표시용)
         // 영역 ModelItem은 조회 시점 문서 기준 — 문서가 바뀌면 재조회 강제 (searcher NeedsRebuild와 동일 취지).
         private string _areasDocId;
         private Autodesk.Navisworks.Api.ModelItemCollection _hiddenByKeepOnly;
@@ -172,8 +174,12 @@ namespace NavisVisualizer.UI
                     prevL2[ChildKey(l1, c)] = (c.Check.Checked, c.TransparencyBox.Text);
             }
 
+            // Str 파일 미지정이면 파일 지정을 먼저 묻는다 (전체 모델 자동 fallback 폐지 — 2026-09).
+            // 취소하면 영역 0개 + 노트로 진행.
+            ScopeGate.EnsureMapped(this, doc, NwdScope.Structure);
             var result = StructureAreaService.Probe(doc);
             _scopeNote = result.ScopeNote;
+            _scopeUnmapped = result.Unmapped;
             _areasDocId = DocId(doc);
             _areaRows.Clear();
 
@@ -605,7 +611,7 @@ namespace NavisVisualizer.UI
                 UnmatchedText = "-",
                 UnmatchedCount = 0,
                 ScopeNote = _scopeNote,
-                ScopeFellBack = false,
+                ScopeUnmapped = _scopeUnmapped,
             };
         }
     }

@@ -449,7 +449,11 @@ namespace NavisVisualizer.UI
                 _lblStatus.Text = "Building box index...";
                 Application.DoEvents();
                 if (_main.CableBoxSearcher.NeedsRebuild(doc))
+                {
+                    // Cable 스코프 미지정이면 파일 지정을 먼저 (전체 모델 자동 fallback 폐지 — 2026-09)
+                    ScopeGate.EnsureMapped(this, doc, NwdScope.Cable);
                     _main.CableBoxSearcher.BuildIndexForBoxes(doc, NwdScope.Cable);
+                }
 
                 var dups = _main.CableBoxSearcher.GetEntriesWithMultipleItems();
                 int totalNodes = _main.CableBoxSearcher.IndexedCount;

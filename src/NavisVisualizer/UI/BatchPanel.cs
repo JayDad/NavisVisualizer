@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Windows.Forms;
+using NavisVisualizer.Searchers;
 using NavisVisualizer.Services;
 
 namespace NavisVisualizer.UI
@@ -463,6 +464,11 @@ namespace NavisVisualizer.UI
                     SetStatus(text, Color.Black);
                     Application.DoEvents();
                 },
+                // 스코프(모델 파일) 미지정 공종: 사람이 보고 있으면 탭과 같은 프롬프트([파일 직접 지정…]/
+                // [전체 모델]/[취소])로 그 자리에서 정하고, 자동 실행(무인)은 프롬프트 없이 건너뛴다.
+                EnsureScopeMapped = (d, scope) => AutoRun
+                    ? ScopeMappingService.Resolve(d, scope).IsMapped
+                    : ScopeGate.EnsureMapped(this, d, scope),
             };
             var results = new List<BatchJobResult>();
             var swAll = Stopwatch.StartNew();

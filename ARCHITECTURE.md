@@ -38,19 +38,32 @@ Excel (.xlsx/.xls/.xlsb)          OASIS SQL Server ([Navis] 스키마)
   SPL 파일이 없는 문서에선 Spool의 체인 fallback으로 두 인덱스가 같은 HYDROPKG를 각각
   빌드하지만(이중 비용), 파일 단위 walk라 작고 탭별 lazy 빌드라 실사용 영향 미미
 
-### NWD 파일 스코핑 (`NwdScope` — federated 모델 성능 최적화)
-인덱스 빌드 시 전체 `doc.Models`가 아니라 공종 대상 nwd 파일만 walk한다.
-- **우선순위 체인** (`NwdScope.Fallback`): 앞 스코프로 대상 모델을 못 찾을 때만 다음 스코프
-  시도. `Spool` = SPL → (없으면) HYDROPKG — "SPL 파일이 있으면 스풀은 SPL에만, 없으면
-  HYDROPKG 안에 있다"는 규약을 그대로 코드화. SPL이 있는 문서에서 HYDROPKG는 walk 안 함
-- **2단계 매칭**: ① `Model.FileName`/RootItem DisplayName 키워드 매칭 (개별 공종 nwd만 연
-  경우·append 구성) ② federated NWD(묶음 파일을 연 경우 하위 파일이 트리 안 파일 노드로
-  들어옴)는 파일 노드(확장자 보유 DisplayName)만 얕게 따라가며 매칭 — geometry 트리는 안 건드림
-- **3중 fallback** (규약이 깨져도 동작 유지, 속도만 손해): 체인 전체 대상 모델 없음 /
-  (Equipment) 스코프 내 태그 미발견 / 스코프 인덱스 0건 → 전체 모델 재인덱싱 +
-  `LastScopeNote`에 fallback 기록
-- 스코프 결과는 각 탭 매칭 Status CSV의 `인덱스 스코프` 행과 Tools 탭 박스 중복 검사에서 확인
-  (체인 사용 시 "스코프 SPL 없음 → HYDROPKG: 02-02_..." 형식으로 어느 단계가 잡혔는지 표시)
+### NWD 파일 스코핑 (`NwdScope` + 프로파일/매핑 — federated 모델 성능 최적화)
+인덱스 빌드 시 전체 `doc.Models`가 아니라 공종 대상 nwd 파일만 walk한다. "어느 파일이 어느
+공종인가"는 코드에 박힌 규약이 아니라 **프로파일 별칭 + 문서별 매핑**으로 결정한다 (2026-09).
+- **단일 진입점 `Services/ScopeMappingService.Resolve(doc, scope)`** — searcher·Structure 프로브·
+  Overview 매핑 표가 전부 이걸 쓴다. 해석 순서: ① 문서별 저장 매핑(`Searchers/ScopeMappingConfig`
+  — 직접 지정 파일 목록 / 전체 모델) → ② 자동 인식(활성 프로파일 별칭으로 파일명 부분일치, 체인 순)
+  → ③ **미지정** (루트 없음 = 인덱스 0건). **전체 모델 자동 fallback은 폐지** — 적용 시
+  `UI/ScopeGate`가 [파일 직접 지정…] / [전체 모델에서 찾기(느림)] / [취소]를 명시적으로 묻는다
+- **프로파일 (`Searchers/ScopeProfiles`)**: 스코프 `Key`별 별칭 목록 + 문서 파일명 감지 패턴.
+  내장 = Trion(NwdScope 기본 키워드 SPL/HYDROPKG/MEQ/TRAY→EIT/CABLE/STR) · Ruya(SPOOL/MEC/STR만
+  — 나머지는 빈 별칭 = 현장 지정). 문서 파일명(`RUYA-*`/`*Trion*`)으로 자동 감지, Overview에서
+  덮어쓰기. `NwdScope.AliasProvider`(static)로 활성 프로파일 별칭이 `Keywords`에 노출됨.
+  사용자 별칭 파일 `%APPDATA%\NavisVisualizer\scope_aliases.cfg`(`프로파일.스코프=별칭|별칭`)로
+  별칭 편집·새 프로파일 추가 가능 (매핑 대화상자의 [별칭 저장]이 씀)
+- **문서별 매핑 (`Services/ScopeMappingStore`)**: `%APPDATA%\NavisVisualizer\scopes\{문서명}.scope.cfg`
+  — `profile=` + `스코프=files:a.nwd|b.nwd` / `스코프=all`. 파일 노드 **이름** 기준이라 리비전 교체
+  후에도 유지되며 없어진 파일은 "미발견"으로 드러남. 매핑 변경 시 `MainDockablePanel.
+  InvalidateScopeIndexes()`로 전 인덱스 무효화
+- **우선순위 체인** (`NwdScope.Fallback`, 자동 인식에서만): `Spool` = SPL → (없으면) HYDROPKG,
+  `EitTray` = TRAY → EIT. SPL이 있는 문서에서 HYDROPKG는 walk 안 함
+- **파일 노드 열거** (`ScopeMappingService.EnumerateFileNodes`): Model 루트 + federated 트리의
+  중첩 파일 노드(확장자 보유 DisplayName, depth≤3)만 — geometry 트리는 안 건드려 즉시 수준.
+  직접 지정에서 상위 파일을 체크하고 하위 파일(예: SPOOL 안의 SUP/HVA)을 체크 해제하면
+  `ScopeResolution.ExcludedFiles`로 walk에서 건너뛴다 (`ModelItemSearcher.IsExcludedFileNode`)
+- 스코프 결과는 각 탭 매칭 Status CSV의 `인덱스 스코프` 행·Overview 매핑 표·Tools 탭 박스 중복
+  검사에서 확인 ("스코프 SPL[SPL] 없음 → HYDROPKG[HYDROPKG]: 02-02_..." / "…→ 미지정" 형식)
 
 ## Data Flow
 
@@ -229,9 +242,10 @@ Apply:
 (구 Cable Pull/Cable(Node) 노드·박스 집계 탭은 2026-07 삭제 — 고급 진단의 box 중복 검사만 유지)
 
 **Structure 탭 (`UI/StructureTab.cs` — 실적 데이터·매칭 없음, CLAUDE.md §17):**
-- `Services/StructureAreaService.Probe`가 Str 파일(`NwdScope.Structure`, 키워드 STR)의
-  레벨1 영역 노드 + 레벨2 하위(영역당 상한 200)를 읽기 전용 열거 (ScopePreflight 미러 —
-  인덱스·geometry walk 없음, 미발견 시 전체 fallback 안 함)
+- `Services/StructureAreaService.Probe`가 Str 파일(`NwdScope.Structure` — `ScopeMappingService`
+  해석: 별칭 STR 자동 인식 또는 직접 지정)의 레벨1 영역 노드 + 레벨2 하위(영역당 상한 200)를
+  읽기 전용 열거 (인덱스·geometry walk 없음, 미지정 시 전체 fallback 안 함 — [영역 조회] 시
+  `ScopeGate`가 파일 지정을 묻는다). 직접 지정에서 뺀 하위 파일(STR 안의 PVV.nwd)은 영역에서 제외
 - 영역별 체크박스 + 투명도 콤보 → [투명도 적용] = `ApplyStructureTransparency`
   (`VisualModule.Structure`, **투명도만** — 색은 원본 유지, 반투명 백도면)
 - [선택 항목만 남김] = 체크 안 된 영역/하위 `SetHidden` 토글 — 다른 공종 가시화의 배경 역할
@@ -252,9 +266,11 @@ Apply:
 - 공종 현황 표: 각 탭이 `IOverviewSource.GetOverviewStatus()`로 노출하는 스냅샷
   (데이터 소스·건수 / 인덱스 건수 / 3D 적용 상태 / 매칭·미매칭 / 인덱스 스코프·fallback).
   행 더블클릭 = 해당 탭 이동. 상태 캐시 없음 — Overview 탭 선택 시 자동 재조회 + [새로고침]
-- NWD Preflight: `Services/ScopePreflight.Probe`가 스코프 체인(STR/SPL→HYDROPKG/HYDROPKG/MEQ/EIT/CABLE)별
-  대상 파일 발견 여부를 인덱스 빌드 없이 판정 (ResolveScopeRoots 2단계 매칭의 읽기 전용 미러 —
-  searcher 진단 상태를 안 건드림). 파일명 규약·하드 스코프 불일치를 적용 전에 노출
+- 모델 파일 매핑 표 (구 NWD Preflight): 스코프 7개(Structure/Spool/Hydrotest/Equipment/EIT Tray/
+  EIT EQ/Cable)별 {방식(자동·직접·전체) / 판정 / 적용 파일 / 별칭}을 `ScopeMappingService.Resolve`로
+  인덱스 빌드 없이 판정. **행 더블클릭 = `UI/ScopeMappingDialog`**(자동 인식+별칭 편집 / 파일 트리
+  체크(복수, 하위 제외) / 전체 모델) → 문서별 저장. 프로파일 콤보(자동 감지 표시 + 덮어쓰기).
+  미지정 공종을 적용 전에 잡는 것이 핵심 가치 — 전체 모델 자동 fallback이 없으므로 여기서 지정
 
 **공통 패턴 (날짜 기반 탭 동일):**
 - DateTimePicker (기준일, 기본: 오늘)

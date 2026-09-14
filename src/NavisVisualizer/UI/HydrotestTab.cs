@@ -473,6 +473,9 @@ namespace NavisVisualizer.UI
         {
             var doc = _main.GetDocument();
             if (doc == null) return;
+            // 스코프 미지정이면 먼저 파일 지정을 묻는다 (전체 모델 자동 fallback 폐지 — 2026-09).
+            // 취소하면 인덱스 0건으로 진행 (매칭 Status·Overview의 스코프 노트에 미지정으로 표시).
+            ScopeGate.EnsureMapped(this, doc, NwdScope.Hydrotest);
             _progressBar.Style = ProgressBarStyle.Marquee;
             _progressBar.Visible = true;
             // 단순 marquee만으로는 무엇을 하는지 알 수 없어 단계 문구 병기 (UX audit P0-3)
@@ -554,7 +557,7 @@ namespace NavisVisualizer.UI
                 UnmatchedText = hasApplied ? _unmatchedPkgIds.Count.ToString("N0") : "-",
                 UnmatchedCount = hasApplied ? _unmatchedPkgIds.Count : 0,
                 ScopeNote = _main.HydroTagSearcher.LastScopeNote ?? "-",
-                ScopeFellBack = _main.HydroTagSearcher.LastScopeFellBack,
+                ScopeUnmapped = _main.HydroTagSearcher.LastScopeUnmapped,
             };
         }
 

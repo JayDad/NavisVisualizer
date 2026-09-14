@@ -67,6 +67,13 @@ namespace NavisVisualizer.Services
         /// <summary>진행 단계 문구 (UI가 라벨에 표시). UI 스레드에서 호출됨.</summary>
         public Action<string> Progress { get; set; }
 
+        /// <summary>
+        /// 인덱스 빌드 직전 스코프(모델 파일 매핑) 게이트 — §19의 ScopeGate와 같은 역할. 화면이 있으면
+        /// `ScopeGate.EnsureMapped`(미지정 시 파일 지정 프롬프트), 무인 실행이면 매핑 여부만 판정해
+        /// 미지정 공종을 건너뛴다(프롬프트 = 정지). null이면 매핑 여부만 판정.
+        /// </summary>
+        public Func<Document, NwdScope, bool> EnsureScopeMapped { get; set; }
+
         private readonly ExportService _export = new ExportService();
 
         public BatchJobResult RunJob(Document doc, BatchJob job, ISet<BatchDiscipline> disciplines,
@@ -113,6 +120,9 @@ namespace NavisVisualizer.Services
                 }
                 PerfLog.Record("배치 모델 열기", swOpen.ElapsedMilliseconds, items: doc.Models.Count,
                     note: Path.GetFileName(job.ModelPath));
+                // 같은 Document 인스턴스에 파일만 갈아끼웠으므로 문서별 매핑 캐시를 비운다
+                // (도크 패널이 없는 독립 실행에서는 FileNameChanged 무효화 경로가 없다).
+                ScopeMappingService.InvalidateCache();
 
                 // 2) OASIS 연결 설정 — job별 프로젝트 필터 override
                 SqlConnectionSettings settings;
@@ -216,10 +226,11 @@ namespace NavisVisualizer.Services
             step.Rows = list.Count;
             if (list.Count == 0) { step.Error = "OASIS 데이터 0건"; return; }
 
+            if (!ScopeReady(doc, NwdScope.Spool, step)) return;
             Report($"[{job.Name}] Spool — 모델 태그 인덱스 생성 중… ({list.Count:N0}건)");
             searcher.Reset();
             searcher.BuildIndexForTags(doc, new HashSet<string>(list.Select(s => s.SpoolId)), NwdScope.Spool);
-            step.ScopeNote = searcher.LastScopeNote ?? "";
+            step.ScopeNote = ScopeNoteOf(searcher);
 
             Report($"[{job.Name}] Spool — 색상 적용 중…");
             var r = engine.ApplySpool(doc, list, ColorSetting.SpoolDefaults, refDate);
@@ -235,10 +246,11 @@ namespace NavisVisualizer.Services
             step.Rows = list.Count;
             if (list.Count == 0) { step.Error = "OASIS 데이터 0건"; return; }
 
+            if (!ScopeReady(doc, NwdScope.Hydrotest, step)) return;
             Report($"[{job.Name}] Hydrotest — 모델 태그 인덱스 생성 중…");
             searcher.Reset();
             searcher.BuildIndex(doc, NwdScope.Hydrotest);
-            step.ScopeNote = searcher.LastScopeNote ?? "";
+            step.ScopeNote = ScopeNoteOf(searcher);
 
             Report($"[{job.Name}] Hydrotest — 색상 적용 중…");
             var r = engine.ApplyHydrotest(doc, list, ColorSetting.HydrotestDefaults, refDate);
@@ -254,10 +266,11 @@ namespace NavisVisualizer.Services
             step.Rows = list.Count;
             if (list.Count == 0) { step.Error = "OASIS 데이터 0건"; return; }
 
+            if (!ScopeReady(doc, NwdScope.Equipment, step)) return;
             Report($"[{job.Name}] Equipment — 모델 태그 인덱스 생성 중… ({list.Count:N0}건)");
             searcher.Reset();
             searcher.BuildIndexForTags(doc, new HashSet<string>(list.Select(e => e.TagNo)), NwdScope.Equipment);
-            step.ScopeNote = searcher.LastScopeNote ?? "";
+            step.ScopeNote = ScopeNoteOf(searcher);
 
             Report($"[{job.Name}] Equipment — 색상 적용 중…");
             var r = engine.ApplyEquipment(doc, list, ColorSetting.EquipmentDefaults, refDate);
@@ -274,14 +287,15 @@ namespace NavisVisualizer.Services
             step.Rows = list.Count;
             if (list.Count == 0) { step.Error = "OASIS 데이터 0건"; return; }
 
+            if (!ScopeReady(doc, NwdScope.EitTray, step)) return;
             Report($"[{job.Name}] EIT Tray — 모델 태그 인덱스 생성 중… ({list.Count:N0}건)");
             searcher.Reset();
             var trayIds = new HashSet<string>(
                 list.Select(t => EitTrayData.NormalizeId(t.TrayNumber)),
                 StringComparer.OrdinalIgnoreCase);
-            // 하드 스코프: EIT nwd에서만 — 미발견 시 전체 트리를 훑지 않고 0건 + 노트 (EitTrayTab과 동일)
-            searcher.BuildIndexForTags(doc, trayIds, NwdScope.EitTray, hardScope: true);
-            step.ScopeNote = searcher.LastScopeNote ?? "";
+            // 스코프 미지정이면 전체 트리를 훑지 않고 0건 + 노트 (§19 — 전 탭 공통 동작)
+            searcher.BuildIndexForTags(doc, trayIds, NwdScope.EitTray);
+            step.ScopeNote = ScopeNoteOf(searcher);
 
             Report($"[{job.Name}] EIT Tray — 색상 적용 중…");
             var r = engine.ApplyEit(doc, list, ColorSetting.EitDefaults);
@@ -297,10 +311,11 @@ namespace NavisVisualizer.Services
             step.Rows = list.Count;
             if (list.Count == 0) { step.Error = "OASIS 데이터 0건"; return; }
 
+            if (!ScopeReady(doc, NwdScope.Cable, step)) return;
             Report($"[{job.Name}] Cable — 모델 태그 인덱스 생성 중… ({list.Count:N0}건)");
             searcher.Reset();
             searcher.BuildIndexForTags(doc, new HashSet<string>(list.Select(c => c.CableNo)), NwdScope.Cable);
-            step.ScopeNote = searcher.LastScopeNote ?? "";
+            step.ScopeNote = ScopeNoteOf(searcher);
 
             // CableLineTab과 동일: 진척 신호가 전무한 맨 목록이면 단색 하이라이트 모드
             bool highlightMode = !list.Any(c => c.HasProgressSignal);
@@ -315,6 +330,37 @@ namespace NavisVisualizer.Services
         private void Report(string text)
         {
             try { Progress?.Invoke(text); } catch { }
+        }
+
+        /// <summary>
+        /// 스코프(모델 파일) 매핑 게이트. 미지정이면 이 공종을 건너뛰고 사유를 남긴다 — 전체 모델
+        /// fallback은 폐지됐으므로(§19) 여기서 멈추지 않으면 조용히 0건이 된다.
+        /// </summary>
+        private bool ScopeReady(Document doc, NwdScope scope, BatchStepResult step)
+        {
+            bool mapped;
+            try
+            {
+                mapped = EnsureScopeMapped != null
+                    ? EnsureScopeMapped(doc, scope)
+                    : ScopeMappingService.Resolve(doc, scope).IsMapped;
+            }
+            catch (Exception ex)
+            {
+                step.Error = "모델 파일 매핑 해석 실패: " + ex.Message;
+                return false;
+            }
+            if (mapped) return true;
+            step.Error = "모델 파일(스코프) 미지정 — Navisworks 플러그인 Overview 탭에서 이 공종의 파일을 지정하세요";
+            return false;
+        }
+
+        private static string ScopeNoteOf(ModelItemSearcher searcher)
+        {
+            string note = searcher.LastScopeNote ?? "";
+            if (searcher.LastScopeUnmapped)
+                note = ("스코프 미지정(0건) " + note).Trim();
+            return note;
         }
 
         /// <summary>%APPDATA%\NavisVisualizer\batch.log — 매일 돌린 이력이 남아야 "어제 왜 안 됐지"를 답할 수 있다.</summary>

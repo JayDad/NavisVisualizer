@@ -86,13 +86,13 @@ namespace NavisVisualizer.UI
         public OverviewStatus GetOverviewStatus()
         {
             int idx = 0;
-            bool anyBuilt = false, fellBack = false;
+            bool anyBuilt = false, unmapped = false;
             foreach (var s in new[] { _eqSearcher, _pipingSearcher, _eitEqSearcher, _cableSearcher })
             {
                 if (!s.IsIndexBuilt) continue;
                 anyBuilt = true;
                 idx += s.IndexedCount;
-                fellBack |= s.LastScopeFellBack;
+                unmapped |= s.LastScopeUnmapped;
             }
             return new OverviewStatus
             {
@@ -106,7 +106,7 @@ namespace NavisVisualizer.UI
                 UnmatchedText = _appliedOnce ? _unmatchedIds.Count.ToString("N0") : "-",
                 UnmatchedCount = _appliedOnce ? _unmatchedIds.Count : 0,
                 ScopeNote = ScopeNotes(),
-                ScopeFellBack = fellBack,
+                ScopeUnmapped = unmapped,
             };
         }
         /// <summary>null = 마스터 미구성(요소 파생 fallback).</summary>
@@ -1153,8 +1153,8 @@ namespace NavisVisualizer.UI
             _lblStats.Text = "모델 태그 인덱스 생성 중… (공종별)";
             Application.DoEvents();
 
-            // 공종마다 자기 태그 셋으로 자기 nwd 하나만 레벨 타겟 (general walk 없음, 하드 스코프
-            // = 그 파일에서만 — 미발견 시 전체 트리 안 훑고 0건 + 진단). 요소 있는 공종만 빌드.
+            // 공종마다 자기 태그 셋으로 매핑된 nwd만 레벨 타겟 (general walk 없음 — 미지정 시 전체 트리
+            // 안 훑고 0건 + 진단, 전 탭 공통 규칙). 요소 있는 공종만 빌드 + 미지정이면 파일 지정을 먼저 묻는다.
             BuildDiscipline(doc, SubSystemDiscipline.Equipment,    _eqSearcher,     NwdScope.Equipment);
             BuildDiscipline(doc, SubSystemDiscipline.Piping,       _pipingSearcher, NwdScope.Hydrotest);
             // EIT EQ는 넓은 Eit("EIT") 스코프 — EQ 파일이 필요하므로 트레이 전용 EitTray("TRAY")가 아님.
@@ -1168,9 +1168,8 @@ namespace NavisVisualizer.UI
             _progressBar.Style = ProgressBarStyle.Blocks;
         }
 
-        /// <summary>그 공종 요소의 ElementId 셋으로 지정 nwd 스코프만 레벨 타겟 인덱싱(하드 스코프).
-        /// 요소 0건이면 스킵. §2 리스크: 요소가 여러 깊이에 섞이면 첫 매칭 깊이만 인덱싱 —
-        /// general walk 시절과 매칭 건수 대조 필요(Windows).</summary>
+        /// <summary>그 공종 요소의 ElementId 셋으로 매핑된 nwd 스코프만 레벨 타겟 인덱싱.
+        /// 요소 0건이면 스킵. 스코프 미지정이면 ScopeGate가 파일 지정을 묻는다 (취소 시 0건).</summary>
         private void BuildDiscipline(Autodesk.Navisworks.Api.Document doc,
             SubSystemDiscipline disc, ModelItemSearcher searcher, NwdScope scope)
         {
@@ -1178,7 +1177,8 @@ namespace NavisVisualizer.UI
                 _elements.Where(el => el.Discipline == disc).Select(el => el.ElementId),
                 StringComparer.OrdinalIgnoreCase);
             if (ids.Count == 0) { searcher.Reset(); return; }
-            searcher.BuildIndexForTags(doc, ids, scope, hardScope: true);
+            ScopeGate.EnsureMapped(this, doc, scope);
+            searcher.BuildIndexForTags(doc, ids, scope);
         }
 
         private void BtnApply_Click(object sender, EventArgs e)
