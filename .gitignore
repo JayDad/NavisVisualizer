@@ -19,3 +19,6 @@ Thumbs.db
 
 # OASIS 연결 설정 (암호 포함 — 배포 시 별도 배치, oasis.config.sample만 커밋)
 oasis.config
+
+# 배포용 스테이징 (deploy.bat이 생성 — 빌드 산출물)
+dist/

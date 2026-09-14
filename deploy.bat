@@ -32,6 +32,16 @@ echo Copying DLLs to %NWPLUGIN_DIR%...
 mkdir "%NWPLUGIN_DIR%" 2>nul
 xcopy /Y "%SCRIPT_DIR%src\NavisVisualizer\bin\Release\net48\*.dll" "%NWPLUGIN_DIR%\"
 
+REM 3) Stage a share-ready folder: the built DLLs + install.bat. Hand dist\ to other
+REM    users - they run install.bat there, no .NET SDK and no NuGet on their PC.
+set DIST_DIR=%SCRIPT_DIR%dist
+echo Staging distributable folder: %DIST_DIR%
+mkdir "%DIST_DIR%" 2>nul
+xcopy /Y /Q "%SCRIPT_DIR%src\NavisVisualizer\bin\Release\net48\*.dll" "%DIST_DIR%\"
+copy /Y "%SCRIPT_DIR%install.bat" "%DIST_DIR%\" >nul
+
 echo.
 echo Done! Restart Navisworks Simulate 2022.
+echo To share with other users: give them the whole dist\ folder
+echo (they run install.bat inside it - no build required).
 pause
