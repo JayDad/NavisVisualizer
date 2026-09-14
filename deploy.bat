@@ -40,6 +40,22 @@ mkdir "%DIST_DIR%" 2>nul
 xcopy /Y /Q "%SCRIPT_DIR%src\NavisVisualizer\bin\Release\net48\*.dll" "%DIST_DIR%\"
 copy /Y "%SCRIPT_DIR%install.bat" "%DIST_DIR%\" >nul
 
+REM 3b) oasis.config is gitignored (it holds the DB password), so it is not in the
+REM     source zip. Pick it up from wherever this machine keeps it so that dist\ is
+REM     complete; without it other users get "OASIS settings file not found".
+set OASIS_SRC=
+if exist "%SCRIPT_DIR%oasis.config" set OASIS_SRC=%SCRIPT_DIR%oasis.config
+if not defined OASIS_SRC if exist "%SCRIPT_DIR%src\NavisVisualizer\oasis.config" set OASIS_SRC=%SCRIPT_DIR%src\NavisVisualizer\oasis.config
+if not defined OASIS_SRC if exist "%NWPLUGIN_DIR%\oasis.config" set OASIS_SRC=%NWPLUGIN_DIR%\oasis.config
+if defined OASIS_SRC (
+    echo Staging oasis.config from: %OASIS_SRC%
+    copy /Y "%OASIS_SRC%" "%DIST_DIR%\" >nul
+) else (
+    echo [WARN] oasis.config not found - dist\ will ship without it.
+    echo        Copy your oasis.config into dist\ before sharing, or users will see
+    echo        "OASIS connection settings file not found". See oasis.config.sample.
+)
+
 echo.
 echo Done! Restart Navisworks Simulate 2022.
 echo To share with other users: give them the whole dist\ folder

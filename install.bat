@@ -42,6 +42,21 @@ if errorlevel 1 (
     exit /b 1
 )
 
+rem --- 3b. oasis.config (OASIS/SQL connection settings) ----------------------
+rem      Looked up by the plugin as: %APPDATA%\NavisVisualizer\oasis.config first,
+rem      then the plugin folder. Shipping it next to the DLLs covers every user.
+if exist "%SRC%oasis.config" (
+    echo       oasis.config found - copying too
+    copy /Y "%SRC%oasis.config" "%NWPLUGIN_DIR%\" >nul
+) else (
+    echo.
+    echo [WARN] oasis.config is NOT in this folder.
+    echo        The plugin installs fine, but the [OASIS] buttons will report
+    echo        "OASIS connection settings file not found". Excel Import still works.
+    echo        Ask the person who shared this folder for oasis.config.
+    echo.
+)
+
 rem --- 4. unblock (files copied from a network drive or a downloaded zip are
 rem        marked "from another computer" and .NET refuses to load them) -------
 echo [2/3] Unblocking files (mark-of-the-web)...

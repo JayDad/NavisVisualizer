@@ -1037,6 +1037,15 @@ clash·export에 활용 가능.
   명령으로 실행됨(2026-09 실측: restore 줄이 통째로 증발 → NETSDK1004). 배치 파일에 한글 금지.
   **NU1900(취약점 DB 조회 실패)** 는 경고일 뿐이나 사내망에선 항상 뜨므로 루트 `Directory.Build.props`의
   `NuGetAudit=false`로 끔 (src·tests 양쪽 적용).
+- **사용자 배포(빌드 안 시키기, 2026-09)**: `deploy.bat`은 개발자용(빌드) — 다른 PC엔 .NET SDK도
+  NuGet도 없다. 빌드 후 `dist\`(산출 DLL + `install.bat` + `oasis.config`)가 자동 생성되니 그 폴더를
+  통째로 전달하고 상대는 `install.bat`만 실행한다. `install.bat`은 Navisworks 실행 중이면 중단하고,
+  복사 후 `Unblock-File`로 mark-of-the-web을 푼다(네트워크 드라이브/다운로드 zip에서 온 DLL은
+  차단돼 로드 실패). **`oasis.config`는 gitignore라 소스 zip에 없다** — `deploy.bat`이 루트 →
+  `src\NavisVisualizer\` → 설치된 플러그인 폴더 순으로 찾아 `dist\`에 넣고, 못 찾으면 경고한다.
+  플러그인은 `%APPDATA%\NavisVisualizer\oasis.config`(개인 오버라이드) → **DLL 폴더** 순으로 읽으므로
+  DLL 옆에 두는 것이 표준 배포다. 평문 암호이므로 공유 폴더 접근 권한 = DB 읽기 권한임에 유의
+  (SELECT 전용 계정 전제).
 - 새 탭 추가 시 그룹 결정 (매칭 전략 × NWD 스코프 2개 축 — 1번 항목 참조):
   - "digit 포함 DisplayName" 매칭이고 **대상 nwd 스코프도 같으면** 기존 인스턴스 재사용
     (`SpoolTagSearcher`=SPL→HYDROPKG / `HydroTagSearcher`=HYDROPKG / `ElecTagSearcher`=EIT /
