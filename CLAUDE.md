@@ -951,6 +951,12 @@ clash·export에 활용 가능.
   단, Autodesk 비의존 파일(DataModels/SqlLoader/SqlConnectionSettings/SourceComparer/DataSourcePanel)은
   `Microsoft.NETFramework.ReferenceAssemblies` 패키지로 리눅스에서도 net48 컴파일 검증 가능.
 - `oasis.config`(DB 암호 포함)는 커밋 금지(.gitignore 등록) — `oasis.config.sample`만 커밋.
+- **사내망 빌드(인터넷 차단) = NU1301 대응 (2026-09)**: `dotnet build`는 암묵적으로 restore를 돌려
+  api.nuget.org에 접속한다 — 새로 복사한 폴더(`obj/` 없음)에서 인터넷이 막히면 "서비스 인덱스를
+  로드할 수 없습니다"(NU1301)로 빌드 실패. 대응: 루트 `nuget.config`가 `packages-offline/`(.nupkg 3개
+  동봉)을 첫 소스로 쓰고, `deploy.bat`이 `dotnet restore --ignore-failed-sources` → `dotnet build
+  --no-restore` 순으로 돈다. **PackageReference 추가 시 그 .nupkg(+의존)를 `packages-offline/`에
+  같이 넣을 것** (`packages-offline/README.md`). 프록시가 있는 PC는 `HTTP_PROXY`/`HTTPS_PROXY` 환경변수로도 해결 가능.
 - 새 탭 추가 시 그룹 결정 (매칭 전략 × NWD 스코프 2개 축 — 1번 항목 참조):
   - "digit 포함 DisplayName" 매칭이고 **대상 nwd 스코프도 같으면** 기존 인스턴스 재사용
     (`SpoolTagSearcher`=SPL→HYDROPKG / `HydroTagSearcher`=HYDROPKG / `ElecTagSearcher`=EIT /
