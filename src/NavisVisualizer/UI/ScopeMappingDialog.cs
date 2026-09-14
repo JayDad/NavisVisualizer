@@ -6,6 +6,7 @@ using System.Windows.Forms;
 using Autodesk.Navisworks.Api;
 using NavisVisualizer.Searchers;
 using NavisVisualizer.Services;
+using Color = System.Drawing.Color;
 
 namespace NavisVisualizer.UI
 {
