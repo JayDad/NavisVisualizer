@@ -31,6 +31,22 @@ namespace NavisVisualizer.Services
             BatchDiscipline.Cable,
         };
 
+        /// <summary>
+        /// 실제 색칠 순서 (표시·저장 순서 <see cref="Ordered"/>와 별개). Hydrotest는 PKG(상위) 노드에
+        /// 덮어쓰기라 Spool(하위 스풀) 뒤에 칠하면 스풀 단계색(미착수 빨강 포함)을 전부 덮어 버린다 —
+        /// Navisworks 영구 색 override는 상위 노드에 걸면 하위 전체에 적용되기 때문. 그래서 굵은 단위
+        /// (Hydrotest)를 먼저, 세밀한 단위(Spool)를 나중에 칠해 스풀 색이 살아남게 한다.
+        /// 나머지 공종은 서로 다른 nwd라 순서 무관.
+        /// </summary>
+        public static readonly BatchDiscipline[] RunOrder =
+        {
+            BatchDiscipline.Hydrotest,
+            BatchDiscipline.Spool,
+            BatchDiscipline.Equipment,
+            BatchDiscipline.EitTray,
+            BatchDiscipline.Cable,
+        };
+
         public static string Label(BatchDiscipline d)
         {
             switch (d)

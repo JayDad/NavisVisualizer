@@ -1031,6 +1031,10 @@ DB단에서 추가된 테이블은 어느 철자를 썼는지 코드가 알 수 
 - `Services/BatchRunner.cs` — job당 `doc.OpenFile → SqlLoader.LoadXxx → searcher.BuildIndex… →
   engine.ApplyXxx → ExportNwdSilent`. 공종 5개(Spool/Hydrotest/Equipment/EIT Tray/Cable) — 각 탭의
   BuildIndex+BtnApply_Click과 **동일 호출**(EIT hardScope, Cable 하이라이트 모드 포함).
+  **색칠 순서 = `BatchDisciplineInfo.RunOrder`: Hydrotest → Spool → 나머지** (2026-09 사용자 실측 —
+  "미착수 빨강이 안 보임"): Hydrotest는 PKG 상위 노드에 override하고 Navisworks 영구 색은 상위에 걸면
+  하위 전체를 덮으므로, Spool을 먼저 칠하면 스풀 단계색(미착수 빨강)이 PKG 색으로 전부 덮였다.
+  굵은 단위 먼저·세밀한 단위 나중. 표시/저장 순서(`Ordered`)는 그대로.
   **Sub-system 제외**: 선택 목록·모드가 탭 상태라 "무엇을 칠할지" 정의가 없음 (사용자 결정 2026-09).
   색 = `ColorSetting.*Defaults` **전 단계** 고정(탭의 세션 색은 메모리뿐 — §21 미착수 빨강 기본값이
   여기서 곧바로 효과). 공종 하나 실패해도 나머지 계속, 하나라도 성공하면 저장. `batch.log` 이력 append.

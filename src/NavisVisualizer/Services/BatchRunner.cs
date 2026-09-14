@@ -147,7 +147,8 @@ namespace NavisVisualizer.Services
                 var engine = new ColorOverrideEngine(
                     spoolSearcher, hydroSearcher, elecSearcher, equipSearcher, cableSearcher);
 
-                foreach (var d in BatchDisciplineInfo.Ordered)
+                // 색칠 순서: Hydrotest(PKG 상위) → Spool(하위) — 스풀 색이 PKG 색에 덮이지 않게 (RunOrder 주석)
+                foreach (var d in BatchDisciplineInfo.RunOrder)
                 {
                     if (!disciplines.Contains(d)) continue;
                     var step = new BatchStepResult { Discipline = d };
