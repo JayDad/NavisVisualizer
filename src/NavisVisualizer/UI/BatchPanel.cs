@@ -37,7 +37,11 @@ namespace NavisVisualizer.UI
         private BatchConfig _config;
         private readonly List<JobRow> _rows = new List<JobRow>();
 
-        private TableLayoutPanel _jobsHost;
+        private Panel _jobsHost;
+
+        // job 행 높이 = 이름행 24 + 공종 체크 2행(3열 고정) 48 + 여백. 자동 크기(AutoSize) 중첩은
+        // 도크 패널 폭이 0인 첫 레이아웃 시점에 0 높이로 접히는 사례가 있어 전부 명시 높이로 둔다.
+        private const int JobRowHeight = 80;
         private DateTimePicker _dtpReference;
         private Label _lblConfigPath;
         private Label _lblOutput;
@@ -146,19 +150,12 @@ namespace NavisVisualizer.UI
             };
             layout.Controls.Add(header);
 
-            // 프로젝트(job) 목록
-            _jobsHost = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                ColumnCount = 1,
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            };
-            _jobsHost.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            // 프로젝트(job) 목록 — 높이는 BuildJobRows가 job 수로 명시 계산
+            _jobsHost = new Panel { Dock = DockStyle.Fill, AutoSize = false, Height = 30 };
             layout.Controls.Add(_jobsHost);
 
             // 옵션 행: 기준일 + 저장 폴더
-            var optRow = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = true, Padding = new Padding(0, 6, 0, 0) };
+            var optRow = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = false, Height = 32, WrapContents = false, Padding = new Padding(0, 6, 0, 0) };
             optRow.Controls.Add(new Label { Text = "기준일", AutoSize = true, Padding = new Padding(0, 6, 4, 0) });
             _dtpReference = new DateTimePicker { Format = DateTimePickerFormat.Short, Width = 110, Value = DateTime.Today };
             _tip.SetToolTip(_dtpReference, "Spool/Hydrotest/Equipment/Cable의 단계 판정 기준일 (EIT Tray는 날짜 없음 — 현재 상태).");
@@ -168,7 +165,8 @@ namespace NavisVisualizer.UI
             layout.Controls.Add(optRow);
 
             // 버튼 행
-            var btnRow = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = true, Padding = new Padding(0, 4, 0, 0) };
+            // 좁은 도크 패널(≈320px)에서는 두 줄로 감기므로 두 줄 높이를 확보 (넓은 독립 창에서는 한 줄 + 여백)
+            var btnRow = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = false, Height = 76, WrapContents = true, Padding = new Padding(0, 4, 0, 0) };
             _btnRun = new Button
             {
                 Text = "▶ 실행",
@@ -236,18 +234,16 @@ namespace NavisVisualizer.UI
         {
             _jobsHost.SuspendLayout();
             _jobsHost.Controls.Clear();
-            _jobsHost.RowStyles.Clear();
             _rows.Clear();
 
             if (_config == null || _config.Jobs.Count == 0)
             {
-                var none = new Label
+                _jobsHost.Controls.Add(new Label
                 {
                     Text = "등록된 프로젝트가 없습니다 — [설정 파일 열기]로 batch.config에 [job:이름] 섹션을 추가하세요.",
-                    AutoSize = true, ForeColor = ErrColor, Dock = DockStyle.Fill,
-                };
-                _jobsHost.Controls.Add(none);
-                _jobsHost.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                    AutoSize = false, Height = 30, ForeColor = ErrColor, Dock = DockStyle.Top,
+                });
+                _jobsHost.Height = 34;
                 _jobsHost.ResumeLayout();
                 return;
             }
@@ -255,25 +251,44 @@ namespace NavisVisualizer.UI
             foreach (var job in _config.Jobs)
             {
                 var row = new JobRow { Job = job };
-                var box = new TableLayoutPanel
+                var box = new Panel { Dock = DockStyle.Top, Height = JobRowHeight, Padding = new Padding(0, 2, 0, 2) };
+
+                // 2행: 공종 체크박스 — 3열 × 2행 고정 격자 (폭과 무관하게 높이 일정)
+                var grid = new TableLayoutPanel
                 {
                     Dock = DockStyle.Fill,
-                    ColumnCount = 1,
-                    AutoSize = true,
-                    AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                    Padding = new Padding(0, 2, 0, 4),
-                    CellBorderStyle = TableLayoutPanelCellBorderStyle.None,
+                    ColumnCount = 3,
+                    RowCount = 2,
+                    Padding = new Padding(18, 0, 0, 0),
                 };
-                box.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+                for (int c = 0; c < 3; c++) grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110));
+                grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));
+                grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));
+                int i = 0;
+                foreach (var d in BatchDisciplineInfo.Ordered)
+                {
+                    var cb = new CheckBox
+                    {
+                        Text = BatchDisciplineInfo.Label(d),
+                        Checked = job.Disciplines.Contains(d),
+                        AutoSize = true,
+                        Margin = new Padding(0, 2, 4, 0),
+                    };
+                    row.Disciplines[d] = cb;
+                    grid.Controls.Add(cb, i % 3, i / 3);
+                    i++;
+                }
+                box.Controls.Add(grid);
 
-                // 1행: ☑ 이름 + 모델 파일명
-                var line1 = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = true };
+                // 1행: ☑ 이름 + 모델 파일명 (Dock=Top이 Fill보다 먼저 배치되도록 나중에 추가)
+                var line1 = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 24, AutoSize = false, WrapContents = false };
                 row.Enabled = new CheckBox
                 {
                     Text = job.Name,
                     Checked = job.Enabled,
                     AutoSize = true,
                     Font = new Font(Font, FontStyle.Bold),
+                    Margin = new Padding(0, 2, 0, 0),
                 };
                 line1.Controls.Add(row.Enabled);
 
@@ -293,25 +308,6 @@ namespace NavisVisualizer.UI
                 line1.Controls.Add(row.ModelLabel);
                 box.Controls.Add(line1);
 
-                // 2행: 공종 체크박스
-                var line2 = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = true, Padding = new Padding(18, 0, 0, 0) };
-                foreach (var d in BatchDisciplineInfo.Ordered)
-                {
-                    var cb = new CheckBox
-                    {
-                        Text = BatchDisciplineInfo.Label(d),
-                        Checked = job.Disciplines.Contains(d),
-                        AutoSize = true,
-                        Margin = new Padding(0, 0, 8, 0),
-                    };
-                    row.Disciplines[d] = cb;
-                    line2.Controls.Add(cb);
-                }
-                box.Controls.Add(line2);
-                box.RowCount = 2;
-                box.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-                box.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-
                 // 공종 체크 없이 job만 켜는 실수 방지: job 체크 시 공종이 하나도 없으면 안내
                 row.Enabled.CheckedChanged += (s, e) =>
                 {
@@ -319,11 +315,12 @@ namespace NavisVisualizer.UI
                         SetStatus($"[{job.Name}] 공종을 하나 이상 체크하세요.", WarnColor);
                 };
 
+                // Dock=Top은 z-order 역순으로 쌓이므로 추가 순서(위→아래)를 지키려면 BringToFront
                 _jobsHost.Controls.Add(box);
-                _jobsHost.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                box.BringToFront();
                 _rows.Add(row);
             }
-            _jobsHost.RowCount = _rows.Count;
+            _jobsHost.Height = _rows.Count * JobRowHeight + 4;
             _jobsHost.ResumeLayout();
         }
 
