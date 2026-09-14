@@ -135,6 +135,14 @@ namespace NavisVisualizer.UI
             // 라디오 전환은 절대 자동 재적용하지 않는다(§6) — 리스트/통계만 새 소스로 갱신.
             _srcPanel.ActiveSourceChanged += (s, e) => ApplyActiveSourceData();
             _srcPanel.CompareClicked      += (s, e) => ExportComparison();
+            // 공사(전역) 변경 → 로드된 OASIS 데이터는 이전 공사 기준. 자동 재로드는 하지 않고
+            // (네트워크 대기로 UI가 멈추므로) 3D 상태만 stale로 표시한다. 활성 소스가
+            // Excel이면 공사와 무관하므로 아무것도 하지 않는다(거짓 경고 방지).
+            _srcPanel.ProjectChanged      += (s, e) =>
+            {
+                if (_srcPanel.ActiveSource == TabDataSource.Oasis && _srcPanel.IsOasisProjectStale)
+                    _applyState.MarkStale("공사 변경 — OASIS 재로드 필요");
+            };
 
             var datePanel = new FlowLayoutPanel { Dock = DockStyle.Fill, Height = 28, AutoSize = false };
             datePanel.Controls.Add(new Label { Text = "기준일:", AutoSize = true, Padding = new Padding(0, 4, 0, 0) });
@@ -433,9 +441,9 @@ namespace NavisVisualizer.UI
                 var settings = SqlConnectionSettings.Load();
                 var list = SqlLoader.LoadCable(settings);
                 _cablesBySource[TabDataSource.Oasis] = list;
-                // EIT_Cable엔 프로젝트 컬럼이 없어(§9) 전체 로드 — 라벨에 프로젝트 미표기.
+                // EIT_Cable에도 프로젝트 컬럼이 DB단에서 추가됨(2026-07) → 공사 필터 적용.
                 _srcPanel.SetLoaded(TabDataSource.Oasis, list.Count,
-                    $"{settings.Database} · {DateTime.Now:HH:mm}");
+                    $"{settings.Database}/{ProjectContext.CurrentDisplay} · {DateTime.Now:HH:mm}");
                 if (_srcPanel.ActiveSource == TabDataSource.Oasis)
                     ApplyActiveSourceData();
             }

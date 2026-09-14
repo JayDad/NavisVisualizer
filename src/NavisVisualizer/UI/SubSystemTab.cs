@@ -136,6 +136,11 @@ namespace NavisVisualizer.UI
         private Label _lblOasis;
         // 로드 요약이 라벨 폭을 넘으면 잘리므로 전체 문구를 툴팁으로 노출
         private readonly ToolTip _loadTip = new ToolTip { AutoPopDelay = 15000 };
+        private ProjectSelector _projectSelector;
+        // OASIS 로드 시점의 공사코드 + 그때의 라벨 원문 — 공사 전환 시 stale 표시/복원용.
+        // Excel 형상 소스(_paletteMode)는 공사와 무관하므로 추적 대상이 아니다.
+        private string _oasisProjectCode;
+        private string _oasisLabelText = "";
         private GroupBox _modeGroup;          // 시각화 모드 그룹 (팔레트 모드에선 숨김)
         private RadioButton _rdoByStage;
         private RadioButton _rdoByProgress;
@@ -168,6 +173,9 @@ namespace NavisVisualizer.UI
         private static readonly Color DotLoaded = Color.FromArgb(0, 160, 60);
         private static readonly Color DotEmpty = Color.FromArgb(170, 170, 170);
         private static readonly Color DotFailed = Color.FromArgb(200, 40, 40);
+        // 공사 전환으로 "이전 공사 기준" 상태 — 실패(빨강)와 구분되는 주황
+        // (ApplyStatePanel·DataSourcePanel의 stale 색과 동일 언어).
+        private static readonly Color DotStale = Color.FromArgb(190, 90, 0);
         /// <summary>좌측 목록에서 이미 우측에 담긴 행의 배경.</summary>
         private static readonly Color PickedBack = Color.FromArgb(223, 240, 230);
 
@@ -224,6 +232,11 @@ namespace NavisVisualizer.UI
             loadPanel.Controls.Add(btnExcel);
             loadPanel.Controls.Add(_dotOasis);
             loadPanel.Controls.Add(_lblOasis);
+
+            // 공사 선택 — 이 탭은 DataSourcePanel을 쓰지 않으므로(OASIS 정식 + Excel 형상이라는
+            // 다른 소스 구성) 셀렉터를 직접 배치한다. 선택 자체는 전역 공유라 다른 탭과 동기된다.
+            _projectSelector = new ProjectSelector();
+            _projectSelector.ProjectChanged += (s, e) => OnProjectChanged();
 
             // ----- 시각화 모드 + 기준일 -----
             _modeGroup = new GroupBox { Text = "시각화 모드", Dock = DockStyle.Fill, Height = 50 };
@@ -305,6 +318,7 @@ namespace NavisVisualizer.UI
             _lblStats = new Label { Dock = DockStyle.Fill, Text = "로드된 데이터 없음", AutoSize = false, Height = 110 };
 
             layout.Controls.Add(loadPanel);
+            layout.Controls.Add(_projectSelector);
             layout.Controls.Add(_modeGroup);
             layout.Controls.Add(_stageColorLabel);
             layout.Controls.Add(_stagePanel);
@@ -608,7 +622,9 @@ namespace NavisVisualizer.UI
                 RebuildNames(out int outsideMaster);
                 AfterElementsLoaded();
 
-                string prj = string.IsNullOrEmpty(settings.ProjectNo) ? "전체" : settings.ProjectNo;
+                // 코드만이 아니라 공사명까지 표기 ("Trion (Q557)") — 어느 공사 데이터를
+                // 보고 있는지가 라벨 한 줄로 확정되도록.
+                string prj = ProjectContext.CurrentDisplay;
                 _loadLabel = $"OASIS {settings.Database}/{prj} · {DateTime.Now:HH:mm}";
                 _dotOasis.ForeColor = DotLoaded;
                 _lblOasis.ForeColor = Color.Black;
@@ -618,14 +634,43 @@ namespace NavisVisualizer.UI
                     + (disciplineNotes.Count > 0 ? " · " + string.Join(" · ", disciplineNotes) : "");
                 // 문구가 길어 창 폭에 잘릴 수 있음 — 전체 문구는 마우스 오버 툴팁으로 제공
                 _loadTip.SetToolTip(_lblOasis, _lblOasis.Text);
+                // 이 데이터가 어느 공사 기준인지 기록 (공사 전환 시 stale 판정 기준)
+                _oasisProjectCode = ProjectContext.CurrentCode;
+                _oasisLabelText = _lblOasis.Text;
             }
             catch (Exception ex)
             {
                 _dotOasis.ForeColor = DotFailed;
                 _lblOasis.ForeColor = DotFailed;
                 _lblOasis.Text = "로드 실패";
+                _oasisProjectCode = null;   // 실패분은 어느 공사 기준도 아님
                 MessageBox.Show($"OASIS 로드 실패:\n{ex.Message}", "오류", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
+        }
+
+        /// <summary>
+        /// 공사(전역)가 바뀌었을 때. 로드된 OASIS 요소는 이전 공사 기준이므로 표시만 바꾸고
+        /// 자동 재로드는 하지 않는다(네트워크 대기로 UI가 멈추는 것을 사용자 의도 없이
+        /// 일으키지 않음, §6). Excel 형상 모드(_paletteMode)는 공사와 무관해 건드리지 않는다.
+        /// </summary>
+        private void OnProjectChanged()
+        {
+            if (_paletteMode || _oasisProjectCode == null) return;
+
+            if (string.Equals(_oasisProjectCode, ProjectContext.CurrentCode, StringComparison.OrdinalIgnoreCase))
+            {
+                // 원래 공사로 되돌아옴 — 경고 해제
+                _dotOasis.ForeColor = DotLoaded;
+                _lblOasis.ForeColor = Color.Black;
+                _lblOasis.Text = _oasisLabelText;
+                return;
+            }
+
+            string loadedAs = ProjectCatalog.DisplayFor(ProjectContext.Catalog, _oasisProjectCode);
+            _dotOasis.ForeColor = DotStale;
+            _lblOasis.ForeColor = DotStale;
+            _lblOasis.Text = $"⚠ {loadedAs} 기준 · [OASIS 로드] 재실행 필요";
+            _applyState.MarkStale("공사 변경 — OASIS 재로드 필요");
         }
 
         /// <summary>
