@@ -11,8 +11,15 @@ database=TEST_NAVIS
 user=navis_ro
 password=CHANGE_ME
 
-# PJTNO/PRJTNO 필터. 비우면 전체 프로젝트 로드.
+# 시작 시 선택될 공사(PJTNO/PRJTNO). 비우면 "전체"로 시작한다.
+# 실행 중에는 각 탭의 공사 드롭다운으로 바꿀 수 있으며, 그 선택은 저장되지 않는다
+# (Navisworks를 다시 열면 이 값으로 돌아옴).
 project=Q557
+
+# 드롭다운에 표시할 공사명. Q557=Trion, Q558=Ruya는 코드에 내장돼 있어 안 적어도 된다.
+# 공사가 추가되면 아래 형식으로 한 줄 넣으면 재빌드 없이 드롭다운에 나온다.
+# (공사명은 DB에 없다 — 이 파일이 이름의 원천.)
+#project.Q559=공사명
 
 # Windows 인증을 쓰려면 아래 주석 해제 (user/password 무시됨)
 #integrated=true

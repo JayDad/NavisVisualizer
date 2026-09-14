@@ -67,6 +67,8 @@ BuildIndexForTags / BuildIndexForBoxes에 `NwdScope` 파라미터, null = 전체
   fallback 발동 여부는 매칭 Status CSV의 `인덱스 스코프` 행으로 확인
 - Cable node box nwd 파일명 규약 확정 시 `NwdScope.Cable` 키워드 추가 (현재는 0건 fallback으로 동작)
 - 파일명 규약 변경 시 `NwdScope`의 키워드 + `NwdScopeTests`를 같이 갱신할 것
+- **위 규약은 Trion(Q557) 전용** — Ruya(Q558)는 파일명 체계가 달라 Structure 외 전 공종이
+  미매칭이다(EIT Tray·Sub-system은 하드 스코프라 0건). 실측 결과·반영안은 §19 참조
 - Str(구조)은 `NwdScope.Structure`(키워드 STR)로 구현됨 — Structure 탭(§17).
   PIPSupport는 플러그인 신설 시 키워드(PIPSUPPORT)로 스코프 추가
 
@@ -332,7 +334,9 @@ EIT_Cable, EIT_EQ, EIT_Route, EIT_Tray, Mech_EQ, Piping_HydrotestPKG, Piping_Spo
   `SqlLoader.LoadCable` 철자 교체 + 표시 필드(FROM/TO MODULE·EQUIP, TYPE/CORE/SIZE, OUT DIA,
   TRAY SYS, SYSTEM, Pulling %) 매핑 + `CableLineTab` DataSourcePanel 듀얼소스 배선 완료.
   `PULLING LTH`는 샘플상 포설 실적 길이로 보이나(0/189=0%, 37/37=100%) 오너 확정 전까지 표시 전용
-  유지(§13-6). 프로젝트 컬럼 없음 → 전체 로드. 미사용: INSTALL_MODULE, SYSTEM DES, SUB-SYSTEM(+DES).
+  유지(§13-6). 미사용: INSTALL_MODULE, SYSTEM DES, SUB-SYSTEM(+DES).
+  **프로젝트 컬럼은 DB단 추가 완료(2026-07 사용자 확정 — 전 테이블 보유)** → 공사 필터 적용.
+  철자는 하드코딩하지 않고 `ProjectColumnResolver`가 테이블별로 해석한다(§20).
   **노드단위 집계는 폐기 — Cable(Node) 탭 삭제(2026-07 사용자 결정)**: `EIT_Route`에 홉 순서
   (SEQ)·NodeId 변환이 없어 개통 불가였고 형상 탭이 역할을 대체. `ApplyCable`/`CableNodeData`/
   `CableStage`/`LoadCablePull`/노드 필터포커스·박스숨김 일괄 제거. Tools 탭 box 중복 검사(§5)와
@@ -852,7 +856,119 @@ EIT/Sub-system)으로 일반화**.
 - **Windows 검증**: 공종별 규모에서 투명 dim vs 숨김 체감(프레임레이트), 붙여넣기 파싱, 리스트
   ID ↔ 모델 노드명 정규화(케이블은 `NormalizeCableNo` 등 기존 규칙 재사용).
 
-### 19. 일괄 갱신(배치) — "아침에 딸각" (구현됨 2026-09 — Windows 검증 대기)
+### 19. Ruya(Q558) NWD 파일 규약 비호환 — 기록만 (미구현, 2026-07 사용자 결정)
+
+**배경**: 공사 선택 드롭다운으로 Q557/Q558 DB 전환은 되지만, **NWD 파일명 규약이 공사마다
+다르다**. `NwdScope` 키워드는 Trion 규약(§1)에 맞춰져 있어 Ruya 모델에는 대부분 안 걸린다.
+**Trion이 정상 동작하므로 지금은 반영하지 않고 기록만 남긴다** — Ruya 모델 작업이 실제로
+시작될 때 아래 안을 착수 근거로 쓸 것.
+
+**Ruya 파일 구성 (2026-07 사용자 제공)**
+```
+BJ-RUY-ELE.nwd     Electrical            BJ-RUY-ARC.nwd   Architecture
+BJ-RUY-INS.nwd     Instrumentation       BJ-RUY-HVA.nwd   HVAC
+BJ-RUY-TEL.nwd     Telecommunication     BJ-RUY-HSE.nwd   HSE
+BJ-RUY-SPOOL.nwd   Piping Spool          BJ-RUY-MI.nwd    Mech. Interface / Misc.
+BJ-RUY-MEC.nwd     Mechanical            BJ-RUY-SUP.nwd   Support
+BJ-RUY-STR.nwd     Structural
+```
+Trion과의 구조적 차이: ① 공종 코드 자체가 다름(SPL→SPOOL, MEQ→MEC) ② **Trion의 EIT 하나가
+ELE/INS/TEL 3개로 분리**(EIT = Electrical·Instrumentation·Telecom이므로 의미상 대응) ③
+**Hydrotest·Cable 전용 파일 없음** ④ Trion에 없는 공종(HSE/HVA/ARC/MI) 존재 ⑤ federated
+컨테이너 파일이 목록에 없음(2단계 매칭이 양쪽 다 대응하므로 그 자체는 무해).
+
+**현재 코드 매칭 결과** (실제 규칙 = 파일명만·대소문자 무시·부분일치로 검증)
+
+| 탭 | Ruya | 사유 |
+|----|------|------|
+| Structure | ✅ 정상 | `STR` → `BJ-RUY-STR.nwd` (유일하게 그대로 동작) |
+| Spool | ⚠️ 전체 fallback | **`SPL`은 `SPOOL`에 부분일치 안 됨** (S-P-L ≠ S-P-O-O-L) |
+| Equipment | ⚠️ 전체 fallback | `MEQ` ≠ `MEC` |
+| Hydrotest | ⚠️ 전체 fallback | HYDROPKG 파일 없음 |
+| Cable | ⚠️ 전체 fallback | Cable 파일 없음 (ELE 안에 있을 것으로 추정) |
+| **EIT Tray** | ❌ **0건(탭 무력화)** | `TRAY`→`EIT` 체인 전멸 + **하드 스코프라 전체 fallback 없음** |
+| **Sub-system** | ❌ **0건(탭 무력화)** | 공종별 4개 인덱스가 전부 하드 스코프 → 동일 |
+
+⚠️는 동작은 하되 **11개 파일 전체를 COM 순회**(HSE·ARC·HVAC 포함)해 느리다. ❌ 2개는
+§15의 하드 스코프 fail-fast 설계상 조용히 0건이 된다 — 다만 **Overview 탭 NWD Preflight가
+"매칭 0건 (하드 스코프)"로 노출**하므로 원인 추적은 가능하다.
+
+**반영 시 안 — 키워드 합집합 (검증 완료: Trion 오탐 0, 기존 매칭 전부 유지)**
+```
+Spool      SPL   + SPOOL          Equipment  MEQ + MEC
+Eit        EIT   + ELE,INS,TEL    EitTray    TRAY + ELE
+Cable      CABLE + ELE            Structure  STR (변경 없음)
+```
+공사별 스코프 프로파일(드롭다운 선택과 연동)도 검토했으나 **합집합을 우선 추천** — 스코프는
+"열린 모델"의 속성인데 드롭다운은 "DB 공사"라, 둘을 묶으면 Ruya를 고른 채 Trion 모델을 연
+경우 스코프가 조용히 비는 새 실패 모드가 생긴다. 공사가 3개 이상으로 늘어 짧은 토큰
+(`ELE`/`INS`/`MEC`)이 충돌하기 시작하면 그때 프로파일 또는 config 기반으로 전환.
+
+**미확정 (Ruya 모델 확보 후 확인)**
+- **Hydrotest는 공사 진행 중반 이후 추가 예정**(2026-07 사용자) — 파일이 생기면 그때 키워드
+  확정. 그전까지 Ruya Hydrotest 탭은 대상 자체가 없음.
+- Tray와 Cable이 `BJ-RUY-ELE.nwd` 안에 있는지 (위 안의 전제). 아니면 EitTray/Cable 키워드 재조정.
+- `BJ-RUY-SUP.nwd`(Support)는 대응 탭 없음 — Trion PIPSupport와 동일하게 스코프만 후보.
+
+**더 큰 리스크 — 스코프보다 노드 이름 규약**
+스코프는 "어느 **파일**을 뒤질지"만 정한다. 실제 매칭은 그 안의 **노드 DisplayName ↔ DB ID
+정확 일치**이므로, **스코프를 고쳐도 Ruya의 노드 명명 규약이 Trion과 다르면 매칭 0건**이다.
+착수 순서는 반드시 ① Ruya 모델을 열어 고급 진단 탭으로 실제 DisplayName 덤프 → ② 규약 확인
+→ ③ 스코프/정규화 확정. 파일명만 보고 키워드를 먼저 고치면 "스코프는 잡혔는데 0건"이 되어
+원인 분리가 어려워진다.
+
+**착수 시 체크리스트**: `NwdScope` 키워드 + `NwdScopeTests` 동시 갱신(개발 규칙) / Overview
+Preflight로 공종별 스코프 발견 여부 확인 / 하드 스코프 2탭(EIT Tray·Sub-system)을 먼저 검증 /
+Trion 매칭 건수 회귀 대조.
+
+### 20. 공사(프로젝트) 선택 드롭다운 — 구현됨 2026-07 (Windows 검증 대기)
+
+OASIS 로드 시 적용할 공사를 탭 드롭다운에서 고른다. 표기는 `Trion (Q557)` 형식.
+**Excel import는 무관** — 파일이 곧 데이터라 공사 필터가 의미 없다.
+
+**전역 공유 + 세션 한정**: 선택은 `Loaders/ProjectContext`(static)에 있고 한 탭에서 바꾸면
+전 탭이 따라온다("지금 이 공사를 본다"는 한 개념 — 탭마다 다른 공사가 섞여 오독되는 사고를
+원천 차단). **저장하지 않는다**(사용자 결정) — 재시작하면 `oasis.config`의 `project=`로 복귀.
+
+**목록 구성 (뒤가 앞을 덮어씀)**
+1. **코드 내장** `ProjectCatalog.BuiltIn` = Q557 Trion / Q558 Ruya — **DB·config 없이도 즉시**
+   선택 가능. 목록을 DB에 종속시키면 접속 실패 시 아무것도 못 고르게 되므로 의도적으로 분리.
+2. `oasis.config`의 `project.<코드>=<이름>` — 공사 추가 시 **재빌드 불필요**
+3. `[목록 새로고침]` — DB `DISTINCT`로 실재 코드 발견·병합. 공사명은 DB에 없으므로(프로젝트
+   마스터 테이블 부재) 코드만 채우고 이름 미등록은 `(이름 미등록)`으로 표시
+
+**필터 컬럼 해석 = `Loaders/ProjectColumnResolver`** (하드코딩 금지)
+철자가 테이블마다 갈린다(Piping 계열 `PRJTNO` / EQ·Summary 계열 `PJTNO`). 게다가 나중에
+DB단에서 추가된 테이블은 어느 철자를 썼는지 코드가 알 수 없다 → `INFORMATION_SCHEMA` 1회
+조회(DB당 캐시)로 추측을 없앤다. 조회 실패 시에만 실측 기반 `KnownFallback`으로 degrade.
+**2026-07 사용자 확정: 전 테이블에 프로젝트 컬럼 추가 완료** → 구 "EIT_Cable/EIT_EQ는 컬럼
+없음" 서술은 폐기(§9 Cable 항목 갱신됨). 코드는 무수정으로 그대로 필터가 걸린다 — 해석
+방식이라 철자를 몰라도 동작.
+
+**컬럼이 없으면 조용히 넘어가지 않고 던진다**: 공사가 선택됐는데 그 테이블에 프로젝트 컬럼이
+없으면 예외 + 안내("DB에 컬럼을 추가하거나 '전체'를 선택하세요"). **다른 공사 데이터를 그
+공사인 양 조용히 칠하는 것이 최악**이라는 판단 — `SqlLoader`의 "조용히 빈 값 문제 원천 차단"
+원칙과 동일. 전 테이블 컬럼 보유 후엔 사실상 안전망.
+
+**전환 시 자동 재로드 안 함 (확정)**: 공사를 바꾸면 로드된 데이터를 지우지 않고 **경고 표시만**
+(`⚠ {이전 공사} 기준 · [OASIS 로드] 재실행 필요` + `ApplyStatePanel` stale). 자동 재로드는
+탭 6개가 동시에 SQL을 쳐서 수 초간 UI가 멈춘다. 잘못 눌렀다 되돌리면 표시도 원복.
+
+**잔여 / 미결**
+- **`전체`(WHERE 없음) 선택 시 공사 간 ID 충돌 위험**: 로더가 전부 ID 기준 first-wins 중복
+  제거(`seen.Add`)를 하므로, 두 공사에 같은 ID가 있으면 뒤에 읽힌 행이 **조용히 버려진다**.
+  매칭은 노드 이름으로 하므로 최악의 경우 Trion 모델에 Ruya 날짜가 칠해질 수 있다(누락보다
+  나쁜 오염). SQL 경로는 Excel 경로와 달리 **중복 건수를 보고하지 않는다**. 보완안 2개:
+  ① `project=` 미지정 시 기본값을 `전체` 대신 첫 공사로, ② SQL 로더도 중복 건수를 라벨에
+  표기(`전체 · 중복 N건 제외`). **실제 ID 충돌 여부 실측 확인이 선행** — 스풀 번호가
+  라인번호 기반이면 공사가 달라도 충돌 여지가 있다.
+- `전체` 항목 자체는 유지 — 프로젝트 컬럼이 아직 없는 테이블이 생겼을 때 볼 유일한 수단.
+- **NWD 스코프와는 무관** — 드롭다운은 "DB 공사"이고 스코프는 "열린 모델"의 속성이라 묶지
+  않았다(묶으면 Ruya를 고른 채 Trion 모델을 연 경우 스코프가 조용히 비는 새 실패 모드). §19 참조.
+- Windows 검증: `INFORMATION_SCHEMA` 조회 권한, `EIT_EQ` 철자 자동 해석, 탭 간 전역 동기화,
+  `ProjectContext.Changed`(static 이벤트) 구독 해제가 탭 Dispose에서 정상 동작하는지.
+
+### 21. 일괄 갱신(배치) — "아침에 딸각" (구현됨 2026-09 — Windows 검증 대기)
 
 **배경(사용자 요구)**: 매일 아침 잊지 않고 "OASIS 최신 실적 → 모델 색칠 → 다른 이름 저장"을
 버튼 한 번으로. 프로젝트(모델 파일) 2개, **날마다 돌리고 싶은 공종이 달라** 실행 시 체크박스로
@@ -872,7 +988,7 @@ EIT/Sub-system)으로 일반화**.
   engine.ApplyXxx → ExportNwdSilent`. 공종 5개(Spool/Hydrotest/Equipment/EIT Tray/Cable) — 각 탭의
   BuildIndex+BtnApply_Click과 **동일 호출**(EIT hardScope, Cable 하이라이트 모드 포함).
   **Sub-system 제외**: 선택 목록·모드가 탭 상태라 "무엇을 칠할지" 정의가 없음 (사용자 결정 2026-09).
-  색 = `ColorSetting.*Defaults` **전 단계** 고정(탭의 세션 색은 메모리뿐 — §19 미착수 빨강 기본값이
+  색 = `ColorSetting.*Defaults` **전 단계** 고정(탭의 세션 색은 메모리뿐 — §21 미착수 빨강 기본값이
   여기서 곧바로 효과). 공종 하나 실패해도 나머지 계속, 하나라도 성공하면 저장. `batch.log` 이력 append.
 - **job마다 searcher 5개 + 엔진을 새로 생성**: Navisworks는 Document 인스턴스를 재사용하며 파일만
   갈아끼우므로, 이전 job의 painted 컬렉션을 든 엔진으로 `ResetModule`을 부르면 죽은 ModelItem을

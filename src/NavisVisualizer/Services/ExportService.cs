@@ -59,7 +59,7 @@ namespace NavisVisualizer.Services
         }
 
         /// <summary>
-        /// 대화상자 없는 NWD 저장 — 일괄 갱신(배치)용 (CLAUDE.md §19). 무인 실행에서 MessageBox는
+        /// 대화상자 없는 NWD 저장 — 일괄 갱신(배치)용 (CLAUDE.md §21). 무인 실행에서 MessageBox는
         /// 곧 정지이므로 precheck 안내·예외를 전부 <paramref name="error"/> 문자열로 돌려주고
         /// (예외는 ErrorLog에도 기록) 호출부가 결과 화면/로그에 싣는다. 동작은 ExportNwd와 동일.
         /// </summary>

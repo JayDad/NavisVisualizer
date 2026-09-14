@@ -8,7 +8,7 @@ using NavisVisualizer.Services;
 namespace NavisVisualizer.Tests
 {
     /// <summary>
-    /// batch.config 파싱/직렬화/출력 경로 규칙 (CLAUDE.md §19). Autodesk 비의존.
+    /// batch.config 파싱/직렬화/출력 경로 규칙 (CLAUDE.md §21). Autodesk 비의존.
     /// 사용자가 손으로 고치는 파일이라 느슨한 표기(대소문자·별칭·공백)를 받아주는지와,
     /// "마지막 선택 기억"이 라운드트립으로 보존되는지를 고정한다.
     /// </summary>

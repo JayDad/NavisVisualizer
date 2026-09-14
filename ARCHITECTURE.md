@@ -239,7 +239,7 @@ Apply:
   하위 전파. 적용/숨김 단위: 균일 영역 = 레벨1 통째, 부분 선택 = 체크된 레벨2 단위
 - 행 ⊙ = 3D 선택·포커스 (Navisworks 선택 하이라이트)
 
-**일괄 갱신 탭 (`UI/BatchPanel.cs` + `Services/BatchRunner.cs`/`BatchConfig.cs`, CLAUDE.md §19):**
+**일괄 갱신 탭 (`UI/BatchPanel.cs` + `Services/BatchRunner.cs`/`BatchConfig.cs`, CLAUDE.md §21):**
 - `%APPDATA%\NavisVisualizer\batch.config`에 등록된 프로젝트(모델 파일)를 체크 + 공종 체크박스
   (Spool/Hydrotest/Equipment/EIT Tray/Cable) → [실행] = job마다 `doc.OpenFile` → `SqlLoader` →
   인덱스 → `ColorOverrideEngine.Apply*`(기본 팔레트·전 단계) → `ExportNwdSilent`(다른 이름 저장).

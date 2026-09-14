@@ -34,7 +34,7 @@ FROM [Navis].[Piping_Spool]";
             var spools = new List<SpoolData>();
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            ExecuteReader(settings, baseSql, "PRJTNO", r =>
+            ExecuteReader(settings, baseSql, "Piping_Spool", r =>
             {
                 string spoolId = GetString(r, "SPOOL NO");
                 if (string.IsNullOrEmpty(spoolId) || !seen.Add(spoolId)) return;
@@ -80,7 +80,7 @@ FROM [Navis].[Piping_HydrotestPKG]";
             var packages = new List<TestPackageData>();
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            ExecuteReader(settings, baseSql, "PRJTNO", r =>
+            ExecuteReader(settings, baseSql, "Piping_HydrotestPKG", r =>
             {
                 string pkgId = GetString(r, "PKGNO");
                 if (string.IsNullOrEmpty(pkgId) || !seen.Add(pkgId)) return;
@@ -123,7 +123,7 @@ FROM [Navis].[Mech_EQ]";
             var items = new List<EquipmentData>();
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            ExecuteReader(settings, baseSql, "PJTNO", r =>
+            ExecuteReader(settings, baseSql, "Mech_EQ", r =>
             {
                 // 모델 인덱스 키는 선행 '/' 제거 형태 — 방어적으로 동일 정규화 유지.
                 string tagNo = GetString(r, "TAG NO").TrimStart('/').Trim();
@@ -191,7 +191,7 @@ FROM [Navis].[Mech_EQ]";
             }
 
             // EIT EQ — [Navis].[EIT_EQ]: TAG NO + INSTALL DTE(설치 실적일, 구 WRKDTE) + SUB-SYSTEM.
-            // 프로젝트 컬럼 없음(§9) → WHERE 생략.
+            // 프로젝트 컬럼은 DB단에서 추가됨(2026-07) — 철자는 ProjectColumnResolver가 해석.
             try
             {
                 int total = 0, taken = 0;
@@ -199,7 +199,7 @@ FROM [Navis].[Mech_EQ]";
                 const string eitEqSql = @"
 SELECT [TAG NO],[TAG DESCRIPTION],[INSTALL DTE],[SUB-SYSTEM]
 FROM [Navis].[EIT_EQ]";
-                ExecuteReader(settings, eitEqSql, null, r =>
+                ExecuteReader(settings, eitEqSql, "EIT_EQ", r =>
                 {
                     total++;
                     string tag = GetString(r, "TAG NO");
@@ -269,7 +269,7 @@ FROM [Navis].[System_Summary]";
             var masters = new List<SubSystemMasterData>();
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            ExecuteReader(settings, baseSql, "PJTNO", r =>
+            ExecuteReader(settings, baseSql, "System_Summary", r =>
             {
                 string no = GetString(r, "Sub-System");
                 if (string.IsNullOrEmpty(no) || !seen.Add(no)) return;
@@ -320,7 +320,7 @@ FROM [Navis].[EIT_Tray]";
             var trays = new List<EitTrayData>();
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            ExecuteReader(settings, baseSql, "PJTNO", r =>
+            ExecuteReader(settings, baseSql, "EIT_Tray", r =>
             {
                 string trayNo = GetString(r, "BRANCH NO.");
                 if (string.IsNullOrEmpty(trayNo) || !seen.Add(EitTrayData.NormalizeId(trayNo))) return;
@@ -341,8 +341,9 @@ FROM [Navis].[EIT_Tray]";
 
         /// <summary>
         /// Cable(형상) 탭용 OASIS 로드. 컬럼 철자는 실측 스키마로 확정(2026-07) — 날짜 4개는
-        /// 전부 ` DATE` 접미사(`PULLING START DATE` 등). EIT_Cable엔 프로젝트 컬럼이 없어(§9)
-        /// projectColumn=null → WHERE 생략. `PULLING LTH`는 실측 샘플상 포설 실적 길이로 보이나
+        /// 전부 ` DATE` 접미사(`PULLING START DATE` 등). 프로젝트 컬럼은 DB단에서 추가됨
+        /// (2026-07) — 철자(PJTNO/PRJTNO)는 ProjectColumnResolver가 해석한다.
+        /// `PULLING LTH`는 실측 샘플상 포설 실적 길이로 보이나
         /// (0/189=0%, 37/37=100%) 데이터 오너 확정 전까지 길이·%는 표시 전용, stage 색엔 안 씀
         /// (§13-6). stage는 날짜만: Pulling=PULLING START DATE / Pulled=PULLING END DATE /
         /// Terminated=FROM·TO CONN DATE 둘 다(AND 게이트, ComputeTerminated).
@@ -360,7 +361,7 @@ FROM [Navis].[EIT_Cable]";
             var cables = new List<CableLineData>();
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            ExecuteReader(settings, baseSql, null, r =>
+            ExecuteReader(settings, baseSql, "EIT_Cable", r =>
             {
                 string cableNo = GetString(r, "CABLE NO");
                 if (string.IsNullOrEmpty(cableNo) || !seen.Add(cableNo)) return;
@@ -394,20 +395,81 @@ FROM [Navis].[EIT_Cable]";
             return cables;
         }
 
+        // ------------------------------------------------------------
+        // 공사코드 발견 (드롭다운 [목록 새로고침])
+        // ------------------------------------------------------------
+
+        /// <summary>
+        /// DB에 실제로 존재하는 공사코드를 DISTINCT로 뽑는다. **코드만 나온다** —
+        /// 공사명은 DB에 없으므로(프로젝트 마스터 테이블 부재) 이름은 코드 기본값 +
+        /// oasis.config가 담당하고, 여기서 처음 보는 코드는 "(이름 미등록)"으로 표시된다.
+        ///
+        /// 대상 테이블은 프로젝트 컬럼을 가진 것 중 가장 작은 것을 고른다
+        /// (System_Summary 우선 — 대형 실적 테이블 DISTINCT 풀스캔 회피).
+        /// </summary>
+        public static List<string> LoadProjectCodes(SqlConnectionSettings settings, out string sourceNote)
+        {
+            var codes = new List<string>();
+            sourceNote = "";
+
+            if (!ProjectColumnResolver.TryPickDiscoveryTable(settings, out string table, out string column))
+            {
+                sourceNote = "프로젝트 컬럼을 가진 테이블을 찾지 못함";
+                return codes;
+            }
+
+            string sql = $"SELECT DISTINCT [{column}] FROM [{ProjectColumnResolver.Schema}].[{table}] " +
+                         $"WHERE [{column}] IS NOT NULL AND LTRIM(RTRIM([{column}])) <> '' " +
+                         $"ORDER BY [{column}]";
+
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            using (var conn = new SqlConnection(settings.BuildConnectionString()))
+            using (var cmd = new SqlCommand(sql, conn))
+            {
+                conn.Open();
+                using (var reader = cmd.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        string code = reader[0]?.ToString()?.Trim();
+                        if (!string.IsNullOrEmpty(code)) codes.Add(code);
+                    }
+                }
+            }
+
+            sourceNote = $"{table}.{column}";
+            NavisVisualizer.Services.PerfLog.Record("공사코드 조회", sw.ElapsedMilliseconds,
+                rows: codes.Count, note: sourceNote);
+            return codes;
+        }
+
         #region Shared helpers
 
         /// <summary>
-        /// baseSql에 프로젝트 필터(WHERE [projectColumn] = @prj)를 조건부로 붙여 실행하고
-        /// 행마다 rowHandler를 호출한다. projectColumn은 테이블마다 다르다
-        /// (EQ 계열 PJTNO / Piping 계열 PRJTNO). projectColumn이 null/빈 문자열이면
-        /// (EIT_Cable처럼 프로젝트 컬럼이 없는 테이블) ProjectNo가 설정돼 있어도 WHERE를 생략한다.
+        /// baseSql에 프로젝트 필터(WHERE [컬럼] = @prj)를 조건부로 붙여 실행하고
+        /// 행마다 rowHandler를 호출한다.
+        ///
+        /// 필터 컬럼명은 하드코딩하지 않고 `table`로부터 실제 스키마에서 해석한다
+        /// (ProjectColumnResolver) — 철자가 테이블마다 다르고(PJTNO/PRJTNO), 나중에
+        /// DB단에서 추가된 테이블은 어느 철자인지 코드가 알 수 없기 때문.
+        ///
+        /// 공사가 선택됐는데 그 테이블에 프로젝트 컬럼이 없으면 **던진다** — 다른 공사
+        /// 데이터를 그 공사인 양 조용히 칠하는 것이 최악이기 때문(이 클래스의 "조용히
+        /// 빈 값 문제 원천 차단" 원칙과 동일). 전체를 보려면 공사를 '전체'로 선택하면 된다.
         /// </summary>
         private static void ExecuteReader(SqlConnectionSettings settings, string baseSql,
-            string projectColumn, Action<IDataRecord> rowHandler)
+            string table, Action<IDataRecord> rowHandler)
         {
             string sql = baseSql;
-            bool filter = !string.IsNullOrWhiteSpace(settings.ProjectNo)
-                && !string.IsNullOrWhiteSpace(projectColumn);
+            bool filter = !string.IsNullOrWhiteSpace(settings.ProjectNo);
+            string projectColumn = filter ? ProjectColumnResolver.Resolve(settings, table) : null;
+
+            if (filter && string.IsNullOrEmpty(projectColumn))
+                throw new InvalidOperationException(
+                    $"[{ProjectColumnResolver.Schema}].[{table}]에 프로젝트 컬럼(PJTNO/PRJTNO)이 없어\n" +
+                    $"공사 '{settings.ProjectNo}'로 거를 수 없습니다.\n\n" +
+                    "DB에 컬럼을 추가하거나, 공사 드롭다운에서 '전체'를 선택하세요.");
+
             if (filter)
                 sql += $"\nWHERE [{projectColumn}] = @prj";
 

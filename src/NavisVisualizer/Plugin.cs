@@ -78,7 +78,7 @@ namespace NavisVisualizer
     }
 
     /// <summary>
-    /// 일괄 갱신(배치) 진입점 (CLAUDE.md §19). 도크 패널 없이 BatchPanel을 모달 창으로 띄운다.
+    /// 일괄 갱신(배치) 진입점 (CLAUDE.md §21). 도크 패널 없이 BatchPanel을 모달 창으로 띄운다.
     /// Automation 러너(tools/NavisBatch)가 <c>ExecuteAddInPlugin("NavisVisualizer.Batch.HDHHI_OE", …)</c>로
     /// 호출하며, Navisworks Add-ins 리본에서도 직접 실행할 수 있다.
     /// 인자: "auto" = 기억된 선택으로 즉시 실행, "close" = 실행 후 창 닫기. 반환 = 저장 실패 job 수.

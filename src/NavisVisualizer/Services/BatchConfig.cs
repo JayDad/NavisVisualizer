@@ -10,7 +10,7 @@ using System.Text.RegularExpressions;
 namespace NavisVisualizer.Services
 {
     /// <summary>일괄 갱신(배치)이 다루는 공종 — 탭 상태 없이 "로드→인덱스→적용" 3줄로 끝나는 5개.
-    /// Sub-system은 선택 목록·모드 상태가 탭에 있어 제외 (CLAUDE.md §19).</summary>
+    /// Sub-system은 선택 목록·모드 상태가 탭에 있어 제외 (CLAUDE.md §21).</summary>
     public enum BatchDiscipline
     {
         Spool,

@@ -47,7 +47,7 @@ namespace NavisVisualizer.Services
     }
 
     /// <summary>
-    /// 일괄 갱신 코어 (CLAUDE.md §19). job마다 "모델 열기 → OASIS 로드 → 인덱스 → 색 적용 →
+    /// 일괄 갱신 코어 (CLAUDE.md §21). job마다 "모델 열기 → OASIS 로드 → 인덱스 → 색 적용 →
     /// 다른 이름 저장"을 UI 없이 수행한다. 각 공종 탭의 [OASIS 로드]+[가시화 적용]과 **같은
     /// 함수**(SqlLoader / ModelItemSearcher / ColorOverrideEngine)를 호출하는 얇은 층이라 탭 코드는
     /// 손대지 않는다.

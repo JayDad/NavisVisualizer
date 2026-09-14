@@ -8,7 +8,7 @@ using Autodesk.Navisworks.Api.Automation;
 namespace NavisBatch
 {
     /// <summary>
-    /// 바탕화면 '딸각' 러너 (CLAUDE.md §19).
+    /// 바탕화면 '딸각' 러너 (CLAUDE.md §21).
     ///   1. Navisworks Simulate를 Automation API로 기동 (기본: 화면에 보이게)
     ///   2. 플러그인 진입점 NavisVisualizer.Batch.HDHHI_OE 실행 → 일괄 갱신 창(프로젝트·공종 체크 → 실행)
     ///   3. 창을 닫으면 반환. 종료 코드 = 저장 실패 job 수 (0 = 전부 성공)
@@ -62,7 +62,7 @@ namespace NavisBatch
                 else
                 {
                     // 보이는 모드: Navisworks를 열어 둔다 — 색칠된 모델을 바로 볼 수 있게.
-                    // (러너 종료로 Navisworks가 같이 닫히면 Windows 실측 후 대기 옵션 추가 — §19)
+                    // (러너 종료로 Navisworks가 같이 닫히면 Windows 실측 후 대기 옵션 추가 — §21)
                     Console.WriteLine("Navisworks는 열어 둡니다.");
                 }
                 return rc;

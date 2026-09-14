@@ -11,7 +11,7 @@ using NavisVisualizer.Services;
 namespace NavisVisualizer.UI
 {
     /// <summary>
-    /// 일괄 갱신(배치) 화면 (CLAUDE.md §19) — "아침에 딸각": batch.config에 등록된 프로젝트(모델)를
+    /// 일괄 갱신(배치) 화면 (CLAUDE.md §21) — "아침에 딸각": batch.config에 등록된 프로젝트(모델)를
     /// 체크하고 공종 체크박스를 고른 뒤 [실행]하면 BatchRunner가 모델을 열어 OASIS 최신 데이터로
     /// 색칠하고 다른 이름으로 저장한다. 도크 패널의 탭과 Automation 러너의 독립 창(ShowStandalone)
     /// 양쪽에 같은 컨트롤을 쓴다.
