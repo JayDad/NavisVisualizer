@@ -1,23 +1,46 @@
 @echo off
-set SCRIPT_DIR=%~dp0
-set PROJ=%SCRIPT_DIR%src\NavisVisualizer\NavisVisualizer.csproj
+setlocal
+REM NavisVisualizer deploy script (plugin + batch runner).
+REM ASCII ONLY in this file: cmd.exe reads .bat files in the console code page (CP949 on
+REM Korean Windows), so UTF-8 Korean text here breaks line parsing and skips commands.
+REM Keep comments/messages in English. Line endings must be CRLF (.gitattributes enforces).
 
-REM 1) 패키지 복원 — 사내망에서 api.nuget.org가 막혀도(NU1301) 실패하지 않도록
-REM    --ignore-failed-sources: 못 닿는 소스는 경고로 낮추고, nuget.config의 packages-offline 폴더
-REM    (+ %%USERPROFILE%%\.nuget\packages 캐시)에서 해결한다.
-echo Restoring packages (offline folder first)...
-dotnet restore "%PROJ%" --ignore-failed-sources
-if %ERRORLEVEL% NEQ 0 (
+set "SCRIPT_DIR=%~dp0"
+set "PROJ=%SCRIPT_DIR%src\NavisVisualizer\NavisVisualizer.csproj"
+set "RUNNER=%SCRIPT_DIR%tools\NavisBatch\NavisBatch.csproj"
+
+echo Repo folder : %SCRIPT_DIR%
+echo Plugin proj : %PROJ%
+if not exist "%PROJ%" (
     echo.
-    echo [ERROR] Restore failed. packages-offline 폴더와 nuget.config가 같이 복사됐는지 확인하세요.
+    echo [ERROR] Project file not found. Run deploy.bat from the repo root folder.
     pause
     exit /b 1
 )
 
-REM 2) 빌드 — 복원은 위에서 끝났으므로 다시 네트워크에 나가지 않게 --no-restore
+REM 1) Restore packages. --ignore-failed-sources: if api.nuget.org is blocked (NU1301) the
+REM    failure is downgraded to a warning and packages resolve from packages-offline\ (see
+REM    nuget.config) or the local NuGet cache (%%USERPROFILE%%\.nuget\packages).
+echo.
+echo Restoring packages (offline folder first)...
+dotnet restore "%PROJ%" --ignore-failed-sources
+if %ERRORLEVEL% NEQ 0 (
+    echo.
+    echo [WARN] Restore with offline sources failed. Retrying a normal restore...
+    dotnet restore "%PROJ%"
+)
+if %ERRORLEVEL% NEQ 0 (
+    echo.
+    echo [ERROR] Restore failed. Check internet/proxy, or copy the .nupkg files into
+    echo         packages-offline\ next to nuget.config (see packages-offline\README.md).
+    pause
+    exit /b 1
+)
+
+REM 2) Build. Restore already ran above, so --no-restore keeps the build off the network.
+echo.
 echo Building NavisVisualizer...
 dotnet build "%PROJ%" -c Release --no-restore
-
 if %ERRORLEVEL% NEQ 0 (
     echo.
     echo [ERROR] Build failed.
@@ -25,33 +48,42 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b 1
 )
 
-set NWPLUGIN_DIR=%APPDATA%\Autodesk\Navisworks Simulate 2022\Plugins\NavisVisualizer
+set "NWPLUGIN_DIR=%APPDATA%\Autodesk\Navisworks Simulate 2022\Plugins\NavisVisualizer"
+echo.
 echo Copying DLLs to %NWPLUGIN_DIR%...
 mkdir "%NWPLUGIN_DIR%" 2>nul
 xcopy /Y "%SCRIPT_DIR%src\NavisVisualizer\bin\Release\net48\*.dll" "%NWPLUGIN_DIR%\"
+if %ERRORLEVEL% NEQ 0 (
+    echo.
+    echo [ERROR] Copy failed. Close Navisworks (DLLs are locked while it runs) and retry.
+    pause
+    exit /b 1
+)
 
 REM ---- Batch (one-click daily update) ----------------------------------------
-set NV_DATA_DIR=%APPDATA%\NavisVisualizer
+set "NV_DATA_DIR=%APPDATA%\NavisVisualizer"
 mkdir "%NV_DATA_DIR%" 2>nul
 
 REM batch.config: create from sample only if the user does not have one yet (never overwrite).
 if not exist "%NV_DATA_DIR%\batch.config" (
     copy /Y "%SCRIPT_DIR%src\NavisVisualizer\batch.config.sample" "%NV_DATA_DIR%\batch.config" >nul
-    echo Created %NV_DATA_DIR%\batch.config from sample - edit model paths before first run.
+    echo Created %NV_DATA_DIR%\batch.config from sample - check model paths before first run.
 )
 
+echo.
 echo Building NavisBatch runner (desktop shortcut)...
 REM Same offline-safe restore as the plugin (no PackageReference, but SDK projects still restore).
-dotnet restore "%SCRIPT_DIR%tools\NavisBatch\NavisBatch.csproj" --ignore-failed-sources
-dotnet build "%SCRIPT_DIR%tools\NavisBatch\NavisBatch.csproj" -c Release --no-restore
+dotnet restore "%RUNNER%" --ignore-failed-sources
+if %ERRORLEVEL% NEQ 0 dotnet restore "%RUNNER%"
+dotnet build "%RUNNER%" -c Release --no-restore
 if %ERRORLEVEL% NEQ 0 (
     echo.
     echo [WARN] NavisBatch runner build failed - plugin is deployed, but no desktop shortcut.
-    echo        You can still run batch from the "Batch" tab inside Navisworks.
+    echo        You can still run the batch from the "Batch" tab inside Navisworks.
     goto :done
 )
 
-set NV_BATCH_DIR=%NV_DATA_DIR%\NavisBatch
+set "NV_BATCH_DIR=%NV_DATA_DIR%\NavisBatch"
 mkdir "%NV_BATCH_DIR%" 2>nul
 xcopy /Y "%SCRIPT_DIR%tools\NavisBatch\bin\Release\net48\*.*" "%NV_BATCH_DIR%\" >nul
 
@@ -68,3 +100,4 @@ if %ERRORLEVEL% NEQ 0 (
 echo.
 echo Done! Restart Navisworks Simulate 2022.
 pause
+endlocal

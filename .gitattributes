@@ -1,0 +1,2 @@
+# cmd.exe needs CRLF in batch files; git archive/checkout apply this on download too.
+*.bat text eol=crlf

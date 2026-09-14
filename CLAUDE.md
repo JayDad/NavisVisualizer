@@ -1056,6 +1056,11 @@ DB단에서 추가된 테이블은 어느 철자를 썼는지 코드가 알 수 
 - `deploy.bat` — 플러그인 배포 후 러너 빌드 → `%APPDATA%\NavisVisualizer\NavisBatch\` 복사 →
   바탕화면 `Navis Batch Update.lnk`(PowerShell WScript.Shell; .bat 코드페이지 안전 위해 ASCII 이름) →
   `batch.config` 없을 때만 sample 복사(덮어쓰기 금지). 러너 빌드 실패는 경고만(플러그인 탭으로 대체 가능).
+  **deploy.bat은 ASCII 전용 + CRLF**(2026-09 실측 — L8): 한글 REM/echo가 들어간 UTF-8 .bat을 cmd가
+  CP949로 읽으면 3바이트 한글의 마지막 바이트가 선행 바이트로 해석돼 개행(`\n`)까지 삼킨다 → 다음 줄이
+  앞 줄에 붙어 명령이 통째로 사라진다(사용자 PC: `'Restoring'은(는) 내부 또는 외부 명령…` + restore 미실행
+  → `NETSDK1004 project.assets.json 없음`). `.gitattributes`(`*.bat text eol=crlf`)로 줄끝 고정,
+  스크립트 안 안내문은 영어로만. 복원은 `--ignore-failed-sources` 실패 시 일반 restore 재시도.
 
 **Windows 검증 항목**
 1. `Document.OpenFile`이 열린 문서가 dirty일 때 "저장?" 대화상자를 띄우는가 — 띄우면 배치 정지 →
@@ -1119,6 +1124,12 @@ clash·export에 활용 가능.
 
 ### L6. 미확정 규약은 **부분 지원 + 안전 fallback**
 - 관리형 박스 JSON에서 축정렬 박스(Rotation≈0)만 확정 처리하고, **회전 박스는 규약 미확정이라 null 반환(→ COM fallback)**. 잘못된 볼륨을 확신 없이 배포하지 않는다. 회전 포맷은 덤프 원본 JSON 확보 후 마무리.
+
+### L8. .bat 파일에 한글 금지 (UTF-8 → CP949 오독으로 줄 구조가 깨진다)
+- `deploy.bat`에 UTF-8 한글 주석/메시지를 넣었더니 사용자 PC(한국어 Windows, cmd = CP949)에서 명령이
+  사라지고 뒷줄 토큰(`Restoring`, `NEQ`)이 명령으로 실행됐다. 3바이트 한글의 끝 바이트가 CP949 선행
+  바이트로 해석돼 다음 바이트(개행 포함)를 삼키기 때문. LF 전용 줄끝도 같이 위험. → **.bat은 ASCII 전용,
+  CRLF 고정(`.gitattributes`)**. 사용자 안내가 필요하면 영어로 쓰거나 별도 .md에 둔다.
 
 ### L7. 케이블 형상 추출 — GenerateSimplePrimitives 실측 교훈
 - 케이블(`lcldrvm_container`)은 **Line 프리미티브**(스윕 튜브 wireframe), Triangle 아님.
