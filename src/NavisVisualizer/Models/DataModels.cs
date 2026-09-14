@@ -122,7 +122,7 @@ namespace NavisVisualizer.Models
         public static Dictionary<HydrotestStage, ColorSetting> HydrotestDefaults =>
             new Dictionary<HydrotestStage, ColorSetting>
             {
-                [HydrotestStage.NotStarted]     = new ColorSetting { DisplayColor = Color.FromArgb(169, 169, 169), Transparency = 0.0 },
+                [HydrotestStage.NotStarted]     = new ColorSetting { DisplayColor = Color.FromArgb(220, 40, 40), Transparency = 0.0 },
                 [HydrotestStage.Review]         = new ColorSetting { DisplayColor = Color.FromArgb(255, 235, 130), Transparency = 0.2 },
                 [HydrotestStage.LineInspection] = new ColorSetting { DisplayColor = Color.FromArgb(255, 215, 0),   Transparency = 0.0 },
                 [HydrotestStage.Flushing]       = new ColorSetting { DisplayColor = Color.FromArgb(135, 206, 235), Transparency = 0.0 },
@@ -134,7 +134,7 @@ namespace NavisVisualizer.Models
         public static Dictionary<SpoolStage, ColorSetting> SpoolDefaults =>
             new Dictionary<SpoolStage, ColorSetting>
             {
-                [SpoolStage.NotStarted]   = new ColorSetting { DisplayColor = Color.FromArgb(169, 169, 169), Transparency = 0.0  },
+                [SpoolStage.NotStarted]   = new ColorSetting { DisplayColor = Color.FromArgb(220, 40, 40), Transparency = 0.0  },
                 [SpoolStage.BV]           = new ColorSetting { DisplayColor = Color.FromArgb(255, 255, 180), Transparency = 0.2  },
                 [SpoolStage.FitUp]        = new ColorSetting { DisplayColor = Color.FromArgb(255, 235, 130), Transparency = 0.2  },
                 [SpoolStage.WeldDone]     = new ColorSetting { DisplayColor = Color.FromArgb(255, 215, 0),   Transparency = 0.0  },
@@ -155,7 +155,7 @@ namespace NavisVisualizer.Models
         public static Dictionary<EquipmentStage, ColorSetting> EquipmentDefaults =>
             new Dictionary<EquipmentStage, ColorSetting>
             {
-                [EquipmentStage.NotStarted] = new ColorSetting { DisplayColor = Color.FromArgb(169, 169, 169), Transparency = 0.0 },
+                [EquipmentStage.NotStarted] = new ColorSetting { DisplayColor = Color.FromArgb(220, 40, 40), Transparency = 0.0 },
                 [EquipmentStage.Delivery]   = new ColorSetting { DisplayColor = Color.FromArgb(255, 215, 0),   Transparency = 0.0 },
                 [EquipmentStage.Loading]    = new ColorSetting { DisplayColor = Color.FromArgb(65, 105, 225),  Transparency = 0.0 },
                 [EquipmentStage.Setting]    = new ColorSetting { DisplayColor = Color.FromArgb(138, 43, 226),  Transparency = 0.0 },
@@ -165,7 +165,7 @@ namespace NavisVisualizer.Models
         public static Dictionary<EitStage, ColorSetting> EitDefaults =>
             new Dictionary<EitStage, ColorSetting>
             {
-                [EitStage.NotStarted] = new ColorSetting { DisplayColor = Color.FromArgb(169, 169, 169), Transparency = 0.0 },
+                [EitStage.NotStarted] = new ColorSetting { DisplayColor = Color.FromArgb(220, 40, 40), Transparency = 0.0 },
                 [EitStage.Installing] = new ColorSetting { DisplayColor = Color.FromArgb(255, 215, 0),   Transparency = 0.0 },
                 [EitStage.Installed]  = new ColorSetting { DisplayColor = Color.FromArgb(0, 128, 0),     Transparency = 0.0 },
             };
@@ -173,7 +173,7 @@ namespace NavisVisualizer.Models
         public static Dictionary<CableLineStage, ColorSetting> CableLineDefaults =>
             new Dictionary<CableLineStage, ColorSetting>
             {
-                [CableLineStage.NotStarted] = new ColorSetting { DisplayColor = Color.FromArgb(169, 169, 169), Transparency = 0.0 },
+                [CableLineStage.NotStarted] = new ColorSetting { DisplayColor = Color.FromArgb(220, 40, 40), Transparency = 0.0 },
                 [CableLineStage.Pulling]    = new ColorSetting { DisplayColor = Color.FromArgb(255, 215, 0),   Transparency = 0.0 },
                 [CableLineStage.Pulled]     = new ColorSetting { DisplayColor = Color.FromArgb(65, 105, 225),  Transparency = 0.0 },
                 [CableLineStage.Terminated] = new ColorSetting { DisplayColor = Color.FromArgb(0, 128, 0),     Transparency = 0.0 },
@@ -186,7 +186,7 @@ namespace NavisVisualizer.Models
         public static Dictionary<ProgressStatus, ColorSetting> ProgressDefaults =>
             new Dictionary<ProgressStatus, ColorSetting>
             {
-                [ProgressStatus.NotStarted] = new ColorSetting { DisplayColor = Color.FromArgb(169, 169, 169), Transparency = 0.0 },
+                [ProgressStatus.NotStarted] = new ColorSetting { DisplayColor = Color.FromArgb(220, 40, 40), Transparency = 0.0 },
                 [ProgressStatus.InProgress] = new ColorSetting { DisplayColor = Color.FromArgb(255, 215, 0),   Transparency = 0.0 },
                 [ProgressStatus.Completed]  = new ColorSetting { DisplayColor = Color.FromArgb(0, 128, 0),     Transparency = 0.0 },
             };
@@ -194,7 +194,7 @@ namespace NavisVisualizer.Models
         public static Dictionary<SubSystemStage, ColorSetting> SubSystemStageDefaults =>
             new Dictionary<SubSystemStage, ColorSetting>
             {
-                [SubSystemStage.NotStarted] = new ColorSetting { DisplayColor = Color.FromArgb(169, 169, 169), Transparency = 0.0 },
+                [SubSystemStage.NotStarted] = new ColorSetting { DisplayColor = Color.FromArgb(220, 40, 40), Transparency = 0.0 },
                 [SubSystemStage.Walkdown]   = new ColorSetting { DisplayColor = Color.FromArgb(255, 215, 0),   Transparency = 0.0 },
                 [SubSystemStage.PartialMcc] = new ColorSetting { DisplayColor = Color.FromArgb(255, 140, 50),  Transparency = 0.0 },
                 [SubSystemStage.Mcc]        = new ColorSetting { DisplayColor = Color.FromArgb(65, 105, 225),  Transparency = 0.0 },

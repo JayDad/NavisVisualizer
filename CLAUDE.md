@@ -575,7 +575,7 @@ A Punch Total, A Punch Closed, A Punch %, B Punch Total, B Punch Closed, B Punch
 - **Stage**: 날짜 기반 4단계 `미착수/포설중/포설완료/결선완료`(`GetStageAtDate` 역순 스캔). Pulling=PULLING
   START, Pulled=PULLING END, Terminated=`FROM CONN`·`TO CONN` **둘 다** 있을 때 Max(AND 게이트).
   **하이라이트 우선 모드**: 로드 데이터에 stage 날짜가 전무하면(맨 Excel 목록) stage 계산 우회 →
-  매칭 케이블을 단색 solid 하이라이트로 칠함(안 그러면 전 케이블이 미착수=70% 투명 회색 = 하이라이트 반대).
+  매칭 케이블을 단색 solid 하이라이트로 칠함(안 그러면 전 케이블이 미착수 단색(기본 빨강) = 하이라이트 반대).
 - **clash**: 신규 `Services/CableClashService` — 케이블 world 세그먼트 **형상만 캐시**(모델당 정적, doc-id
   무효화), 판정은 매 [적용]마다 live `GetActiveClipPlanes`로 재계산(L2). AABB pre-cull + Cyrus–Beck
   세그먼트-vs-반평면(축정렬 박스 6반평면 + Planes 모드 한 구현). `GeometryProbe.ExtractWorldSegments`
