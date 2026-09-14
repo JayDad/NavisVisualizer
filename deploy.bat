@@ -18,6 +18,13 @@ if not exist "%PROJ%" (
     exit /b 1
 )
 
+REM 0) .NET SDK must be installed (8.0 or newer; global.json rolls forward to the latest major).
+where dotnet >nul 2>&1
+if %ERRORLEVEL% NEQ 0 goto :nosdk
+dotnet --version >nul 2>&1
+if %ERRORLEVEL% NEQ 0 goto :nosdk
+for /f "delims=" %%v in ('dotnet --version') do echo .NET SDK    : %%v
+
 REM 1) Restore packages. --ignore-failed-sources: if api.nuget.org is blocked (NU1301) the
 REM    failure is downgraded to a warning and packages resolve from packages-offline\ (see
 REM    nuget.config) or the local NuGet cache (%%USERPROFILE%%\.nuget\packages).
@@ -101,3 +108,15 @@ echo.
 echo Done! Restart Navisworks Simulate 2022.
 pause
 endlocal
+exit /b 0
+
+:nosdk
+echo.
+echo [ERROR] .NET SDK is not installed on this PC (dotnet command not found or no SDK).
+echo         Install ".NET 8 SDK (x64)" or newer from:
+echo             https://dotnet.microsoft.com/download/dotnet/8.0
+echo         (choose "SDK" installer, NOT "Runtime"), then run deploy.bat again.
+echo         Alternative without SDK: copy the already-built plugin folder from another PC to
+echo             %APPDATA%\Autodesk\Navisworks Simulate 2022\Plugins\NavisVisualizer\
+pause
+exit /b 1
