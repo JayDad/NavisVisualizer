@@ -987,6 +987,8 @@ clash·export에 활용 가능.
   같이 넣을 것** (`packages-offline/README.md`). 프록시가 있는 PC는 `HTTP_PROXY`/`HTTPS_PROXY` 환경변수로도 해결 가능.
   **`deploy.bat`은 ASCII(영문)만** — 한국어 Windows cmd는 .bat을 CP949로 읽어 UTF-8 한글 주석이 깨진 채
   명령으로 실행됨(2026-09 실측: restore 줄이 통째로 증발 → NETSDK1004). 배치 파일에 한글 금지.
+  **NU1900(취약점 DB 조회 실패)** 는 경고일 뿐이나 사내망에선 항상 뜨므로 루트 `Directory.Build.props`의
+  `NuGetAudit=false`로 끔 (src·tests 양쪽 적용).
 - 새 탭 추가 시 그룹 결정 (매칭 전략 × NWD 스코프 2개 축 — 1번 항목 참조):
   - "digit 포함 DisplayName" 매칭이고 **대상 nwd 스코프도 같으면** 기존 인스턴스 재사용
     (`SpoolTagSearcher`=SPL→HYDROPKG / `HydroTagSearcher`=HYDROPKG / `ElecTagSearcher`=EIT /

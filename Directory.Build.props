@@ -1,0 +1,11 @@
+<Project>
+  <!--
+    사내망(인터넷 차단) 빌드 대응 (2026-09).
+    NuGetAudit: .NET SDK 8+는 복원 시 nuget.org에서 패키지 취약점 DB를 조회한다(NU1900 경고).
+    인터넷이 막힌 PC에선 항상 실패하는 경고라 현장에서 오류로 오해되므로 끈다.
+    패키지 복원 자체(packages-offline)와는 무관.
+  -->
+  <PropertyGroup>
+    <NuGetAudit>false</NuGetAudit>
+  </PropertyGroup>
+</Project>
