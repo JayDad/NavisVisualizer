@@ -20,10 +20,15 @@ Excel (.xlsx/.xls/.xlsb)          OASIS SQL Server ([Navis] 스키마)
 | 모듈 | Stage 수 | 매칭 키 | 인덱싱 방식 | Searcher (NWD 스코프) |
 |------|---------|---------|------------|----------------------|
 | **Spool** | 14 (B/V → Welding) | Spool Number (DisplayName) | 재귀 탐색 (WalkAndIndex) | `SpoolTagSearcher` 전용 (SPL → 없으면 HYDROPKG) |
-| **Hydrotest** | 6 (Review → Reinstatement) | Test Package No. (DisplayName) | 재귀 탐색 (WalkAndIndex) | `HydroTagSearcher` 전용 (HYDROPKG) |
+| **Hydrotest** | 6 (Review → Reinstatement) | Test Package No. (DisplayName) | 레벨 타겟 (BuildIndexForTags — 2026-09 전환) | `HydroTagSearcher` 전용 (HYDROPKG) |
 | **Equipment** | 4 (Delivery → Inspection) | Tag No. (DisplayName, prefix 지원) | 레벨 타겟 (BuildIndexForTags) | `EquipmentSearcher` 전용 (MEQ) |
 | **EIT Tray** | 4 (Tray 설치 → Cable 완료) | Tray Number (leading `/` 정규화 후) | 재귀 탐색 (WalkAndIndex) | `ElecTagSearcher` 전용 (EIT) |
 | **Sub-system** | 2모드: 마스터 단계 5 (Walkdown→PCC) / 요소 진행 3단계 | Tag No. + Test Package No. (Sub-system 축 통합) | 재귀 탐색 (WalkAndIndex) | `SubSystemSearcher` 전용 (MEQ·SPL·HYDROPKG) |
+
+### 태그 키 정규화 (`Searchers/TagKey.cs` — 2026-09)
+모델 DisplayName ↔ 실적 ID의 장식 차이를 한 곳에서 흡수. 인덱스 등록은 `Candidates`(전체 / 첫 '/' 앞
+접두 = Trion "TAG/suffix" / 마지막 '/' 뒤 세그먼트 = Ruya "/GPSET/TAG", 바깥 괄호 제거), 조회는
+`Normalize`(선행 '/'·괄호 제거·대문자) — `FindBySpoolIds` 결과 키는 원본 ID 유지. CLAUDE.md §20.
 
 ### Searcher 분리 근거
 - **매칭 전략 축**: `WalkAndIndex`(digit full-walk) 계열과 Equipment 레벨-타겟은 인덱스 구조가

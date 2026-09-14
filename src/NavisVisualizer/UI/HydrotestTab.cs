@@ -17,6 +17,11 @@ namespace NavisVisualizer.UI
         private readonly MainDockablePanel _main;
 
         private List<TestPackageData> _packages = new List<TestPackageData>();
+        /// <summary>레벨 타겟 인덱스는 활성 소스의 PKG 셋 기반 → 소스 전환/재로드 시 재빌드 강제 (Spool과 동일).</summary>
+        private bool _needsIndexRebuild;
+
+        private bool IndexStale(Autodesk.Navisworks.Api.Document doc) =>
+            _needsIndexRebuild || _main.HydroTagSearcher.NeedsRebuild(doc);
         private readonly Dictionary<TabDataSource, List<TestPackageData>> _packagesBySource
             = new Dictionary<TabDataSource, List<TestPackageData>>();
         private bool _appliedOnce;
@@ -375,6 +380,7 @@ namespace NavisVisualizer.UI
             // 범위 표시가 거짓말하지 않도록 전체 모델로 복귀시킨다.
             _scopeFilter.Invalidate();
             _scopeKeys = null;
+            _needsIndexRebuild = true;   // 레벨 타겟은 활성 소스 PKG 셋 기반
             bool willReapply = reapply && _packages.Count > 0 && _main.GetDocument() != null;
             if (!willReapply)
                 _scopePanel.ResetToFullModel();
@@ -471,7 +477,12 @@ namespace NavisVisualizer.UI
             // 단순 marquee만으로는 무엇을 하는지 알 수 없어 단계 문구 병기 (UX audit P0-3)
             _lblStats.Text = "모델 태그 인덱스 생성 중…";
             Application.DoEvents();
-            _main.HydroTagSearcher.BuildIndex(doc, NwdScope.Hydrotest);
+            // 레벨 타겟(known-tag walk): PKG 번호를 만나면 인덱싱 후 그 서브트리 정지 → PKG 아래의 스풀/
+            // geometry 숲을 안 훑는다. 구 general walk는 digit 보유 노드를 전부 인덱싱하며 PDMS 계열
+            // 모델(Ruya — 모든 노드에 digit)에서 전 트리 COM 순회로 10분+ 걸렸다 (2026-09 실측).
+            var pkgIdSet = new HashSet<string>(_packages.Select(p => p.TestPkgId));
+            _main.HydroTagSearcher.BuildIndexForTags(doc, pkgIdSet, NwdScope.Hydrotest);
+            _needsIndexRebuild = false;
             _progressBar.Visible = false;
             _progressBar.Style = ProgressBarStyle.Blocks;
         }
@@ -484,7 +495,7 @@ namespace NavisVisualizer.UI
                 MessageBox.Show("데이터를 먼저 로드하고 모델을 열어주세요.");
                 return;
             }
-            if (_main.HydroTagSearcher.NeedsRebuild(doc))
+            if (IndexStale(doc))
                 BuildIndex();
 
             var activeSettings = new Dictionary<HydrotestStage, ColorSetting>();
@@ -580,7 +591,7 @@ namespace NavisVisualizer.UI
                     MessageBox.Show("먼저 [가시화 적용]을 실행하세요. 집계 범위는 매칭된 항목에 적용됩니다.");
                     return;
                 }
-                if (_main.HydroTagSearcher.NeedsRebuild(doc))
+                if (IndexStale(doc))
                 {
                     MessageBox.Show("모델이 변경되었습니다. [가시화 적용]을 다시 실행한 뒤 범위를 선택하세요.");
                     return;
@@ -684,7 +695,7 @@ namespace NavisVisualizer.UI
                 MessageBox.Show("먼저 [가시화 적용]을 실행하세요. 숨김은 매칭된 항목에 적용됩니다.");
                 return;
             }
-            if (_main.HydroTagSearcher.NeedsRebuild(doc))
+            if (IndexStale(doc))
             {
                 MessageBox.Show("모델이 변경되었습니다. [가시화 적용]을 다시 실행한 뒤 사용하세요.");
                 return;
@@ -745,7 +756,7 @@ namespace NavisVisualizer.UI
             if (_listView.SelectedItems.Count == 0) return;
 
             var doc = _main.GetDocument();
-            if (doc == null || !_main.HydroTagSearcher.IsIndexBuilt || _main.HydroTagSearcher.NeedsRebuild(doc)) return;
+            if (doc == null || !_main.HydroTagSearcher.IsIndexBuilt || IndexStale(doc)) return;
 
             var collection = new Autodesk.Navisworks.Api.ModelItemCollection();
             foreach (ListViewItem selected in _listView.SelectedItems)

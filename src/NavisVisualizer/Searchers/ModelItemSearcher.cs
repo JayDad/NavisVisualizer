@@ -101,11 +101,11 @@ namespace NavisVisualizer.Searchers
                 _lastDocumentId = GetDocumentId(doc);
                 perf.Rows = knownTags.Count;
 
-                // Normalize tags for comparison
+                // Normalize tags for comparison (TagKey — 선행 '/'·괄호 장식 제거, 대문자)
                 var normalizedTags = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var tag in knownTags)
                 {
-                    string t = tag.Trim().TrimStart('/').ToUpperInvariant();
+                    string t = TagKey.Normalize(tag);
                     if (!string.IsNullOrEmpty(t))
                         normalizedTags.Add(t);
                 }
@@ -173,15 +173,11 @@ namespace NavisVisualizer.Searchers
             string name = item.DisplayName?.Trim();
             if (!string.IsNullOrEmpty(name))
             {
-                string key = name.TrimStart('/').Trim().ToUpperInvariant();
+                // 후보 키(전체 / "TAG/suffix" 접두 / "/GPSET/TAG" 마지막 세그먼트, 괄호 제거) 중 하나라도
+                // known tag면 매칭 — Ruya의 PDMS 경로 접두(/GPSET/)와 괄호 스풀명을 흡수 (TagKey).
                 bool matched = false;
-                if (!string.IsNullOrEmpty(key))
-                {
+                foreach (var key in TagKey.Candidates(name))
                     if (knownTags.Contains(key)) { AddToIndex(key, item); matched = true; }
-                    int slash = key.IndexOf('/');
-                    if (slash > 0 && knownTags.Contains(key.Substring(0, slash)))
-                    { AddToIndex(key.Substring(0, slash), item); matched = true; }
-                }
                 if (matched)
                 {
                     if (!depths.Contains(depth)) depths.Add(depth);
@@ -217,16 +213,9 @@ namespace NavisVisualizer.Searchers
 
             if (isTagLike)
             {
-                string key = name.TrimStart('/').Trim();
-                if (!string.IsNullOrEmpty(key))
-                {
-                    key = key.ToUpperInvariant();
+                // 전체 / 접두 / 마지막 세그먼트 후보 전부 등록 (TagKey — "/GPSET/TAG"·"(TAG)" 장식 흡수)
+                foreach (var key in TagKey.Candidates(name))
                     AddToIndex(key, item);
-
-                    int slash = key.IndexOf('/');
-                    if (slash > 0)
-                        AddToIndex(key.Substring(0, slash), item);
-                }
             }
 
             // Decide whether to keep descending — for ALL nodes, tag-like or not.
@@ -325,10 +314,13 @@ namespace NavisVisualizer.Searchers
             if (!_isBuilt)
                 throw new InvalidOperationException("인덱스가 빌드되지 않았습니다.");
 
+            // 결과 키는 호출부가 쓰는 원본 ID 그대로, 조회만 TagKey.Normalize — 실적 파일에 "/GPSET/…"나
+            // "(…)"가 붙어 있어도(또는 안 붙어 있어도) 같은 인덱스 키에 닿는다.
             var result = new Dictionary<string, List<ModelItem>>(StringComparer.OrdinalIgnoreCase);
             foreach (var id in spoolIds)
             {
-                result[id] = _index.TryGetValue(id, out var items)
+                string key = TagKey.Normalize(id);
+                result[id] = key.Length > 0 && _index.TryGetValue(key, out var items)
                     ? items
                     : new List<ModelItem>();
             }

@@ -898,6 +898,34 @@ walk에서 실제로 건너뛰는가(SUP 태그가 인덱스에 없어야) ③ T
 **잔여**: 별칭 편집은 공종별 대화상자에서만(프로파일 전체 편집 화면 없음 — 파일 직접 편집). 프로파일
 자동 감지 패턴(RUYA/RUY, Trion)은 컨테이너 파일명 기준 — 다른 이름 규약이면 Overview 콤보로 수동 선택.
 
+### 20. 태그 키 정규화 — Ruya `/GPSET/` 접두·괄호 + Hydrotest 레벨 타겟 (2026-09 구현 — Windows 검증 대기)
+
+**실측(사용자, Ruya Hydrotest 모델)**: 노드명이 `/GPSET/U001-DO-102-K`(PDMS 경로 접두)·`(C01B-DO-030254-1)`
+(괄호)로 오는데 매칭 0건 + 인덱스 빌드가 10분 넘게 안 끝남. 실적 파일 PKG에 `/GPSET/`를 붙여도 실패.
+
+**원인 2중**
+1. **키 불일치**: 구 인덱스 키 = `TrimStart('/')` 전체("GPSET/U001-DO-102-K") + 첫 '/' 앞 접두("GPSET")뿐 —
+   태그가 **뒤 세그먼트**인 규약은 미지원. 실적에 접두를 붙인 경우는 조회가 원본 ID 그대로
+   (`_index.TryGetValue("/GPSET/…")`)라 선행 '/'가 남아 또 불일치.
+2. **느림 = 매칭 실패의 부산물**: known-tag walk는 매칭 노드에서 서브트리를 정지하는데 매칭이 하나도
+   없으니 프루닝이 전혀 안 돼 digit 보유 노드(PDMS 모델은 전부)를 따라 geometry 숲 전체를 COM 순회.
+   Hydrotest 탭은 아예 general walk(`BuildIndex`)라 매칭과 무관하게 전 트리 인덱싱.
+
+**반영**
+- `Searchers/TagKey.cs`(Autodesk 비의존, `TagKeyTests`): `Normalize`(공백·선행 '/'·바깥 괄호 제거·대문자),
+  `Candidates`(전체 / 첫 '/' 앞 접두 = Trion "TAG/suffix" / **마지막 '/' 뒤 세그먼트** = Ruya). 인덱스는
+  후보 전부 등록, `FindBySpoolIds`는 원본 ID 키 유지 + 조회만 Normalize → 실적에 `/GPSET/`가 있든 없든 매칭.
+  `WalkAndIndex`/`WalkAndIndexKnownTags`/`BuildIndexForTags` 정규화 전부 TagKey로 통일.
+- **Hydrotest 탭 → 레벨 타겟**(`BuildIndexForTags(pkgIdSet, Hydrotest)` + `_needsIndexRebuild`/`IndexStale`,
+  Spool 패턴): PKG 노드에서 정지하므로 하위 스풀·geometry를 안 훑음. Sub-system Piping이 이미 같은
+  방식이라 정합. general walk를 쓰는 탭은 이제 없음(`BuildIndex`는 유지 — 호출부 없음).
+
+**Windows 검증**: ① Ruya Hydrotest/Spool 매칭 건수 > 0 + 빌드 수 초 ② Trion 회귀(접두/접미 규약 매칭 건수
+동일) ③ `(…)` 괄호 스풀이 실제 DisplayName인지(Navisworks 표시 장식이면 무해) ④ Hydrotest 레벨 타겟
+전환 후 PKG가 여러 깊이(예: `/GPSET/U001` > `/GPSET/U001-DO` > `…-102-K`)에 섞여도 다중 깊이 walk가 잡는지.
+**주의**: `/GPSET/U001`, `/GPSET/U001-DO` 같은 상위 그룹 노드도 digit 보유라 general 인덱스엔 들어가지만
+known-tag 매칭은 정확 일치라 무관. 실적 PKG 번호가 `U001-DO-102-K` 형식(K 접미)인지 데이터 오너 확인.
+
 ### 참고: 속성 쓰기(User-Defined Property) 현황 — 확장 후보
 
 **현재 구현**: **Spool·Equipment 탭에만** `[속성 쓰기]` 버튼(출력 행). `Services/UserDataService`가
